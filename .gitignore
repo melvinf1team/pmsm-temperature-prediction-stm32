@@ -1,0 +1,23 @@
+# Environnement Python
+.venv/
+venv/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs et CSV générés
+logs/
+*.csv
+
+# Build Sphinx
+docs/build/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
