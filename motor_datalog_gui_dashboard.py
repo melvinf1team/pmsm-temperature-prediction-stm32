@@ -3,7 +3,8 @@
 Ce module fournit une application Tkinter permettant de piloter une carte
 STM32 B-G473E-ZEST1S associée à une power board STDES-LVHP01, de lancer une
 séquence moteur simple, de recevoir les mesures UART, d'enregistrer un CSV et
-d'afficher les grandeurs en temps réel.
+d'afficher les grandeurs en temps réel. Le CSV final conserve uniquement les
+colonnes STM32 utiles au prétraitement NanoEdge AI, sans timestamp PC.
 
 Le protocole série attendu côté firmware est volontairement textuel et basé sur
 une ligne par message::
@@ -57,6 +58,22 @@ LOG_MAX_LINES = 3000
 LOG_TRIM_LINES = 300
 CSV_FLUSH_EVERY_ROWS = 10
 CSV_FLUSH_INTERVAL_S = 1.0
+IQ_WARNING_RATIO = 0.90
+
+# Colonnes effectivement écrites dans le CSV final.
+# La carte peut recevoir davantage de colonnes pour l'affichage live, mais seules
+# celles-ci sont conservées dans le fichier de datalogging.
+CSV_OUTPUT_COLUMNS = [
+    "stm32_time_ms",
+    "ds18b20_temp_c",
+    "motor_ud_v",
+    "motor_uq_v",
+    "motor_speed_mech_rpm",
+    "motor_id_a",
+    "motor_iq_a",
+]
+
+NON_PLOT_FIELDS = {"stm32_time_ms", "motor_speed_elec_hz", "motor_vbus_v"}
 
 
 # Palette centrale utilisée par toute l'interface graphique.
@@ -130,7 +147,8 @@ KNOWN_FIELDS = {
     "ds18b20_temp_c": ("Temp ext", "°C"),
     "d6t_avg_c": ("Temp int moy", "°C"),
     "d6t_max_c": ("Temp int max", "°C"),
-    "motor_vbus_v": ("Vbus", "V"),
+    "motor_ud_v": ("Ud", "V"),
+    "motor_uq_v": ("Uq", "V"),
     "motor_speed_elec_hz": ("Vitesse elec", "Hz"),
     "motor_speed_mech_rpm": ("Vitesse mech", "rpm"),
     "motor_id_a": ("Id", "A"),
@@ -140,7 +158,8 @@ KNOWN_FIELDS = {
 DEFAULT_LIVE_FIELDS = [
     "stm32_time_ms",
     "ds18b20_temp_c",
-    "motor_vbus_v",
+    "motor_ud_v",
+    "motor_uq_v",
     "motor_speed_elec_hz",
     "motor_speed_mech_rpm",
     "motor_id_a",
@@ -149,8 +168,8 @@ DEFAULT_LIVE_FIELDS = [
 
 DEFAULT_PLOT_FIELDS = {
     "ds18b20_temp_c": "Temp ext (°C)",
-    "motor_vbus_v": "Vbus (V)",
-    "motor_speed_elec_hz": "Vitesse elec (Hz)",
+    "motor_ud_v": "Ud (V)",
+    "motor_uq_v": "Uq (V)",
     "motor_speed_mech_rpm": "Vitesse mech (rpm)",
     "motor_id_a": "Id (A)",
     "motor_iq_a": "Iq (A)",
@@ -162,8 +181,8 @@ PLOT_COLORS = {
     "ds18b20_temp_c": "#F59E0B",
     "d6t_avg_c": "#F97316",
     "d6t_max_c": "#EF4444",
-    "motor_vbus_v": "#3B82F6",
-    "motor_speed_elec_hz": "#A855F7",
+    "motor_ud_v": "#3B82F6",
+    "motor_uq_v": "#A855F7",
     "motor_speed_mech_rpm": "#22C55E",
     "motor_id_a": "#06B6D4",
     "motor_iq_a": "#EC4899",
@@ -214,6 +233,7 @@ class MotorDatalogGui(tk.Tk):
         self.csv_file = None
         self.csv_writer = None
         self.csv_columns = []
+        self.csv_output_columns = []
         self.csv_path = None
         self.csv_pending_rows = 0
         self.csv_last_flush_s = time.monotonic()
@@ -253,6 +273,7 @@ class MotorDatalogGui(tk.Tk):
         self.live_fields = list(DEFAULT_LIVE_FIELDS)
         self.live_vars = {key: tk.StringVar(value="—") for key in self.live_fields}
         self.live_card_frames = {}
+        self.live_value_labels = {}
         self.live_frame = None
 
         self.left_canvas = None
@@ -780,7 +801,9 @@ class MotorDatalogGui(tk.Tk):
         ttk.Label(frame, text=title, style="Card.TLabel").pack(anchor="w", padx=12, pady=(10, 0))
         value_line = tk.Frame(frame, bg=COLORS["panel"])
         value_line.pack(fill=tk.X, padx=12, pady=(2, 10))
-        ttk.Label(value_line, textvariable=self.live_vars[key], style="Value.TLabel").pack(side=tk.LEFT)
+        value_label = ttk.Label(value_line, textvariable=self.live_vars[key], style="Value.TLabel")
+        value_label.pack(side=tk.LEFT)
+        self.live_value_labels[key] = value_label
         ttk.Label(value_line, text=f" {unit}", style="Unit.TLabel").pack(side=tk.LEFT, pady=(7, 0))
 
     def build_plot_panel(self, parent):
@@ -865,7 +888,7 @@ class MotorDatalogGui(tk.Tk):
         """
         added = []
         for key in columns:
-            if key == "stm32_time_ms" or key in self.plot_fields:
+            if key in NON_PLOT_FIELDS or key in self.plot_fields:
                 continue
             label, unit = KNOWN_FIELDS.get(key, (key, ""))
             self.plot_fields[key] = f"{label} ({unit})" if unit else label
@@ -1428,8 +1451,6 @@ class MotorDatalogGui(tk.Tk):
             raise ValueError("Iq limite doit être > 0.")
         if hard_limit <= 0:
             raise ValueError("Hard stop doit être > 0.")
-        if hard_limit < iq_limit:
-            raise ValueError("Hard stop doit être supérieur ou égal à Iq limite.")
         if accel <= 0:
             raise ValueError("L'accélération doit être > 0.")
         if datalog_ms < 1:
@@ -1593,11 +1614,6 @@ class MotorDatalogGui(tk.Tk):
             self.set_field_invalid("csv_path", True)
             errors.append("Aucun fichier CSV sélectionné.")
 
-        if hard_limit is not None and iq_limit is not None and hard_limit < iq_limit:
-            self.set_field_invalid("hard_limit", True)
-            self.set_field_invalid("iq_limit", True)
-            errors.append("Hard stop doit être supérieur ou égal à Iq limite.")
-
         if pole_pairs is not None and target_rpm is not None and speed_hz is not None:
             expected_hz = (target_rpm * pole_pairs) / 60.0
             if abs(expected_hz - speed_hz) > max(0.05, abs(expected_hz) * 0.01):
@@ -1627,6 +1643,7 @@ class MotorDatalogGui(tk.Tk):
                 self.start_button.configure(state=tk.DISABLED, bg=COLORS["panel_3"], fg=COLORS["muted"])
                 self.set_status("Erreur configuration", errors[0])
 
+        self.update_iq_warning_color()
         return is_valid
 
     def start_run(self):
@@ -1667,6 +1684,7 @@ class MotorDatalogGui(tk.Tk):
         self.csv_file = None
         self.csv_writer = None
         self.csv_columns = []
+        self.csv_output_columns = []
         self.csv_pending_rows = 0
         self.csv_last_flush_s = time.monotonic()
         self.data_before_header_count = 0
@@ -1773,6 +1791,7 @@ class MotorDatalogGui(tk.Tk):
         self.csv_file = None
         self.csv_writer = None
         self.csv_columns = []
+        self.csv_output_columns = []
         self.csv_pending_rows = 0
 
         if self.serial_obj:
@@ -1973,7 +1992,16 @@ class MotorDatalogGui(tk.Tk):
         self.csv_file = open(self.csv_path, mode="w", newline="", encoding="utf-8")
         self.csv_writer = csv.writer(self.csv_file, delimiter=";")
         self.csv_columns = columns
-        self.csv_writer.writerow(["pc_time_iso"] + columns)
+        self.csv_output_columns = [col for col in CSV_OUTPUT_COLUMNS if col in columns]
+
+        missing_columns = [col for col in CSV_OUTPUT_COLUMNS if col not in columns]
+        extra_columns = [col for col in columns if col not in CSV_OUTPUT_COLUMNS]
+        if missing_columns:
+            self.log("Colonnes CSV attendues absentes du firmware : " + ", ".join(missing_columns))
+        if extra_columns:
+            self.log("Colonnes reçues non écrites dans le CSV final : " + ", ".join(extra_columns))
+
+        self.csv_writer.writerow(self.csv_output_columns)
         self.csv_pending_rows = 0
         self.csv_last_flush_s = time.monotonic()
         self.flush_csv(force=True)
@@ -2041,12 +2069,11 @@ class MotorDatalogGui(tk.Tk):
                 self.log(f"DATA invalide ({len(values)} valeurs pour {len(self.csv_columns)} colonnes) : {line}")
                 return
 
-            pc_time = datetime.now().isoformat(timespec="milliseconds")
-            self.csv_writer.writerow([pc_time] + values)
+            row = dict(zip(self.csv_columns, values))
+            self.csv_writer.writerow([row.get(col, "") for col in self.csv_output_columns])
             self.csv_pending_rows += 1
             self.flush_csv()
 
-            row = dict(zip(self.csv_columns, values))
             self.update_live_values(row)
             self.append_plot_row(row)
             return
@@ -2059,12 +2086,58 @@ class MotorDatalogGui(tk.Tk):
     def update_live_values(self, row):
         """Met à jour les cartes live avec les valeurs d'une ligne DATA.
 
+        La vitesse électrique est volontairement affichée mais pas dataloggée. Elle est
+        donc recalculée côté interface à partir de la vitesse mécanique et du nombre de
+        paires de pôles configuré.
+
         Args:
             row: Dictionnaire ``colonne -> valeur`` construit depuis la ligne CSV.
         """
         for key, var in self.live_vars.items():
             if key in row:
                 var.set(row[key])
+
+        rpm = self.safe_float(row.get("motor_speed_mech_rpm", math.nan))
+        if math.isfinite(rpm) and "motor_speed_elec_hz" in self.live_vars:
+            self.live_vars["motor_speed_elec_hz"].set(self.format_float(self.rpm_to_elec_hz(rpm)))
+
+        self.update_iq_warning_color()
+
+    def get_iq_limit_safe(self):
+        """Retourne la limite Iq configurée, ou ``NaN`` si elle est invalide.
+
+        Returns:
+            float: Limite Iq positive, sinon ``math.nan``.
+        """
+        try:
+            value = float(self.iq_limit_var.get().strip().replace(",", "."))
+            if math.isfinite(value) and value > 0.0:
+                return value
+        except Exception:
+            pass
+        return math.nan
+
+    def update_iq_warning_color(self):
+        """Colore la valeur Iq selon son rapprochement avec la limite configurée."""
+        label = self.live_value_labels.get("motor_iq_a")
+        if label is None:
+            return
+
+        iq_value = self.safe_float(self.live_vars.get("motor_iq_a", tk.StringVar(value="")).get())
+        iq_limit = self.get_iq_limit_safe()
+        color = COLORS["text"]
+
+        if math.isfinite(iq_value) and math.isfinite(iq_limit) and iq_limit > 0.0:
+            ratio = abs(iq_value) / iq_limit
+            if ratio >= 1.0:
+                color = COLORS["danger"]
+            elif ratio >= IQ_WARNING_RATIO:
+                color = COLORS["warning"]
+
+        try:
+            label.configure(foreground=color)
+        except Exception:
+            pass
 
     def append_plot_row(self, row):
         """Ajoute une ligne de données aux buffers du graphique.
