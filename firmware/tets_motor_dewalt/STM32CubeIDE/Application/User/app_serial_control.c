@@ -26,8 +26,8 @@
  * une consigne dangereuse au moteur. Ajuste ces valeurs seulement après validation. */
 #define APP_CFG_MIN_TARGET_RPM       100.0f
 #define APP_CFG_MAX_TARGET_RPM       2000.0f
-#define APP_CFG_MAX_IQ_LIMIT_A       11.0f
-#define APP_CFG_MAX_HARD_LIMIT_A     11.0f
+#define APP_CFG_MAX_IQ_LIMIT_A       12.0f
+#define APP_CFG_MAX_HARD_LIMIT_A     14.0f
 #define APP_CFG_MAX_ACCEL_HZ_S       2000.0f
 #define APP_CFG_MIN_DATALOG_MS       1U
 #define APP_CFG_MAX_DATALOG_MS       10000U

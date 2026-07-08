@@ -44,8 +44,8 @@
 #define SPEED_POLE_RPS                      (float_t)(400) /*!< @brief Used for speed filtering in the HSO */
 #define KSAMPLE_DELAY                       0.2 /*!< @brief Compensation factor to mitigate the difference between voltage sampling instant and current sampling instant */
 #define ANGLE_COMPENSATION_FACTOR           (float_t)1.98
-#define BOARD_SOFT_OVERCURRENT_TRIP         (float_t)(20) /*!< @brief Threshold of software over current trip detection. */
-#define BOARD_MAX_CURRENT                   (float_t)(20) /*!< @brief Maximum current reference the user wants to ask from the board. */
+#define BOARD_SOFT_OVERCURRENT_TRIP         (float_t)(14) /*!< @brief Threshold of software over current trip detection. */
+#define BOARD_MAX_CURRENT                   (float_t)(12) /*!< @brief Maximum current reference the user wants to ask from the board. */
 #define BOARD_LIMIT_OVERVOLTAGE             (float_t)(21.6) /*!< Over-voltage threshold */
 #define BOARD_LIMIT_UNDERVOLTAGE            (float_t)(5.0) /*!< @brief under voltage threshold */
 #define BOARD_MAX_MODULATION                (float_t)((100 * 1.15f) /100.0f)
@@ -88,7 +88,7 @@
 /* USER CODE END PID_SPEED_INTEGRAL_INIT_DIV */
 
 #define SPD_DIFFERENTIAL_TERM_ENABLING      DISABLE
-#define IQMAX_A                             5
+#define IQMAX_A                             12
 
 /* Default settings */
 #define DEFAULT_CONTROL_MODE                MCM_SPEED_MODE

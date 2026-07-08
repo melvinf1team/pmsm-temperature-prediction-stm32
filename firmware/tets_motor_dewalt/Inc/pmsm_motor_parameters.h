@@ -53,7 +53,7 @@
 #define THROTTLE_OFFSET         0.0f
 #define THROTTLE_GAIN           1.0f
 #define MOTOR_MAX_SPEED_RPM     4000 /*!< Maximum rated speed  */
-#define NOMINAL_CURRENT_A       20
+#define NOMINAL_CURRENT_A       12
 
 #define ID_DEMAG_A              -5 /*!< Demagnetization current */
 
