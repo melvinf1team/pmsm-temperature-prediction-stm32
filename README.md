@@ -13,3 +13,12 @@ Projet de datalogging PMSM sur STM32 B-G473E-ZEST1S avec power board STDES-LVHP0
 ```powershell
 pip install -r requirements.txt
 python pc_dashboard/motor_datalog_gui_dashboard.py
+```
+
+## Générer la documentation
+
+```powershell
+cd docs
+.\make.bat html
+start build\html\index.html
+```
