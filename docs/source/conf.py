@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 # Permet à Sphinx de trouver le fichier Python situé à la racine du projet.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pc_dashboard"))
 
 project = "STM32 PMSM Datalog Dashboard"
 copyright = '2026, Melvin Pellegrino'

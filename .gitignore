@@ -1,23 +1,42 @@
-# Environnement Python
+# Python
 .venv/
 venv/
-
-# Cache Python
 __pycache__/
 *.pyc
 *.pyo
 
-# Logs et CSV générés
+# CSV / logs générés
 logs/
 *.csv
 
-# Build Sphinx
+# Sphinx
 docs/build/
 
-# Fichiers système
-.DS_Store
-Thumbs.db
+# STM32CubeIDE / Eclipse
+.metadata/
+Debug/
+Release/
+build/
+
+# Fichiers objets / build embedded
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.su
+
+# Fichiers temporaires
+*.bak
+*.tmp
+*.log
 
 # IDE
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db
