@@ -78,19 +78,26 @@ NON_PLOT_FIELDS = {"stm32_time_ms", "motor_speed_elec_hz", "motor_vbus_v"}
 
 # Palette centrale utilisée par toute l'interface graphique.
 COLORS = {
-    "bg": "#070B14",
-    "panel": "#101827",
-    "panel_2": "#162033",
-    "panel_3": "#1D2A42",
-    "border": "#26344D",
-    "text": "#EAF0FF",
-    "muted": "#93A4BF",
-    "accent": "#3B82F6",
-    "accent_2": "#22C55E",
-    "danger": "#EF4444",
-    "warning": "#F59E0B",
-    "input": "#0B1220",
-    "line_grid": "#26344D",
+    "bg": "#070A0F",
+    "panel": "#10151E",
+    "panel_2": "#151D29",
+    "panel_3": "#1D2B3D",
+    "border": "#2B384B",
+    "text": "#F2F6FF",
+    "muted": "#9AA8BA",
+    "accent": "#2DD4BF",
+    "accent_2": "#A3E635",
+    "danger": "#FB7185",
+    "warning": "#FBBF24",
+    "input": "#0A1019",
+    "line_grid": "#273447",
+    "panel_soft": "#0C111A",
+    "panel_lift": "#182232",
+    "cyan": "#38BDF8",
+    "lime": "#A3E635",
+    "rose": "#FB7185",
+    "amber": "#FBBF24",
+    "violet": "#C084FC",
 }
 
 
@@ -178,14 +185,27 @@ DEFAULT_PLOT_FIELDS = {
 DEFAULT_PLOT_SELECTION = {"motor_speed_mech_rpm", "motor_iq_a", "ds18b20_temp_c"}
 
 PLOT_COLORS = {
-    "ds18b20_temp_c": "#F59E0B",
-    "d6t_avg_c": "#F97316",
-    "d6t_max_c": "#EF4444",
-    "motor_ud_v": "#3B82F6",
-    "motor_uq_v": "#A855F7",
-    "motor_speed_mech_rpm": "#22C55E",
-    "motor_id_a": "#06B6D4",
-    "motor_iq_a": "#EC4899",
+    "ds18b20_temp_c": "#FBBF24",
+    "d6t_avg_c": "#FB923C",
+    "d6t_max_c": "#FB7185",
+    "motor_ud_v": "#38BDF8",
+    "motor_uq_v": "#C084FC",
+    "motor_speed_mech_rpm": "#A3E635",
+    "motor_id_a": "#2DD4BF",
+    "motor_iq_a": "#F472B6",
+}
+
+FIELD_ACCENTS = {
+    "stm32_time_ms": "#94A3B8",
+    "ds18b20_temp_c": "#FBBF24",
+    "d6t_avg_c": "#FB923C",
+    "d6t_max_c": "#FB7185",
+    "motor_ud_v": "#38BDF8",
+    "motor_uq_v": "#C084FC",
+    "motor_speed_elec_hz": "#2DD4BF",
+    "motor_speed_mech_rpm": "#A3E635",
+    "motor_id_a": "#22D3EE",
+    "motor_iq_a": "#F472B6",
 }
 
 
@@ -215,9 +235,9 @@ class MotorDatalogGui(tk.Tk):
         """
         super().__init__()
 
-        self.title("STM32 PMSM Datalog Dashboard")
-        self.geometry("1480x930")
-        self.minsize(980, 650)
+        self.title("STM32 PMSM Dark Bench Dashboard")
+        self.geometry("1540x960")
+        self.minsize(1120, 720)
         self.configure(bg=COLORS["bg"])
 
         self.serial_obj = None
@@ -322,47 +342,44 @@ class MotorDatalogGui(tk.Tk):
         return str(Path.cwd() / "logs" / f"daq_log_{timestamp}.csv")
 
     def setup_style(self):
-        """Configure le thème visuel Tkinter/ttk de l'application.
-
-        Les couleurs, polices, champs valides/invalides, labels et checkbuttons sont
-        personnalisés ici afin de conserver une interface sombre cohérente.
-        """
+        """Configure un thème sombre dense et lisible pour le banc moteur."""
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
 
+        font_ui = "Segoe UI"
+        font_title = "Segoe UI Semibold"
+        font_value = "Bahnschrift SemiBold"
+
         style.configure("TFrame", background=COLORS["bg"])
         style.configure("Card.TFrame", background=COLORS["panel"], relief="flat")
         style.configure("SubCard.TFrame", background=COLORS["panel_2"], relief="flat")
-        style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI", 10))
-        style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"], font=("Segoe UI", 9))
-        style.configure("Card.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=("Segoe UI", 10))
-        style.configure("CardTitle.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=("Segoe UI Semibold", 12))
-        style.configure("Section.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=("Segoe UI Semibold", 9))
-        style.configure("Hero.TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI Semibold", 22))
-        style.configure("HeroSub.TLabel", background=COLORS["bg"], foreground=COLORS["muted"], font=("Segoe UI", 10))
-        style.configure("Value.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=("Segoe UI Semibold", 18))
-        style.configure("Unit.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=("Segoe UI", 9))
-        style.configure("Warn.TLabel", background=COLORS["panel"], foreground=COLORS["danger"], font=("Segoe UI Semibold", 9))
-        style.configure("Status.TLabel", background=COLORS["panel_2"], foreground=COLORS["text"], font=("Segoe UI Semibold", 10))
+        style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=(font_ui, 10))
+        style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"], font=(font_ui, 9))
+        style.configure("Card.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=(font_ui, 10))
+        style.configure("CardMuted.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=(font_ui, 9))
+        style.configure("CardTitle.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=(font_title, 12))
+        style.configure("Section.TLabel", background=COLORS["panel"], foreground=COLORS["accent"], font=(font_title, 9))
+        style.configure("Hero.TLabel", background=COLORS["panel_soft"], foreground=COLORS["text"], font=(font_title, 24))
+        style.configure("HeroSub.TLabel", background=COLORS["panel_soft"], foreground=COLORS["muted"], font=(font_ui, 10))
+        style.configure("Value.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=(font_value, 21))
+        style.configure("Unit.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=(font_ui, 9))
+        style.configure("Warn.TLabel", background=COLORS["panel"], foreground=COLORS["warning"], font=(font_title, 9))
+        style.configure("Status.TLabel", background=COLORS["panel_lift"], foreground=COLORS["text"], font=(font_title, 10))
 
-        style.configure("TEntry", fieldbackground=COLORS["input"], background=COLORS["input"], foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"], padding=6)
-        style.configure("Invalid.TEntry", fieldbackground="#3A0B12", background="#3A0B12", foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["danger"], lightcolor=COLORS["danger"], darkcolor=COLORS["danger"], padding=6)
-        style.configure("TCombobox", fieldbackground=COLORS["input"], background=COLORS["input"], foreground=COLORS["text"], arrowcolor=COLORS["text"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"], padding=5)
-        style.configure("Invalid.TCombobox", fieldbackground="#3A0B12", background="#3A0B12", foreground=COLORS["text"], arrowcolor=COLORS["text"], bordercolor=COLORS["danger"], lightcolor=COLORS["danger"], darkcolor=COLORS["danger"], padding=5)
+        style.configure("TEntry", fieldbackground=COLORS["input"], background=COLORS["input"], foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"], padding=8)
+        style.configure("Invalid.TEntry", fieldbackground="#3A1018", background="#3A1018", foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["danger"], lightcolor=COLORS["danger"], darkcolor=COLORS["danger"], padding=8)
+        style.configure("TCombobox", fieldbackground=COLORS["input"], background=COLORS["input"], foreground=COLORS["text"], arrowcolor=COLORS["accent"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"], padding=7)
+        style.configure("Invalid.TCombobox", fieldbackground="#3A1018", background="#3A1018", foreground=COLORS["text"], arrowcolor=COLORS["danger"], bordercolor=COLORS["danger"], lightcolor=COLORS["danger"], darkcolor=COLORS["danger"], padding=7)
         style.map("TCombobox", fieldbackground=[("readonly", COLORS["input"])], foreground=[("readonly", COLORS["text"])])
-        style.map("Invalid.TCombobox", fieldbackground=[("readonly", "#3A0B12")], foreground=[("readonly", COLORS["text"])])
-        style.configure("TCheckbutton", background=COLORS["panel"], foreground=COLORS["text"], font=("Segoe UI", 9))
-        style.map("TCheckbutton", background=[("active", COLORS["panel"])], foreground=[("active", COLORS["text"])])
+        style.map("Invalid.TCombobox", fieldbackground=[("readonly", "#3A1018")], foreground=[("readonly", COLORS["text"])])
+        style.configure("TCheckbutton", background=COLORS["panel"], foreground=COLORS["text"], font=(font_ui, 9))
+        style.map("TCheckbutton", background=[("active", COLORS["panel"])], foreground=[("active", COLORS["accent"])])
 
     def build_ui(self):
-        """Construit la structure principale de l'interface.
-
-        La fenêtre est divisée en un en-tête, une colonne gauche adaptative et une zone
-        droite contenant les cartes live, le graphique et le journal UART.
-        """
+        """Construit la structure principale de l'interface graphique sombre."""
         root = tk.Frame(self, bg=COLORS["bg"])
         root.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
 
@@ -370,12 +387,12 @@ class MotorDatalogGui(tk.Tk):
 
         body = tk.Frame(root, bg=COLORS["bg"])
         body.pack(fill=tk.BOTH, expand=True, pady=(16, 0))
-        body.grid_columnconfigure(0, minsize=390, weight=0)
+        body.grid_columnconfigure(0, minsize=430, weight=0)
         body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
 
-        left_shell = tk.Frame(body, bg=COLORS["bg"], width=390)
-        left_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        left_shell = tk.Frame(body, bg=COLORS["bg"], width=430)
+        left_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
         left_shell.grid_propagate(False)
         left_shell.grid_rowconfigure(0, weight=1)
         left_shell.grid_columnconfigure(0, weight=1)
@@ -384,8 +401,9 @@ class MotorDatalogGui(tk.Tk):
 
         right = tk.Frame(body, bg=COLORS["bg"])
         right.grid(row=0, column=1, sticky="nsew")
-        right.grid_rowconfigure(1, weight=1)
         right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1)
+        right.grid_rowconfigure(2, weight=0)
 
         self.build_left_panel(left)
         self.build_live_cards(right)
@@ -512,90 +530,97 @@ class MotorDatalogGui(tk.Tk):
         return "break"
 
     def build_header(self, parent):
-        """Construit l'en-tête avec titre, statut et boutons moteur.
-
-        Args:
-            parent: Conteneur principal recevant l'en-tête.
-        """
-        header = tk.Frame(parent, bg=COLORS["bg"])
+        """Construit l'en-tête de commande du banc moteur."""
+        header = tk.Frame(parent, bg=COLORS["panel_soft"], highlightbackground=COLORS["border"], highlightthickness=1)
         header.pack(fill=tk.X)
         header.grid_columnconfigure(0, weight=1)
         header.grid_columnconfigure(1, weight=0)
         header.grid_columnconfigure(2, weight=0)
 
-        title_block = tk.Frame(header, bg=COLORS["bg"])
-        title_block.grid(row=0, column=0, sticky="w")
+        accent = tk.Frame(header, bg=COLORS["accent"], width=5)
+        accent.grid(row=0, column=0, sticky="nsw")
 
-        ttk.Label(title_block, text="STM32 PMSM Datalog Dashboard", style="Hero.TLabel").pack(anchor="w")
-        ttk.Label(title_block, text="Contrôle moteur, acquisition CSV et visualisation temps réel", style="HeroSub.TLabel").pack(anchor="w", pady=(2, 0))
+        title_block = tk.Frame(header, bg=COLORS["panel_soft"])
+        title_block.grid(row=0, column=0, sticky="w", padx=(24, 16), pady=18)
+        ttk.Label(title_block, text="STM32 PMSM Bench", style="Hero.TLabel").pack(anchor="w")
+        ttk.Label(title_block, text="Pilotage moteur, acquisition CSV et supervision temps reel", style="HeroSub.TLabel").pack(anchor="w", pady=(3, 0))
 
-        status_card = tk.Frame(header, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
-        status_card.grid(row=0, column=1, sticky="e")
+        status_card = tk.Frame(header, bg=COLORS["panel_lift"], highlightbackground=COLORS["border"], highlightthickness=1)
+        status_card.grid(row=0, column=1, sticky="e", padx=(8, 14), pady=14)
         status_card.grid_columnconfigure(1, weight=1)
 
-        self.status_dot = tk.Canvas(status_card, width=16, height=16, bg=COLORS["panel"], highlightthickness=0)
-        self.status_dot.grid(row=0, column=0, rowspan=2, padx=(14, 8), pady=10)
-        self.status_dot_id = self.status_dot.create_oval(3, 3, 13, 13, fill=COLORS["warning"], outline="")
+        self.status_dot = tk.Canvas(status_card, width=20, height=20, bg=COLORS["panel_lift"], highlightthickness=0)
+        self.status_dot.grid(row=0, column=0, rowspan=2, padx=(14, 9), pady=12)
+        self.status_dot_id = self.status_dot.create_oval(4, 4, 16, 16, fill=COLORS["warning"], outline="")
+        ttk.Label(status_card, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 18), pady=(10, 0))
+        ttk.Label(status_card, textvariable=self.status_detail_var, style="CardMuted.TLabel").grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
 
-        ttk.Label(status_card, textvariable=self.status_var, style="CardTitle.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 14), pady=(8, 0))
-        ttk.Label(status_card, textvariable=self.status_detail_var, style="Card.TLabel").grid(row=1, column=1, sticky="w", padx=(0, 14), pady=(0, 8))
-
-        control_card = tk.Frame(header, bg=COLORS["bg"], highlightbackground=COLORS["bg"], highlightthickness=1)
-        control_card.grid(row=0, column=2, sticky="e", padx=(10, 0))
+        control_card = tk.Frame(header, bg=COLORS["panel_soft"])
+        control_card.grid(row=0, column=2, sticky="e", padx=(0, 16), pady=14)
         control_card.grid_columnconfigure(0, weight=1)
         control_card.grid_columnconfigure(1, weight=1)
 
-        self.start_button = tk.Button(
-            control_card,
-            text="▶ Lancer",
-            command=self.start_run,
+        self.start_button = self.action_button(control_card, "LANCER", self.start_run, COLORS["lime"], "#062712")
+        self.start_button.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+
+        self.stop_button = self.action_button(control_card, "ARRETER", self.stop_run, COLORS["danger"], "#3A1018")
+        self.stop_button.configure(state=tk.DISABLED)
+        self.stop_button.grid(row=0, column=1, sticky="nsew")
+
+    def action_button(self, parent, text, command, accent, base_bg):
+        """Crée un gros bouton de commande moteur."""
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=base_bg,
+            fg=COLORS["text"],
+            activebackground=accent,
+            activeforeground="#061016",
+            relief="flat",
+            padx=24,
+            pady=16,
+            cursor="hand2",
+            font=("Segoe UI Semibold", 11),
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=accent,
+        )
+
+    def small_button(self, parent, text, command, accent=None):
+        """Crée un bouton compact pour les cartes de configuration."""
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
             bg=COLORS["panel_3"],
             fg=COLORS["text"],
-            activebackground=COLORS["accent_2"],
-            activeforeground="white",
+            activebackground=accent or COLORS["accent"],
+            activeforeground="#061016",
             relief="flat",
-            padx=16,
-            pady=13,
+            padx=12,
+            pady=9,
             cursor="hand2",
-            font=("Segoe UI Semibold", 10),
+            font=("Segoe UI Semibold", 9),
+            bd=0,
         )
-        self.start_button.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
 
-        self.stop_button = tk.Button(
-            control_card,
-            text="■ Arrêter",
-            command=self.stop_run,
-            bg=COLORS["danger"],
-            fg="white",
-            activebackground="#B91C1C",
-            activeforeground="white",
-            relief="flat",
-            padx=16,
-            pady=13,
-            cursor="hand2",
-            font=("Segoe UI Semibold", 10),
-            state=tk.DISABLED,
-        )
-        self.stop_button.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
-
-    def card(self, parent, title=None, padx=14, pady=12):
-        """Crée une carte graphique réutilisable.
-
-        Args:
-            parent: Conteneur dans lequel placer la carte.
-            title: Titre optionnel affiché en haut de la carte.
-            padx: Marge horizontale interne.
-            pady: Marge verticale interne.
-
-        Returns:
-            tuple[tk.Frame, tk.Frame]: Frame externe de la carte et frame de contenu.
-        """
+    def card(self, parent, title=None, padx=16, pady=14, accent=None):
+        """Crée une carte sombre sans barre colorée supérieure."""
         outer = tk.Frame(parent, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
         if title:
-            ttk.Label(outer, text=title, style="CardTitle.TLabel").pack(anchor="w", padx=padx, pady=(pady, 6))
+            title_row = tk.Frame(outer, bg=COLORS["panel"])
+            title_row.pack(fill=tk.X, padx=padx, pady=(pady, 6))
+            if accent:
+                tk.Frame(title_row, bg=accent, width=8, height=8).pack(side=tk.LEFT, padx=(0, 8), pady=(4, 0))
+            ttk.Label(title_row, text=title.upper(), style="CardTitle.TLabel").pack(side=tk.LEFT, anchor="w")
         content = tk.Frame(outer, bg=COLORS["panel"])
         content.pack(fill=tk.BOTH, expand=True, padx=padx, pady=(0 if title else pady, pady))
         return outer, content
+
+    def form_label(self, parent, text, row, col, padx=(0, 8)):
+        """Place un label compact de formulaire."""
+        ttk.Label(parent, text=text, style="CardMuted.TLabel").grid(row=row, column=col, sticky="w", padx=padx, pady=(0, 4))
 
     def form_row(self, parent, label, widget, row, col=0):
         """Ajoute une ligne de formulaire label + widget en grille.
@@ -627,208 +652,161 @@ class MotorDatalogGui(tk.Tk):
         right_widget.grid(row=row, column=3, sticky="ew", pady=(0, 6))
 
     def build_left_panel(self, parent):
-        """Construit les cartes de configuration de la colonne gauche.
-
-        La colonne contient les blocs Connexion, Profil moteur, CSV et Acquisition. Les
-        boutons de lancement/arrêt sont volontairement exclus de cette colonne et placés
-        dans l'en-tête.
-
-        Args:
-            parent: Frame interne de la colonne gauche.
-        """
+        """Construit le rail gauche de configuration."""
         parent.grid_columnconfigure(0, weight=1)
         for row in range(4):
             parent.grid_rowconfigure(row, weight=0)
 
-        # Connexion
-        conn_card, conn = self.card(parent, "Connexion", padx=12, pady=8)
-        conn_card.grid(row=0, column=0, sticky="ew", pady=(0, 7))
+        conn_card, conn = self.card(parent, "Connexion carte", padx=14, pady=12, accent=COLORS["cyan"])
+        conn_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         conn.grid_columnconfigure(0, weight=1)
         conn.grid_columnconfigure(1, weight=0)
 
+        self.form_label(conn, "Port COM", 0, 0)
         self.port_combo = ttk.Combobox(conn, textvariable=self.port_var, state="readonly", width=28)
         self.combo_widgets["port"] = self.port_combo
-        ttk.Label(conn, text="Port COM", style="Card.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 3))
-        self.port_combo.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(0, 6))
+        self.port_combo.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 10))
         self.port_combo.bind("<<ComboboxSelected>>", self.on_port_selected)
 
-        self.refresh_button = tk.Button(
-            conn,
-            text="Rafraîchir",
-            command=self.refresh_ports,
-            bg=COLORS["panel_3"],
-            fg=COLORS["text"],
-            activebackground=COLORS["accent"],
-            activeforeground="white",
-            relief="flat",
-            padx=12,
-            pady=7,
-            cursor="hand2",
-        )
-        self.refresh_button.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+        self.refresh_button = self.small_button(conn, "Scanner", self.refresh_ports, COLORS["cyan"])
+        self.refresh_button.grid(row=1, column=1, sticky="ew", pady=(0, 10))
 
+        self.form_label(conn, "Baudrate", 2, 0)
         self.baud_entry = ttk.Entry(conn, textvariable=self.baud_var)
         self.entry_widgets["baud"] = self.baud_entry
-        ttk.Label(conn, text="Baudrate", style="Card.TLabel").grid(row=3, column=0, sticky="w", pady=(0, 3))
-        self.baud_entry.grid(row=4, column=0, sticky="ew", padx=(0, 8), pady=(0, 0))
+        self.baud_entry.grid(row=3, column=0, columnspan=2, sticky="ew")
 
-        # Profil moteur
-        profile_card, profile = self.card(parent, "Profil moteur", padx=10, pady=6)
-        profile_card.grid(row=1, column=0, sticky="ew", pady=(0, 7))
+        profile_card, profile = self.card(parent, "Profil moteur", padx=14, pady=12, accent=COLORS["lime"])
+        profile_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         profile.grid_columnconfigure(0, weight=0)
-        profile.grid_columnconfigure(1, weight=1, minsize=72)
+        profile.grid_columnconfigure(1, weight=1, minsize=76)
         profile.grid_columnconfigure(2, weight=0)
-        profile.grid_columnconfigure(3, weight=1, minsize=72)
+        profile.grid_columnconfigure(3, weight=1, minsize=76)
 
         self.profile_combo = ttk.Combobox(profile, textvariable=self.profile_var, values=list(self.profiles.keys()), state="readonly")
         self.combo_widgets["profile"] = self.profile_combo
-        self.profile_combo.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 8))
+        self.profile_combo.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 12))
         self.profile_combo.bind("<<ComboboxSelected>>", self.on_profile_changed)
 
         self.speed_rpm_entry = ttk.Entry(profile, textvariable=self.speed_rpm_var, width=8)
         self.entry_widgets["speed_rpm"] = self.speed_rpm_entry
-
         self.speed_hz_entry = ttk.Entry(profile, textvariable=self.speed_hz_var, width=8)
         self.entry_widgets["speed_hz"] = self.speed_hz_entry
         self.compact_form_row(profile, "rpm", self.speed_rpm_entry, "Hz elec", self.speed_hz_entry, 1)
 
         self.pole_entry = ttk.Entry(profile, textvariable=self.pole_pairs_var, width=8)
         self.entry_widgets["pole_pairs"] = self.pole_entry
-
         self.accel_entry = ttk.Entry(profile, textvariable=self.accel_var, width=8)
         self.entry_widgets["accel"] = self.accel_entry
-        self.compact_form_row(profile, "Pôles", self.pole_entry, "Accel", self.accel_entry, 2)
+        self.compact_form_row(profile, "Paires", self.pole_entry, "Accel", self.accel_entry, 2)
 
         self.iq_entry = ttk.Entry(profile, textvariable=self.iq_limit_var, width=8)
         self.entry_widgets["iq_limit"] = self.iq_entry
-
         self.hard_entry = ttk.Entry(profile, textvariable=self.hard_limit_var, width=8)
         self.entry_widgets["hard_limit"] = self.hard_entry
         self.compact_form_row(profile, "Iq lim.", self.iq_entry, "Hard", self.hard_entry, 3)
 
-        self.save_profile_button = tk.Button(
-            profile,
-            text="💾 Enregistrer profil",
-            command=self.save_current_profile,
-            bg=COLORS["panel_3"],
-            fg=COLORS["text"],
-            activebackground=COLORS["accent"],
-            activeforeground="white",
-            relief="flat",
-            padx=10,
-            pady=6,
-            cursor="hand2",
-            font=("Segoe UI Semibold", 9),
-        )
-        self.save_profile_button.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(2, 0))
+        self.save_profile_button = self.small_button(profile, "Enregistrer le profil", self.save_current_profile, COLORS["lime"])
+        self.save_profile_button.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         self.save_profile_button.grid_remove()
 
-        # CSV
-        csv_card, csv_box = self.card(parent, "CSV", padx=12, pady=8)
-        csv_card.grid(row=2, column=0, sticky="ew", pady=(0, 7))
+        csv_card, csv_box = self.card(parent, "Sortie CSV", padx=14, pady=12, accent=COLORS["amber"])
+        csv_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         csv_box.grid_columnconfigure(0, weight=1)
         csv_box.grid_columnconfigure(1, weight=0)
 
-        ttk.Label(csv_box, text="Fichier de sortie", style="Card.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 3))
+        self.form_label(csv_box, "Fichier de sortie", 0, 0)
         self.csv_entry = ttk.Entry(csv_box, textvariable=self.csv_path_var)
         self.entry_widgets["csv_path"] = self.csv_entry
-        self.csv_entry.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(0, 0))
-        tk.Button(
-            csv_box,
-            text="Choisir",
-            command=self.choose_csv_file,
-            bg=COLORS["panel_3"],
-            fg=COLORS["text"],
-            activebackground=COLORS["accent"],
-            activeforeground="white",
-            relief="flat",
-            padx=12,
-            pady=8,
-            cursor="hand2",
-        ).grid(row=1, column=1, sticky="ew")
+        self.csv_entry.grid(row=1, column=0, sticky="ew", padx=(0, 10))
+        self.small_button(csv_box, "Choisir", self.choose_csv_file, COLORS["amber"]).grid(row=1, column=1, sticky="ew")
 
-        # Acquisition
-        acq_card, acq = self.card(parent, "Acquisition", padx=12, pady=8)
-        acq_card.grid(row=3, column=0, sticky="ew", pady=(0, 7))
+        acq_card, acq = self.card(parent, "Acquisition", padx=14, pady=12, accent=COLORS["violet"])
+        acq_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
         for i in range(2):
             acq.grid_columnconfigure(i, weight=1)
 
         self.datalog_entry = ttk.Entry(acq, textvariable=self.datalog_ms_var)
         self.entry_widgets["datalog_ms"] = self.datalog_entry
-        self.form_row(acq, "Période DATA (ms)", self.datalog_entry, 0, 0)
+        self.form_row(acq, "Periode DATA (ms)", self.datalog_entry, 0, 0)
 
         self.ds18b20_entry = ttk.Entry(acq, textvariable=self.ds18b20_ms_var)
         self.entry_widgets["ds18b20_ms"] = self.ds18b20_entry
-        self.form_row(acq, "Période DS18B20 (ms)", self.ds18b20_entry, 0, 1)
+        self.form_row(acq, "Periode DS18B20 (ms)", self.ds18b20_entry, 0, 1)
 
         self.warning_label = ttk.Label(acq, textvariable=self.warning_var, style="Warn.TLabel", wraplength=340)
-        self.warning_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 0))
+        self.warning_label.configure(wraplength=380)
+        self.warning_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
 
     def build_live_cards(self, parent):
-        """Construit les cartes de valeurs instantanées.
-
-        Args:
-            parent: Conteneur de droite recevant les cartes live.
-        """
+        """Construit les cartes de valeurs instantanées."""
         self.live_frame = tk.Frame(parent, bg=COLORS["bg"])
         self.live_frame.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         for i in range(4):
-            self.live_frame.grid_columnconfigure(i, weight=1)
+            self.live_frame.grid_columnconfigure(i, weight=1, uniform="live")
 
         self.live_card_frames = {}
         for key in self.live_fields:
             self.add_live_card(key)
 
     def add_live_card(self, key):
-        """Ajoute dynamiquement une carte de valeur instantanée.
-
-        Args:
-            key: Nom de colonne CSV associé à la valeur à afficher.
-        """
+        """Ajoute dynamiquement une carte de valeur instantanée."""
         if self.live_frame is None or key in self.live_card_frames:
             return
 
         if key not in self.live_vars:
-            self.live_vars[key] = tk.StringVar(value="—")
+            self.live_vars[key] = tk.StringVar(value="-")
             self.live_fields.append(key)
 
         idx = len(self.live_card_frames)
         title, unit = KNOWN_FIELDS.get(key, (key, ""))
+        accent = FIELD_ACCENTS.get(key, COLORS["accent"])
+
         frame = tk.Frame(self.live_frame, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
         frame.grid(row=idx // 4, column=idx % 4, sticky="ew", padx=6, pady=6)
+        frame.grid_columnconfigure(0, weight=1)
         self.live_card_frames[key] = frame
-        ttk.Label(frame, text=title, style="Card.TLabel").pack(anchor="w", padx=12, pady=(10, 0))
+
+        top = tk.Frame(frame, bg=COLORS["panel"])
+        top.grid(row=0, column=0, sticky="ew", padx=12, pady=(9, 0))
+        top.grid_columnconfigure(0, weight=1)
+        ttk.Label(top, text=title.upper(), style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
+        tk.Frame(top, bg=accent, width=10, height=10).grid(row=0, column=1, sticky="e", padx=(8, 0))
+
         value_line = tk.Frame(frame, bg=COLORS["panel"])
-        value_line.pack(fill=tk.X, padx=12, pady=(2, 10))
+        value_line.grid(row=1, column=0, sticky="ew", padx=12, pady=(2, 12))
         value_label = ttk.Label(value_line, textvariable=self.live_vars[key], style="Value.TLabel")
         value_label.pack(side=tk.LEFT)
         self.live_value_labels[key] = value_label
-        ttk.Label(value_line, text=f" {unit}", style="Unit.TLabel").pack(side=tk.LEFT, pady=(7, 0))
+        ttk.Label(value_line, text=f" {unit}", style="Unit.TLabel").pack(side=tk.LEFT, pady=(9, 0))
 
     def build_plot_panel(self, parent):
-        """Construit le panneau du graphique dynamique.
-
-        Args:
-            parent: Conteneur de droite recevant le graphique.
-        """
-        plot_card, plot_content = self.card(parent, "Graphique dynamique")
+        """Construit le panneau du graphique dynamique."""
+        plot_card, plot_content = self.card(parent, "Graphique dynamique", padx=14, pady=12, accent=COLORS["accent"])
         plot_card.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
+        plot_card.grid_rowconfigure(0, weight=1)
+        plot_card.grid_columnconfigure(0, weight=1)
         plot_content.grid_columnconfigure(0, weight=0)
         plot_content.grid_columnconfigure(1, weight=1)
         plot_content.grid_rowconfigure(0, weight=1)
 
         selector = tk.Frame(plot_content, bg=COLORS["panel"])
-        selector.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        selector.grid(row=0, column=0, sticky="nsw", padx=(0, 16))
 
-        ttk.Label(selector, text="Variables à afficher", style="Section.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Label(selector, text="VARIABLES", style="Section.TLabel").pack(anchor="w", pady=(0, 9))
         self.plot_checks_frame = tk.Frame(selector, bg=COLORS["panel"])
         self.plot_checks_frame.pack(anchor="w", fill=tk.X)
         for key in self.plot_fields:
             self.add_plot_checkbox(key)
 
-        tk.Button(selector, text="Effacer le graphe", command=self.clear_plot, bg=COLORS["panel_3"], fg=COLORS["text"], activebackground=COLORS["accent"], activeforeground="white", relief="flat", padx=10, pady=7, cursor="hand2").pack(fill=tk.X, pady=(16, 0))
-        ttk.Label(selector, text="Note : si plusieurs unités sont cochées, le graphe utilise une échelle relative 0–100 par variable. Les min/max réels restent dans la légende.", style="Card.TLabel", wraplength=210).pack(anchor="w", pady=(14, 0))
+        self.small_button(selector, "Effacer", self.clear_plot, COLORS["accent"]).pack(fill=tk.X, pady=(16, 0))
+        ttk.Label(
+            selector,
+            text="Plusieurs unites : affichage relatif 0-100, min/max dans la legende.",
+            style="CardMuted.TLabel",
+            wraplength=220,
+        ).pack(anchor="w", pady=(14, 0))
 
         chart_area = tk.Frame(plot_content, bg=COLORS["panel"])
         chart_area.grid(row=0, column=1, sticky="nsew")
@@ -836,7 +814,7 @@ class MotorDatalogGui(tk.Tk):
         chart_area.grid_columnconfigure(0, weight=1)
 
         if MATPLOTLIB_AVAILABLE:
-            self.figure = Figure(figsize=(8, 4.8), dpi=100, facecolor=COLORS["panel"])
+            self.figure = Figure(figsize=(8.5, 5.1), dpi=100, facecolor=COLORS["panel"])
             self.ax = self.figure.add_subplot(111)
             self.style_axis()
             self.canvas = FigureCanvasTkAgg(self.figure, master=chart_area)
@@ -845,7 +823,7 @@ class MotorDatalogGui(tk.Tk):
         else:
             tk.Label(
                 chart_area,
-                text="Matplotlib n'est pas installé.\nInstalle-le avec : pip install matplotlib",
+                text="Matplotlib n'est pas installe.\nInstalle-le avec : pip install matplotlib",
                 bg=COLORS["panel"],
                 fg=COLORS["warning"],
                 font=("Segoe UI Semibold", 12),
@@ -863,11 +841,7 @@ class MotorDatalogGui(tk.Tk):
                 self.add_live_card(key)
 
     def add_plot_checkbox(self, key):
-        """Ajoute une case à cocher pour afficher une variable dans le graphe.
-
-        Args:
-            key: Nom de colonne CSV à rendre disponible dans le sélecteur du graphique.
-        """
+        """Ajoute une case à cocher pour afficher une variable dans le graphe."""
         if self.plot_checks_frame is None or key in self.plot_checkbuttons:
             return
         label = self.plot_fields.get(key, key)
@@ -877,7 +851,7 @@ class MotorDatalogGui(tk.Tk):
             variable=self.plot_enabled_vars[key],
             command=self.mark_plot_dirty,
         )
-        cb.pack(anchor="w", pady=3)
+        cb.pack(anchor="w", pady=4)
         self.plot_checkbuttons[key] = cb
 
     def register_csv_fields_for_plot(self, columns):
@@ -900,12 +874,8 @@ class MotorDatalogGui(tk.Tk):
             self.log("Variables CSV ajoutées au graphe : " + ", ".join(added))
 
     def build_log_panel(self, parent):
-        """Construit le journal texte TX/RX.
-
-        Args:
-            parent: Conteneur de droite recevant le journal.
-        """
-        log_card, log_content = self.card(parent, "Journal")
+        """Construit le journal texte TX/RX."""
+        log_card, log_content = self.card(parent, "Journal UART", padx=14, pady=12, accent=COLORS["rose"])
         log_card.grid(row=2, column=0, sticky="nsew")
         log_card.grid_rowconfigure(0, weight=1)
         log_card.grid_columnconfigure(0, weight=1)
@@ -914,15 +884,16 @@ class MotorDatalogGui(tk.Tk):
 
         self.log_text = tk.Text(
             log_content,
-            height=8,
+            height=7,
             wrap="none",
-            bg="#050814",
+            bg="#05080D",
             fg=COLORS["text"],
             insertbackground=COLORS["text"],
             relief="flat",
-            padx=10,
-            pady=8,
-            font=("Consolas", 9),
+            padx=12,
+            pady=10,
+            font=("Cascadia Mono", 9),
+            bd=0,
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(log_content, command=self.log_text.yview)
@@ -2177,24 +2148,19 @@ class MotorDatalogGui(tk.Tk):
         self.plot_dirty = True
 
     def style_axis(self, ax=None, title=False):
-        """Applique le style sombre à un axe matplotlib.
-
-        Args:
-            ax: Axe à styliser. Si ``None``, utilise ``self.ax``.
-            title: Ajoute le titre standard du graphique si ``True``.
-        """
+        """Applique le style sombre du tableau de bord à un axe matplotlib."""
         if ax is None:
             ax = self.ax
         if ax is None:
             return
         ax.set_facecolor(COLORS["panel"])
-        ax.tick_params(colors=COLORS["muted"])
+        ax.tick_params(colors=COLORS["muted"], labelsize=9)
         for spine in ax.spines.values():
             spine.set_color(COLORS["border"])
-        ax.grid(True, color=COLORS["line_grid"], alpha=0.45, linewidth=0.8)
+        ax.grid(True, color=COLORS["line_grid"], alpha=0.42, linewidth=0.8)
         ax.set_xlabel("Temps (s)", color=COLORS["muted"])
         if title:
-            ax.set_title("Données temps réel", color=COLORS["text"], fontsize=12, pad=12)
+            ax.set_title("Donnees temps reel", color=COLORS["text"], fontsize=12, pad=12)
 
     def redraw_plot_periodic(self):
         """Callback périodique de rafraîchissement du graphique."""
