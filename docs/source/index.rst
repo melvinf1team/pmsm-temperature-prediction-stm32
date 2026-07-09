@@ -16,8 +16,9 @@ Le dashboard permet :
 
 .. toctree::
    :maxdepth: 2
-   :caption: Sommaire
 
+   sommaire
    installation
+   cablage
    utilisation
    api
