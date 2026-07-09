@@ -1,6 +1,7 @@
 #include "app_datalog.h"
 #include "main.h"
 #include "ds18b20.h"
+#include "d6t_ir.h"
 #include "datalog_module.h"
 
 #include "mc_api.h"
@@ -59,6 +60,8 @@ static uint32_t ds18b20_conversion_ready_ms = 0U;
 
 static char ds18b20_cached_value[32] = "nan";
 static bool ds18b20_has_value = false;
+
+static bool d6t_last_present = false;
 
 /*
  * ================================
@@ -306,6 +309,7 @@ static void AppDatalog_SendHeader(void)
   AppDatalog_UartQueueText(
     "#CSV_HEADER,"
     "stm32_time_ms,"
+    "d6t_temp_c,"
     "ds18b20_temp_c,"
     "motor_ud_v,"
     "motor_uq_v,"
@@ -345,8 +349,9 @@ static void AppDatalog_SendDataLine(uint32_t now)
   AppDatalog_LineAppend(line,
                         sizeof(line),
                         &used,
-                        "DATA,%lu,%s",
+                        "DATA,%lu,%s,%s",
                         (unsigned long)now,
+                        D6TIR_GetCsvValue(),
                         ds18b20_cached_value);
 
   AppDatalog_LineAppendMilliCsv(line, sizeof(line), &used, AppDatalog_FloatToMilli(ud_v));
@@ -358,6 +363,27 @@ static void AppDatalog_SendDataLine(uint32_t now)
   AppDatalog_LineAppend(line, sizeof(line), &used, "\r\n");
 
   AppDatalog_UartQueueText(line);
+}
+
+static void AppDatalog_D6tIrStatusTask(void)
+{
+  bool present = D6TIR_IsPresent();
+
+  if (present == d6t_last_present)
+  {
+    return;
+  }
+
+  if (present)
+  {
+    AppDatalog_UartQueueText("#INFO,D6T_IR_DETECTED,d6t_temp_c_active\r\n");
+  }
+  else
+  {
+    AppDatalog_UartQueueText("#WARN,D6T_IR_NOT_DETECTED,d6t_temp_c=NaN\r\n");
+  }
+
+  d6t_last_present = present;
 }
 
 /*
@@ -481,6 +507,7 @@ void AppDatalog_Init(void)
   AppDatalog_TakeOverUsart1();
   AppDatalog_ResetTxQueue();
 
+  D6TIR_Init();
   ds18b20_module->init();
 
   AppDatalog_SetRuntimePeriods(APP_DATALOG_DEFAULT_PERIOD_MS,
@@ -497,9 +524,15 @@ void AppDatalog_Init(void)
 
   snprintf(ds18b20_cached_value, sizeof(ds18b20_cached_value), "nan");
   ds18b20_has_value = false;
+  d6t_last_present = D6TIR_IsPresent();
 
   AppDatalog_UartQueueText("#BOOT_APP_DATALOG\r\n");
   AppDatalog_UartQueueText("#USART1_TAKEN_OVER_BY_DATALOG\r\n");
+  AppDatalog_UartQueueText("#D6T_IR_I2C_SOFT,PB8=SCL,PB9=SDA,ADDR=0x0A\r\n");
+  if (!d6t_last_present)
+  {
+    AppDatalog_UartQueueText("#WARN,D6T_IR_NOT_DETECTED,d6t_temp_c=NaN\r\n");
+  }
   AppDatalog_UartQueueText("#WAITING_FOR_GUI_COMMANDS\r\n");
 
   AppDatalog_UartPump();
@@ -515,6 +548,8 @@ void AppDatalog_Task(void)
    * Le DS18B20 continue en arrière-plan pour garder une valeur fraîche
    * dès que possible, même avant START.
    */
+  D6TIR_Task(now);
+  AppDatalog_D6tIrStatusTask();
   AppDatalog_Ds18b20Task(now);
 
   if (!logging_enabled)
