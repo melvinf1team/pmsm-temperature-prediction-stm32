@@ -63,8 +63,12 @@ IQ_WARNING_RATIO = 0.90
 # Colonnes effectivement écrites dans le CSV final.
 # La carte peut recevoir davantage de colonnes pour l'affichage live, mais seules
 # celles-ci sont conservées dans le fichier de datalogging.
+D6T_TEMPERATURE_COLUMN = "d6t_temp_c"
+D6T_TEMPERATURE_COLUMNS = {D6T_TEMPERATURE_COLUMN}
+
 CSV_OUTPUT_COLUMNS = [
     "stm32_time_ms",
+    D6T_TEMPERATURE_COLUMN,
     "ds18b20_temp_c",
     "motor_ud_v",
     "motor_uq_v",
@@ -152,8 +156,7 @@ PROFILE_STORE_PATH = Path(__file__).with_name("motor_profiles.json")
 KNOWN_FIELDS = {
     "stm32_time_ms": ("STM32", "ms"),
     "ds18b20_temp_c": ("Temp ext", "°C"),
-    "d6t_avg_c": ("Temp int moy", "°C"),
-    "d6t_max_c": ("Temp int max", "°C"),
+    "d6t_temp_c": ("Temp int", "°C"),
     "motor_ud_v": ("Ud", "V"),
     "motor_uq_v": ("Uq", "V"),
     "motor_speed_elec_hz": ("Vitesse elec", "Hz"),
@@ -165,9 +168,9 @@ KNOWN_FIELDS = {
 DEFAULT_LIVE_FIELDS = [
     "stm32_time_ms",
     "ds18b20_temp_c",
+    "d6t_temp_c",
     "motor_ud_v",
     "motor_uq_v",
-    "motor_speed_elec_hz",
     "motor_speed_mech_rpm",
     "motor_id_a",
     "motor_iq_a",
@@ -175,6 +178,7 @@ DEFAULT_LIVE_FIELDS = [
 
 DEFAULT_PLOT_FIELDS = {
     "ds18b20_temp_c": "Temp ext (°C)",
+    "d6t_temp_c": "Temp int IR (°C)",
     "motor_ud_v": "Ud (V)",
     "motor_uq_v": "Uq (V)",
     "motor_speed_mech_rpm": "Vitesse mech (rpm)",
@@ -182,12 +186,11 @@ DEFAULT_PLOT_FIELDS = {
     "motor_iq_a": "Iq (A)",
 }
 
-DEFAULT_PLOT_SELECTION = {"motor_speed_mech_rpm", "motor_iq_a", "ds18b20_temp_c"}
+DEFAULT_PLOT_SELECTION = {"motor_speed_mech_rpm", "motor_iq_a", "ds18b20_temp_c", "d6t_temp_c"}
 
 PLOT_COLORS = {
     "ds18b20_temp_c": "#FBBF24",
-    "d6t_avg_c": "#FB923C",
-    "d6t_max_c": "#FB7185",
+    "d6t_temp_c": "#FB923C",
     "motor_ud_v": "#38BDF8",
     "motor_uq_v": "#C084FC",
     "motor_speed_mech_rpm": "#A3E635",
@@ -198,8 +201,7 @@ PLOT_COLORS = {
 FIELD_ACCENTS = {
     "stm32_time_ms": "#94A3B8",
     "ds18b20_temp_c": "#FBBF24",
-    "d6t_avg_c": "#FB923C",
-    "d6t_max_c": "#FB7185",
+    "d6t_temp_c": "#FB923C",
     "motor_ud_v": "#38BDF8",
     "motor_uq_v": "#C084FC",
     "motor_speed_elec_hz": "#2DD4BF",
@@ -291,7 +293,7 @@ class MotorDatalogGui(tk.Tk):
         self.warning_var = tk.StringVar(value="")
 
         self.live_fields = list(DEFAULT_LIVE_FIELDS)
-        self.live_vars = {key: tk.StringVar(value="—") for key in self.live_fields}
+        self.live_vars = {key: tk.StringVar(value=self.default_live_value(key)) for key in self.live_fields}
         self.live_card_frames = {}
         self.live_value_labels = {}
         self.live_frame = None
@@ -756,7 +758,7 @@ class MotorDatalogGui(tk.Tk):
             return
 
         if key not in self.live_vars:
-            self.live_vars[key] = tk.StringVar(value="-")
+            self.live_vars[key] = tk.StringVar(value=self.default_live_value(key))
             self.live_fields.append(key)
 
         idx = len(self.live_card_frames)
@@ -1019,6 +1021,25 @@ class MotorDatalogGui(tk.Tk):
             return ""
         text = f"{value:.3f}"
         return text.rstrip("0").rstrip(".") if "." in text else text
+
+    @staticmethod
+    def default_live_value(key):
+        """Retourne la valeur affichée tant qu'aucune mesure n'est reçue."""
+        return "—"
+
+    @staticmethod
+    def csv_value_for_column(row, column):
+        """Retourne la valeur CSV en remplissant les mesures IR absentes par NaN."""
+        value = row.get(column, "")
+        if column in D6T_TEMPERATURE_COLUMNS and str(value).strip() == "":
+            return "NaN"
+        return value
+
+    def reset_live_values(self):
+        """Réinitialise les cartes live avant une nouvelle acquisition."""
+        for key, var in self.live_vars.items():
+            var.set(self.default_live_value(key))
+        self.update_iq_warning_color()
 
     def get_pole_pairs_safe(self):
         """Lit le nombre de paires de pôles avec une valeur de secours.
@@ -1659,6 +1680,7 @@ class MotorDatalogGui(tk.Tk):
         self.csv_pending_rows = 0
         self.csv_last_flush_s = time.monotonic()
         self.data_before_header_count = 0
+        self.reset_live_values()
         self.clear_plot()
         self.clear_ack_queue()
 
@@ -1963,12 +1985,15 @@ class MotorDatalogGui(tk.Tk):
         self.csv_file = open(self.csv_path, mode="w", newline="", encoding="utf-8")
         self.csv_writer = csv.writer(self.csv_file, delimiter=";")
         self.csv_columns = columns
-        self.csv_output_columns = [col for col in CSV_OUTPUT_COLUMNS if col in columns]
+        self.csv_output_columns = list(CSV_OUTPUT_COLUMNS)
 
         missing_columns = [col for col in CSV_OUTPUT_COLUMNS if col not in columns]
         extra_columns = [col for col in columns if col not in CSV_OUTPUT_COLUMNS]
         if missing_columns:
             self.log("Colonnes CSV attendues absentes du firmware : " + ", ".join(missing_columns))
+            for key in D6T_TEMPERATURE_COLUMNS:
+                if key in missing_columns and key in self.live_vars:
+                    self.live_vars[key].set("NaN")
         if extra_columns:
             self.log("Colonnes reçues non écrites dans le CSV final : " + ", ".join(extra_columns))
 
@@ -2041,7 +2066,7 @@ class MotorDatalogGui(tk.Tk):
                 return
 
             row = dict(zip(self.csv_columns, values))
-            self.csv_writer.writerow([row.get(col, "") for col in self.csv_output_columns])
+            self.csv_writer.writerow([self.csv_value_for_column(row, col) for col in self.csv_output_columns])
             self.csv_pending_rows += 1
             self.flush_csv()
 
@@ -2066,7 +2091,9 @@ class MotorDatalogGui(tk.Tk):
         """
         for key, var in self.live_vars.items():
             if key in row:
-                var.set(row[key])
+                var.set(self.csv_value_for_column(row, key))
+            elif key in D6T_TEMPERATURE_COLUMNS:
+                var.set("NaN")
 
         rpm = self.safe_float(row.get("motor_speed_mech_rpm", math.nan))
         if math.isfinite(rpm) and "motor_speed_elec_hz" in self.live_vars:
