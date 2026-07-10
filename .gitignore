@@ -6,7 +6,8 @@ __pycache__/
 *.pyo
 
 # CSV / logs générés
-logs/
+datalogging/logs/
+pretraitement/logs_processed_ewma/
 *.csv
 
 # Sphinx

@@ -1,0 +1,108 @@
+Firmware STM32
+==============
+
+Organisation
+------------
+
+Le firmware se trouve dans ``firmware/tets_motor_dewalt``. Il combine un projet
+STM32CubeIDE/MCSDK généré et plusieurs modules utilisateur situés dans
+``STM32CubeIDE/Application/User`` et déclarés dans ``Inc``.
+
+Les modules applicatifs principaux sont :
+
+``app_serial_control.c``
+   Réception UART, parsing des commandes PC, validation des paramètres et envoi
+   des ``ACK`` / ``ERR``.
+
+``app_motor_control.c``
+   Démarrage, arrêt, configuration runtime du moteur et sécurités courant /
+   survitesse.
+
+``app_datalog.c``
+   Prise en main de l'USART, file TX non bloquante, envoi du header CSV et des
+   lignes ``DATA``.
+
+``d6t_ir.c``
+   Lecture I2C logiciel du capteur IR D6T et formatage de ``d6t_temp_c``.
+
+``ds18b20.c``
+   Driver 1-Wire du DS18B20 avec cache de dernière valeur valide.
+
+Initialisation
+--------------
+
+Dans ``Src/main.c``, l'ordre applicatif est :
+
+.. code-block:: c
+
+   AppDatalog_Init();
+   AppMotorControl_Init();
+   AppSerialControl_Init();
+
+Puis la boucle principale appelle :
+
+.. code-block:: c
+
+   AppSerialControl_Task();
+   AppMotorControl_Task();
+   AppDatalog_Task();
+
+``AppDatalog_Init`` désactive l'usage ASPEP/DMA de ``USART1`` pour laisser la
+place au protocole ASCII du projet. Les messages de boot indiquent l'état du
+logger et du capteur D6T.
+
+Contrôle série
+--------------
+
+``AppSerialControl_OnUsart1Irq`` lit les octets reçus dans une file circulaire.
+``AppSerialControl_Task`` reconstruit les lignes ASCII et cherche une commande
+connue même si des octets parasites précèdent la commande.
+
+``CFG`` est validé par bornes : vitesse cible, limite ``Iq``, hard stop,
+accélération, période DATA et période DS18B20. Une configuration valide appelle
+``AppMotorControl_SetRuntimeConfig`` et ``AppDatalog_SetRuntimePeriods``.
+
+Contrôle moteur
+---------------
+
+``AppMotorControl_Start`` applique la configuration runtime, ajuste le PI vitesse
+et démarre le moteur via MCSDK avec polarisation. La limite ``Iq`` est rampée en
+RUN pour éviter une demande de couple brutale. ``AppMotorControl_Task`` surveille
+les faults MCSDK, le dépassement de courant et la survitesse.
+
+Datalogging embarqué
+--------------------
+
+``AppDatalog_StartLogging`` arme le logger après réception de ``START``. Le
+header envoyé est :
+
+.. code-block:: text
+
+   #CSV_HEADER,stm32_time_ms,d6t_temp_c,ds18b20_temp_c,motor_ud_v,motor_uq_v,motor_speed_mech_rpm,motor_id_a,motor_iq_a
+
+Chaque ligne ``DATA`` contient le tick STM32, les températures, les tensions d/q
+reconstruites, la vitesse mécanique et les courants d/q. Les tensions d/q sont
+calculées depuis ``CurrCtrl_M1.Ddq_out_pu`` et la tension bus DC.
+
+Capteur D6T
+-----------
+
+``d6t_ir.c`` utilise un I2C logiciel sur ``PB8``/``PB9``. Le module lit un frame
+de 35 octets, vérifie le PEC et extrait le pixel ``D6TIR_SELECTED_PIXEL_INDEX``.
+La valeur est formatée en degrés Celsius avec une décimale. Tant qu'aucune
+lecture valide n'existe, ``D6TIR_GetCsvValue`` renvoie ``NaN``.
+
+Capteur DS18B20
+---------------
+
+``ds18b20.c`` pilote le bus 1-Wire avec des fenêtres critiques très courtes pour
+ne pas perturber le contrôle moteur. La conversion 12 bits dure 750 ms. Si une
+lecture fraîche échoue mais qu'une ancienne valeur valide existe, le driver
+renvoie la dernière valeur connue afin de garder un CSV exploitable.
+
+Sécurités
+---------
+
+Les sécurités sont réparties entre PC et firmware. Le dashboard valide les
+entrées utilisateur pour guider l'opérateur. Le firmware garde les bornes finales
+et coupe le moteur en cas de fault MCSDK, courant trop élevé ou survitesse.

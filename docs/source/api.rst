@@ -1,10 +1,21 @@
-Référence API
-=============
+Référence API Python
+====================
 
-Cette section documente automatiquement le code Python principal du dashboard.
+Dashboard de datalogging
+------------------------
 
 .. automodule:: motor_datalog_gui_dashboard
+   :no-index:
    :members:
    :undoc-members:
    :show-inheritance:
    :special-members: __init__
+
+Prétraitement EWMA
+------------------
+
+.. automodule:: preprocess_logs_ewma
+   :no-index:
+   :members:
+   :undoc-members:
+   :show-inheritance:

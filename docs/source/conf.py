@@ -1,30 +1,31 @@
-# Configuration file for the Sphinx documentation builder.
-import os
-import sys
 from pathlib import Path
+import sys
 
-# Permet à Sphinx de trouver le fichier Python situé à la racine du projet.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pc_dashboard"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-project = "STM32 PMSM Datalog Dashboard"
-copyright = '2026, Melvin Pellegrino'
+sys.path.insert(0, str(PROJECT_ROOT / "datalogging"))
+sys.path.insert(0, str(PROJECT_ROOT / "pretraitement"))
+
+project = "PMSM Temperature Prediction STM32"
+copyright = "2026, Melvin Pellegrino"
 author = "Melvin Pellegrino"
 release = "1.0"
 language = "fr"
 
 extensions = [
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
-    "sphinx.ext.autosummary",
 ]
 
 autosummary_generate = True
 
 templates_path = ["_templates"]
-exclude_patterns = []
+exclude_patterns = ["build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
+html_title = project
 
 autodoc_default_options = {
     "members": True,

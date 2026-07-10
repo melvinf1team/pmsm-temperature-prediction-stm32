@@ -1,46 +1,62 @@
 Utilisation
 ===========
 
-Connexion
----------
+Séquence recommandée
+--------------------
 
-Sélectionner le port COM associé à la carte STM32, puis vérifier le baudrate.
-La valeur par défaut est 115200 bauds.
+1. Flasher le firmware STM32 depuis STM32CubeIDE.
+2. Brancher les capteurs et vérifier le port COM de la carte.
+3. Lancer ``datalogging/motor_datalog_gui_dashboard.py``.
+4. Sélectionner le port COM, le baudrate et le profil moteur.
+5. Choisir la période ``DATA`` et la période DS18B20.
+6. Cliquer sur le lancement pour envoyer ``SYNC``, ``CFG`` puis ``START``.
+7. Arrêter la session avec ``STOP``.
+8. Exécuter ``pretraitement/preprocess_logs_ewma.py`` pour générer les fichiers
+   exploitables par NanoEdge AI Studio.
 
-Profil moteur
--------------
+Colonnes brutes du dashboard
+----------------------------
 
-Le profil moteur définit les paramètres envoyés à la carte :
+Le firmware annonce les colonnes avec ``#CSV_HEADER``. Le dashboard conserve les
+colonnes suivantes dans cet ordre :
 
-* vitesse cible en rpm ;
-* vitesse électrique équivalente ;
-* nombre de paires de pôles ;
-* limite Iq ;
-* limite hard stop ;
-* rampe d'accélération.
+.. code-block:: text
 
-Acquisition
------------
+   stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
 
-La période DATA définit la fréquence d'enregistrement des données moteur.
-La période DS18B20 définit la fréquence de mesure du capteur de température externe.
+``stm32_time_ms``
+   Timestamp carte en millisecondes. Il sert au prétraitement pour déduire la
+   fréquence réelle d'acquisition.
 
-Le capteur DS18B20 ne doit pas être configuré sous 750 ms pour obtenir une
-nouvelle mesure fiable.
+``d6t_temp_c``
+   Température IR cible. Elle devient la première colonne du fichier traité et
+   n'est pas lissée.
+
+``ds18b20_temp_c``
+   Température externe de référence, conservée comme feature.
+
+``motor_ud_v`` et ``motor_uq_v``
+   Tensions d/q reconstruites depuis la sortie de modulation et le bus DC.
+
+``motor_speed_mech_rpm``
+   Vitesse mécanique en rpm.
+
+``motor_id_a`` et ``motor_iq_a``
+   Courants d/q moteur en ampères.
 
 Protocole série
 ---------------
 
-Le logiciel envoie les commandes suivantes à la carte :
+Commandes envoyées par le dashboard :
 
 .. code-block:: text
 
    SYNC
-   CFG,<target_rpm>,<iq_limit>,<hard_limit>,<accel>,<datalog_ms>,<ds18b20_ms>
+   CFG,<target_rpm>,<iq_limit_a>,<hard_limit_a>,<accel_elec_hz_s>,<datalog_ms>,<ds18b20_ms>
    START
    STOP
 
-La carte doit répondre avec :
+Réponses et messages attendus :
 
 .. code-block:: text
 
@@ -48,26 +64,16 @@ La carte doit répondre avec :
    ACK,CFG
    ACK,START
    ACK,STOP
+   ERR,<raison>
+   #CSV_HEADER,<colonnes>
+   DATA,<valeurs>
 
-Les données doivent être envoyées sous la forme :
+Le dashboard ignore les lignes ``DATA`` reçues avant ``#CSV_HEADER`` afin de ne
+pas écrire un CSV incohérent.
 
-.. code-block:: text
+Import NanoEdge AI Studio
+-------------------------
 
-   #CSV_HEADER,stm32_time_ms,d6t_temp_c,ds18b20_temp_c,motor_ud_v,motor_uq_v,motor_speed_mech_rpm,motor_id_a,motor_iq_a
-   DATA,1000,31.2,24.5,1.125,3.480,600.0,-0.120,1.200
-
-Si le module IR n'est pas branché ou ne répond pas, la ligne reste valide :
-
-.. code-block:: text
-
-   DATA,1000,NaN,24.5,1.125,3.480,600.0,-0.120,1.200
-
-Colonnes CSV finales
---------------------
-
-Le fichier CSV écrit par le dashboard conserve les colonnes suivantes, dans cet
-ordre :
-
-.. code-block:: text
-
-   stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
+Après prétraitement, le fichier CSV commence par ``d6t_temp_c``. Cette première
+colonne doit être utilisée comme target d'extrapolation. Les autres colonnes
+représentent les features instantanées, dérivées et lissées par EWMA.

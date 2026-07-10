@@ -2,3 +2,5 @@ sphinx
 sphinx-rtd-theme
 pyserial
 matplotlib
+numpy
+pandas

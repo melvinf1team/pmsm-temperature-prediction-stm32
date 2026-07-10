@@ -1,10 +1,11 @@
-"""Interface graphique de datalogging moteur PMSM pour STM32.
+"""Interface graphique de datalogging PMSM pour prediction thermique STM32.
 
 Ce module fournit une application Tkinter permettant de piloter une carte
 STM32 B-G473E-ZEST1S associée à une power board STDES-LVHP01, de lancer une
 séquence moteur simple, de recevoir les mesures UART, d'enregistrer un CSV et
-d'afficher les grandeurs en temps réel. Le CSV final conserve uniquement les
-colonnes STM32 utiles au prétraitement NanoEdge AI, sans timestamp PC.
+d'afficher les grandeurs en temps réel. Le CSV final est écrit dans
+``datalogging/logs`` et conserve uniquement les colonnes STM32 utiles au
+prétraitement NanoEdge AI, sans timestamp PC.
 
 Le protocole série attendu côté firmware est volontairement textuel et basé sur
 une ligne par message::
@@ -18,8 +19,8 @@ une ligne par message::
     #CSV_HEADER,<colonne_1>,<colonne_2>,...
     DATA,<valeur_1>,<valeur_2>,...
 
-Le style de documentation utilisé suit les conventions Google docstring pour
-faciliter une génération future avec Sphinx ou Read the Docs.
+Le style de documentation suit les conventions Google docstring afin que Sphinx
+puisse générer une référence API cohérente avec la documentation projet.
 """
 
 import csv
@@ -338,10 +339,10 @@ class MotorDatalogGui(tk.Tk):
 
         Returns:
             str: Chemin vers un fichier ``daq_log_YYYYMMDD_HHMMSS.csv`` dans le dossier
-            ``logs`` du répertoire courant.
+            ``logs`` place a cote de ce script.
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return str(Path.cwd() / "logs" / f"daq_log_{timestamp}.csv")
+        return str(Path(__file__).resolve().parent / "logs" / f"daq_log_{timestamp}.csv")
 
     def setup_style(self):
         """Configure un thème sombre dense et lisible pour le banc moteur."""
@@ -1810,8 +1811,7 @@ class MotorDatalogGui(tk.Tk):
         """Envoie une commande ASCII au firmware STM32.
 
         Args:
-            command: Commande complète à envoyer, généralement terminée par ``
-        ``.
+            command: Commande complète à envoyer, généralement terminée par un saut de ligne.
             char_delay: Délai optionnel entre deux caractères pour les firmwares qui
                 tolèrent mal les rafales UART.
 
