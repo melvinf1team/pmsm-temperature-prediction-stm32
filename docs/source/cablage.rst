@@ -3,25 +3,31 @@ Câblage
 
 Le montage cible une carte STM32 B-G473E-ZEST1S associée à une power board
 STDES-LVHP01. Les capteurs externes partagent la masse de la carte et doivent
-être alimentés en 3.3 V.
+être alimentés à la tension requise par leur fiche technique.
 
 Capteur IR D6T
 --------------
 
 La colonne ``d6t_temp_c`` est la target du dataset NanoEdge AI. Le firmware lit
-un pixel du module IR D6T par I2C logiciel sur ``PB8`` et ``PB9``.
+un pixel du module IR D6T-44L-06 par I2C logiciel sur ``PB6`` et ``PB9``.
 
-+--------+-----------+-------------------------------+
-| Signal | Pin STM32 | Remarque                      |
-+========+===========+===============================+
-| SCL    | PB8       | Ligne I2C clock open-drain    |
-+--------+-----------+-------------------------------+
-| SDA    | PB9       | Ligne I2C data open-drain     |
-+--------+-----------+-------------------------------+
-| VCC    | 3V3       | Ne pas alimenter en 5 V       |
-+--------+-----------+-------------------------------+
-| GND    | GND       | Masse commune                 |
-+--------+-----------+-------------------------------+
++-------------+--------+-----------+-----------+--------------------------------+
+| Broche D6T  | Signal | Pin STM32 | Carte     | Remarque                       |
++=============+========+===========+===========+================================+
+| 4           | SCL    | PB6       | CN10-27   | Ligne I2C clock open-drain     |
++-------------+--------+-----------+-----------+--------------------------------+
+| 3           | SDA    | PB9       | CN10-24   | CN10-26 est le même signal PB9 |
++-------------+--------+-----------+-----------+--------------------------------+
+| 2           | VCC    | -         | CN7-18    | Alimentation +5 V              |
++-------------+--------+-----------+-----------+--------------------------------+
+| 1           | GND    | -         | CN7-20    | CN7-22 convient également      |
++-------------+--------+-----------+-----------+--------------------------------+
+
+Ajouter une résistance de tirage de 4.7 kΩ entre ``SCL`` et ``3.3V``, et une
+seconde entre ``SDA`` et ``3.3V``. Les broches ``PB6`` et ``PB9`` sont utilisées
+en sortie open-drain et sans pull-up interne. Les deux positions ``PB9`` visibles 
+sur la carte correspondent au même signal, routé vers ``CN10-24`` et ``CN10-26`` 
+pour la compatibilité avec plusieurs cartes d'extension moteur.
 
 L'adresse I2C attendue est ``0x0A``. Le firmware lit la commande ``0x4C`` et
 vérifie le PEC du frame. Le pixel loggé est configuré par

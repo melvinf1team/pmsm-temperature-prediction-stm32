@@ -87,10 +87,11 @@ calculées depuis ``CurrCtrl_M1.Ddq_out_pu`` et la tension bus DC.
 Capteur D6T
 -----------
 
-``d6t_ir.c`` utilise un I2C logiciel sur ``PB8``/``PB9``. Le module lit un frame
-de 35 octets, vérifie le PEC et extrait le pixel ``D6TIR_SELECTED_PIXEL_INDEX``.
-La valeur est formatée en degrés Celsius avec une décimale. Tant qu'aucune
-lecture valide n'existe, ``D6TIR_GetCsvValue`` renvoie ``NaN``.
+``d6t_ir.c`` utilise un I2C logiciel sur ``PB6``/``PB9``, exposés respectivement
+sur ``CN10-27`` et ``CN10-24``. Le module lit un frame de 35 octets, vérifie le
+PEC et extrait le pixel ``D6TIR_SELECTED_PIXEL_INDEX``. La valeur est formatée
+en degrés Celsius avec une décimale. Tant qu'aucune lecture valide n'existe,
+``D6TIR_GetCsvValue`` renvoie ``NaN``.
 
 Capteur DS18B20
 ---------------

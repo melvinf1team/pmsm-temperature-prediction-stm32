@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 #define D6TIR_SCL_GPIO_Port         GPIOB
-#define D6TIR_SCL_Pin               GPIO_PIN_8
+#define D6TIR_SCL_Pin               GPIO_PIN_6
 #define D6TIR_SDA_GPIO_Port         GPIOB
 #define D6TIR_SDA_Pin               GPIO_PIN_9
 
@@ -338,7 +338,7 @@ void D6TIR_Init(void)
 
   GPIO_InitStruct.Pin = D6TIR_SCL_Pin | D6TIR_SDA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 

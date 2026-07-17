@@ -7,7 +7,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "datalogging"))
 sys.path.insert(0, str(PROJECT_ROOT / "pretraitement"))
 
 project = "PMSM Temperature Prediction STM32"
-copyright = "2026, Melvin Pellegrino"
+copyright = "2026, STMicroelectronics,Melvin Pellegrino"
 author = "Melvin Pellegrino"
 release = "1.0"
 language = "fr"

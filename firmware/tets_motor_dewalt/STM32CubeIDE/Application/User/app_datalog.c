@@ -528,7 +528,7 @@ void AppDatalog_Init(void)
 
   AppDatalog_UartQueueText("#BOOT_APP_DATALOG\r\n");
   AppDatalog_UartQueueText("#USART1_TAKEN_OVER_BY_DATALOG\r\n");
-  AppDatalog_UartQueueText("#D6T_IR_I2C_SOFT,PB8=SCL,PB9=SDA,ADDR=0x0A\r\n");
+  AppDatalog_UartQueueText("#D6T_IR_I2C_SOFT,PB6=SCL,PB9=SDA,ADDR=0x0A\r\n");
   if (!d6t_last_present)
   {
     AppDatalog_UartQueueText("#WARN,D6T_IR_NOT_DETECTED,d6t_temp_c=NaN\r\n");
