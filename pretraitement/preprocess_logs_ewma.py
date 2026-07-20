@@ -4,22 +4,32 @@ Le script lit les CSV produits par ``datalogging/motor_datalog_gui_dashboard.py`
 conserve ``d6t_temp_c`` en première colonne comme cible non transformée, puis
 construit les variables explicatives et leurs EWMA. Les spans EWMA de référence
 ont été réglés pour 2 Hz et sont remis à l'échelle à partir de la fréquence
-d'acquisition réelle du fichier d'entrée.
+d'acquisition réelle du fichier d'entrée. Les chemins peuvent être fournis par
+ligne de commande, fichier de configuration ou variables d'environnement via
+ConfigArgParse.
 """
 
-from argparse import ArgumentParser
+import os
 from pathlib import Path
 
+import configargparse
 import numpy as np
 import pandas as pd
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
 DATALOGGING_DIR = PROJECT_ROOT / "datalogging"
 
 INPUT_DIR = DATALOGGING_DIR / "logs"
-OUTPUT_DIR = Path(__file__).resolve().parent / "logs_processed_ewma"
+OUTPUT_DIR = SCRIPT_DIR / "logs_processed_ewma"
 INPUT_PATTERN = "daq_log_*.csv"
+
+# Fichiers optionnels lus automatiquement par ConfigArgParse s'ils existent.
+DEFAULT_CONFIG_FILES = [
+    PROJECT_ROOT / "preprocess_ewma.ini",
+    SCRIPT_DIR / "preprocess_ewma.ini",
+]
 
 # Mettre a True pour ecrire les noms de colonnes dans les CSV de sortie.
 WRITE_HEADER = True
@@ -57,13 +67,45 @@ DERIVED_COLUMNS = [
 EWM_COLUMNS = FEATURE_INPUT_COLUMNS + DERIVED_COLUMNS
 
 
-def parse_args():
-    parser = ArgumentParser(
-        description="Pretraite les logs du dashboard PMSM avec des EWMA adaptees a la frequence d'acquisition."
+def path_from_arg(value):
+    """Normalise un chemin fourni par CLI, config ou variable d'environnement."""
+    path = Path(os.path.expandvars(str(value))).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def parse_args(argv=None):
+    parser = configargparse.ArgParser(
+        description="Pretraite les logs du dashboard PMSM avec des EWMA adaptees a la frequence d'acquisition.",
+        default_config_files=[str(path) for path in DEFAULT_CONFIG_FILES],
     )
-    parser.add_argument("--input-dir", type=Path, default=INPUT_DIR)
-    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
-    parser.add_argument("--pattern", default=INPUT_PATTERN)
+    parser.add_argument(
+        "-c",
+        "--config",
+        is_config_file=True,
+        help="Fichier de configuration optionnel au format key=value.",
+    )
+    parser.add_argument(
+        "--input-dir",
+        type=path_from_arg,
+        default=INPUT_DIR,
+        env_var="PMSM_PREPROCESS_INPUT_DIR",
+        help="Dossier contenant les CSV bruts du dashboard.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=path_from_arg,
+        default=OUTPUT_DIR,
+        env_var="PMSM_PREPROCESS_OUTPUT_DIR",
+        help="Dossier de sortie des CSV preprocesses.",
+    )
+    parser.add_argument(
+        "--pattern",
+        default=INPUT_PATTERN,
+        env_var="PMSM_PREPROCESS_PATTERN",
+        help="Motif glob des fichiers CSV a traiter dans input-dir.",
+    )
     parser.add_argument(
         "--frequency-hz",
         type=float,
@@ -96,7 +138,27 @@ def parse_args():
         action="store_false",
         help="Ne conserve pas la colonne stm32_time_ms dans le CSV de sortie.",
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    args.input_dir = path_from_arg(args.input_dir)
+    args.output_dir = path_from_arg(args.output_dir)
+    return args
+
+
+def require_input_directory(input_dir):
+    """Valide que le dossier d'entrée existe et pointe bien vers un dossier."""
+    if not input_dir.exists():
+        raise FileNotFoundError(f"Dossier d'entree introuvable: {input_dir}")
+    if not input_dir.is_dir():
+        raise NotADirectoryError(f"Le chemin d'entree n'est pas un dossier: {input_dir}")
+    return input_dir
+
+
+def prepare_output_directory(output_dir):
+    """Crée le dossier de sortie, sauf si le chemin existe déjà comme fichier."""
+    if output_dir.exists() and not output_dir.is_dir():
+        raise NotADirectoryError(f"Le chemin de sortie n'est pas un dossier: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 def detect_acquisition_frequency_hz(df, forced_frequency_hz=None):
@@ -254,16 +316,20 @@ def process_file(csv_file, output_dir, write_header, include_time_ms, forced_fre
 
 def main():
     args = parse_args()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    input_dir = require_input_directory(args.input_dir)
+    output_dir = prepare_output_directory(args.output_dir)
 
-    csv_files = sorted(args.input_dir.glob(args.pattern))
+    if not args.pattern.strip():
+        raise ValueError("Le motif de fichiers CSV ne peut pas etre vide.")
+
+    csv_files = sorted(input_dir.glob(args.pattern))
     if not csv_files:
-        raise FileNotFoundError(f"Aucun fichier trouve dans {args.input_dir} avec le motif {args.pattern!r}")
+        raise FileNotFoundError(f"Aucun fichier trouve dans {input_dir} avec le motif {args.pattern!r}")
 
     for csv_file in csv_files:
         process_file(
             csv_file=csv_file,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             write_header=args.write_header,
             include_time_ms=args.include_time_ms,
             forced_frequency_hz=args.frequency_hz,

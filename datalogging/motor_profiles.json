@@ -3,7 +3,7 @@
     "name": "Classique",
     "speed_value": 1500.0,
     "speed_unit": "rpm",
-    "iq_limit_a": 3.0,
+    "iq_limit_a": 5.0,
     "hard_limit_a": 6.0,
     "accel_elec_hz_s": 1000.0,
     "datalog_ms": 100,

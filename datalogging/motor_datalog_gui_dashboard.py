@@ -5,7 +5,9 @@ STM32 B-G473E-ZEST1S associée à une power board STDES-LVHP01, de lancer une
 séquence moteur simple, de recevoir les mesures UART, d'enregistrer un CSV et
 d'afficher les grandeurs en temps réel. Le CSV final est écrit dans
 ``datalogging/logs`` et conserve uniquement les colonnes STM32 utiles au
-prétraitement NanoEdge AI, sans timestamp PC.
+prétraitement NanoEdge AI, sans timestamp PC. Les chemins par défaut peuvent
+être surchargés par ligne de commande, fichier de configuration ou variables
+d'environnement via ConfigArgParse.
 
 Le protocole série attendu côté firmware est volontairement textuel et basé sur
 une ligne par message::
@@ -26,6 +28,7 @@ puisse générer une référence API cohérente avec la documentation projet.
 import csv
 import json
 import math
+import os
 import queue
 import threading
 import time
@@ -33,9 +36,11 @@ from collections import deque
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
+import configargparse
 import serial
 import serial.tools.list_ports
 
@@ -150,7 +155,84 @@ PROFILES = {
 
 
 BUILTIN_PROFILE_NAMES = set(PROFILES.keys())
-PROFILE_STORE_PATH = Path(__file__).with_name("motor_profiles.json")
+DASHBOARD_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = DASHBOARD_DIR.parent
+DEFAULT_LOG_DIR = DASHBOARD_DIR / "logs"
+DEFAULT_PROFILE_STORE_PATH = DASHBOARD_DIR / "motor_profiles.json"
+
+# Fichiers optionnels lus automatiquement par ConfigArgParse s'ils existent.
+DEFAULT_CONFIG_FILES = [
+    PROJECT_ROOT / "dashboard_config.ini",
+    DASHBOARD_DIR / "dashboard_config.ini",
+]
+
+
+@dataclass
+class DashboardPaths:
+    """Chemins configurables utilisés par le dashboard Tkinter."""
+
+    log_dir: Path
+    profile_store_path: Path
+    csv_path: Optional[Path]
+
+
+def path_from_arg(value):
+    """Normalise un chemin fourni par CLI, config ou variable d'environnement."""
+    path = Path(os.path.expandvars(str(value))).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def parse_dashboard_args(argv=None):
+    """Lit les chemins configurables du dashboard avec ConfigArgParse."""
+    parser = configargparse.ArgParser(
+        description="Dashboard PMSM STM32 avec chemins configurables.",
+        default_config_files=[str(path) for path in DEFAULT_CONFIG_FILES],
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        is_config_file=True,
+        help="Fichier de configuration optionnel au format key=value.",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=path_from_arg,
+        default=DEFAULT_LOG_DIR,
+        env_var="PMSM_DATALOG_LOG_DIR",
+        help="Dossier ou proposer les nouveaux CSV de datalogging.",
+    )
+    parser.add_argument(
+        "--profile-store",
+        type=path_from_arg,
+        default=DEFAULT_PROFILE_STORE_PATH,
+        env_var="PMSM_DATALOG_PROFILE_STORE",
+        help="Fichier JSON des profils moteur personnalises.",
+    )
+    parser.add_argument(
+        "--csv-path",
+        type=path_from_arg,
+        default=None,
+        env_var="PMSM_DATALOG_CSV_PATH",
+        help="Chemin CSV initial propose dans le champ de sortie.",
+    )
+
+    args, _unknown_args = parser.parse_known_args(argv)
+    paths = DashboardPaths(
+        log_dir=path_from_arg(args.log_dir),
+        profile_store_path=path_from_arg(args.profile_store),
+        csv_path=path_from_arg(args.csv_path) if args.csv_path else None,
+    )
+
+    if paths.log_dir.exists() and not paths.log_dir.is_dir():
+        raise NotADirectoryError(f"Le chemin des logs n'est pas un dossier : {paths.log_dir}")
+    if paths.profile_store_path.exists() and not paths.profile_store_path.is_file():
+        raise IsADirectoryError(f"Le chemin des profils n'est pas un fichier : {paths.profile_store_path}")
+    if paths.csv_path is not None and paths.csv_path.exists() and paths.csv_path.is_dir():
+        raise IsADirectoryError(f"Le chemin CSV initial pointe vers un dossier : {paths.csv_path}")
+
+    return paths
 
 
 # Métadonnées des colonnes CSV reconnues par les cartes live et le graphe.
@@ -229,12 +311,13 @@ class MotorDatalogGui(tk.Tk):
         plot_fields: Variables actuellement disponibles pour le graphique.
         live_vars: Variables Tkinter liées aux cartes de valeurs instantanées.
     """
-    def __init__(self):
+    def __init__(self, paths=None):
         """Initialise l'application, l'état interne et l'interface graphique.
 
         L'initialisation prépare les variables Tkinter, charge les profils, construit
         les panneaux de l'interface, détecte les ports COM disponibles et démarre les
         boucles périodiques de traitement des files et de rafraîchissement du graphe.
+        Les chemins applicatifs sont lus avec ConfigArgParse avant l'affichage.
         """
         super().__init__()
 
@@ -242,6 +325,7 @@ class MotorDatalogGui(tk.Tk):
         self.geometry("1540x960")
         self.minsize(1120, 720)
         self.configure(bg=COLORS["bg"])
+        self.paths = paths or parse_dashboard_args()
 
         self.serial_obj = None
         self.serial_lock = threading.Lock()
@@ -288,7 +372,7 @@ class MotorDatalogGui(tk.Tk):
         self.accel_var = tk.StringVar()
         self.datalog_ms_var = tk.StringVar()
         self.ds18b20_ms_var = tk.StringVar()
-        self.csv_path_var = tk.StringVar(value=self.default_csv_path())
+        self.csv_path_var = tk.StringVar(value=str(self.paths.csv_path or self.default_csv_path()))
         self.status_var = tk.StringVar(value="Prêt")
         self.status_detail_var = tk.StringVar(value="Sélectionne un port COM et une configuration.")
         self.warning_var = tk.StringVar(value="")
@@ -333,16 +417,26 @@ class MotorDatalogGui(tk.Tk):
         self.after(50, self.process_gui_queue)
         self.after(PLOT_REFRESH_MS, self.redraw_plot_periodic)
 
-    @staticmethod
-    def default_csv_path():
+    def default_csv_path(self):
         """Construit le chemin CSV par défaut pour une nouvelle acquisition.
 
         Returns:
             str: Chemin vers un fichier ``daq_log_YYYYMMDD_HHMMSS.csv`` dans le dossier
-            ``logs`` place a cote de ce script.
+            configuré pour les logs du dashboard.
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return str(Path(__file__).resolve().parent / "logs" / f"daq_log_{timestamp}.csv")
+        return str(self.paths.log_dir / f"daq_log_{timestamp}.csv")
+
+    @staticmethod
+    def csv_path_from_text(value):
+        """Convertit et valide un chemin CSV saisi dans l'interface."""
+        raw = str(value).strip()
+        if not raw:
+            raise ValueError("Aucun fichier CSV sélectionné.")
+        path = path_from_arg(raw)
+        if path.exists() and path.is_dir():
+            raise ValueError(f"Le chemin CSV pointe vers un dossier : {path}")
+        return path
 
     def setup_style(self):
         """Configure un thème sombre dense et lisible pour le banc moteur."""
@@ -928,18 +1022,22 @@ class MotorDatalogGui(tk.Tk):
     def load_profiles(self):
         """Charge les profils moteur intégrés et personnalisés.
 
-        Le fichier ``motor_profiles.json`` est lu s'il existe dans le même dossier que
-        le script. Les profils invalides sont ignorés et les erreurs sont stockées dans
-        ``profile_load_errors`` pour affichage dans le journal.
+        Le fichier JSON configuré via ConfigArgParse est lu s'il existe. Les profils
+        invalides sont ignorés et les erreurs sont stockées dans ``profile_load_errors``
+        pour affichage dans le journal.
 
         Returns:
             dict[str, MotorProfile]: Dictionnaire des profils disponibles.
         """
         profiles = dict(PROFILES)
+        profile_store_path = self.paths.profile_store_path
 
-        if PROFILE_STORE_PATH.exists():
+        if profile_store_path.exists():
             try:
-                raw = json.loads(PROFILE_STORE_PATH.read_text(encoding="utf-8"))
+                if not profile_store_path.is_file():
+                    raise ValueError("Le chemin des profils pointe vers un dossier.")
+
+                raw = json.loads(profile_store_path.read_text(encoding="utf-8"))
                 if not isinstance(raw, list):
                     raise ValueError("Le fichier doit contenir une liste de profils.")
 
@@ -969,7 +1067,7 @@ class MotorDatalogGui(tk.Tk):
                         ds18b20_ms=int(item.get("ds18b20_ms", 1000)),
                     )
             except Exception as exc:
-                self.profile_load_errors.append(f"Impossible de charger {PROFILE_STORE_PATH.name} : {exc}")
+                self.profile_load_errors.append(f"Impossible de charger {profile_store_path.name} : {exc}")
 
         if "Personnalisé" not in profiles:
             profiles["Personnalisé"] = PROFILES["Personnalisé"]
@@ -989,7 +1087,7 @@ class MotorDatalogGui(tk.Tk):
         return "Personnalisé"
 
     def save_profiles_to_disk(self):
-        """Sauvegarde les profils personnalisés dans ``motor_profiles.json``.
+        """Sauvegarde les profils personnalisés dans le fichier JSON configuré.
 
         Les profils intégrés ne sont pas exportés afin de conserver le fichier JSON
         centré sur les profils créés par l'utilisateur.
@@ -1000,7 +1098,9 @@ class MotorDatalogGui(tk.Tk):
                 continue
             custom_profiles.append(asdict(profile))
 
-        PROFILE_STORE_PATH.write_text(
+        profile_store_path = self.paths.profile_store_path
+        profile_store_path.parent.mkdir(parents=True, exist_ok=True)
+        profile_store_path.write_text(
             json.dumps(custom_profiles, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -1369,11 +1469,18 @@ class MotorDatalogGui(tk.Tk):
 
     def choose_csv_file(self):
         """Ouvre une boîte de dialogue pour choisir le fichier CSV de sortie."""
-        initial = Path(self.csv_path_var.get())
-        initialdir = str(initial.parent) if initial.parent.exists() else str(Path.cwd())
+        try:
+            initial = self.csv_path_from_text(self.csv_path_var.get())
+        except ValueError:
+            initial = Path(self.default_csv_path())
+
+        initialdir_path = initial.parent if initial.parent.exists() else self.paths.log_dir
+        if not initialdir_path.exists():
+            initialdir_path = Path.cwd()
+
         filename = filedialog.asksaveasfilename(
             title="Choisir le fichier CSV",
-            initialdir=initialdir,
+            initialdir=str(initialdir_path),
             initialfile=initial.name,
             defaultextension=".csv",
             filetypes=[("CSV", "*.csv"), ("Tous les fichiers", "*.*")],
@@ -1436,7 +1543,7 @@ class MotorDatalogGui(tk.Tk):
         accel = float(self.accel_var.get().replace(",", "."))
         datalog_ms = int(self.datalog_ms_var.get().strip())
         ds18b20_ms = int(self.ds18b20_ms_var.get().strip())
-        csv_path = self.csv_path_var.get().strip()
+        csv_path = self.csv_path_from_text(self.csv_path_var.get())
 
         if target_rpm <= 0:
             raise ValueError("La vitesse doit être > 0.")
@@ -1452,9 +1559,6 @@ class MotorDatalogGui(tk.Tk):
             raise ValueError("La période DS18B20 doit être >= 1 ms.")
         if not port:
             raise ValueError("Aucun port COM sélectionné.")
-        if not csv_path:
-            raise ValueError("Aucun fichier CSV sélectionné.")
-
         return {
             "port": port,
             "baud": baud,
@@ -1602,10 +1706,11 @@ class MotorDatalogGui(tk.Tk):
         datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "Période DATA", 0)
         ds18b20_ms = parse_int("ds18b20_ms", self.ds18b20_ms_var, "Période DS18B20", 0)
 
-        csv_path = self.csv_path_var.get().strip()
-        if not csv_path:
+        try:
+            self.csv_path_from_text(self.csv_path_var.get())
+        except ValueError as exc:
             self.set_field_invalid("csv_path", True)
-            errors.append("Aucun fichier CSV sélectionné.")
+            errors.append(str(exc))
 
         if pole_pairs is not None and target_rpm is not None and speed_hz is not None:
             expected_hz = (target_rpm * pole_pairs) / 60.0
@@ -1653,7 +1758,7 @@ class MotorDatalogGui(tk.Tk):
             return
 
         cfg = self.parse_config()
-        csv_path = Path(cfg["csv_path"])
+        csv_path = cfg["csv_path"]
         csv_path.parent.mkdir(parents=True, exist_ok=True)
 
         if csv_path.exists():
@@ -2291,6 +2396,6 @@ class MotorDatalogGui(tk.Tk):
 
 
 if __name__ == "__main__":
-    app = MotorDatalogGui()
+    app = MotorDatalogGui(parse_dashboard_args())
     app.protocol("WM_DELETE_WINDOW", app.on_close)
     app.mainloop()
