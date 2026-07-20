@@ -1,6 +1,7 @@
 sphinx
 sphinx-rtd-theme
 ConfigArgParse
+PyYAML
 pyserial
 matplotlib
 numpy

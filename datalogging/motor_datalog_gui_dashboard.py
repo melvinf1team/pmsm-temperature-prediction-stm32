@@ -6,8 +6,8 @@ séquence moteur simple, de recevoir les mesures UART, d'enregistrer un CSV et
 d'afficher les grandeurs en temps réel. Le CSV final est écrit dans
 ``datalogging/logs`` et conserve uniquement les colonnes STM32 utiles au
 prétraitement NanoEdge AI, sans timestamp PC. Les chemins par défaut peuvent
-être surchargés par ligne de commande, fichier de configuration ou variables
-d'environnement via ConfigArgParse.
+être surchargés par ligne de commande, fichier YAML ou variables d'environnement
+via ConfigArgParse.
 
 Le protocole série attendu côté firmware est volontairement textuel et basé sur
 une ligne par message::
@@ -160,10 +160,10 @@ PROJECT_ROOT = DASHBOARD_DIR.parent
 DEFAULT_LOG_DIR = DASHBOARD_DIR / "logs"
 DEFAULT_PROFILE_STORE_PATH = DASHBOARD_DIR / "motor_profiles.json"
 
-# Fichiers optionnels lus automatiquement par ConfigArgParse s'ils existent.
+# Fichiers YAML optionnels lus automatiquement par ConfigArgParse s'ils existent.
 DEFAULT_CONFIG_FILES = [
-    PROJECT_ROOT / "dashboard_config.ini",
-    DASHBOARD_DIR / "dashboard_config.ini",
+    PROJECT_ROOT / "dashboard_config.yaml",
+    DASHBOARD_DIR / "dashboard_config.yaml",
 ]
 
 
@@ -189,12 +189,13 @@ def parse_dashboard_args(argv=None):
     parser = configargparse.ArgParser(
         description="Dashboard PMSM STM32 avec chemins configurables.",
         default_config_files=[str(path) for path in DEFAULT_CONFIG_FILES],
+        config_file_parser_class=configargparse.YAMLConfigFileParser,
     )
     parser.add_argument(
         "-c",
         "--config",
         is_config_file=True,
-        help="Fichier de configuration optionnel au format key=value.",
+        help="Fichier de configuration optionnel au format YAML.",
     )
     parser.add_argument(
         "--log-dir",

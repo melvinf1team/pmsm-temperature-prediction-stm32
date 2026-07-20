@@ -5,8 +5,7 @@ conserve ``d6t_temp_c`` en première colonne comme cible non transformée, puis
 construit les variables explicatives et leurs EWMA. Les spans EWMA de référence
 ont été réglés pour 2 Hz et sont remis à l'échelle à partir de la fréquence
 d'acquisition réelle du fichier d'entrée. Les chemins peuvent être fournis par
-ligne de commande, fichier de configuration ou variables d'environnement via
-ConfigArgParse.
+ligne de commande, fichier YAML ou variables d'environnement via ConfigArgParse.
 """
 
 import os
@@ -25,10 +24,10 @@ INPUT_DIR = DATALOGGING_DIR / "logs"
 OUTPUT_DIR = SCRIPT_DIR / "logs_processed_ewma"
 INPUT_PATTERN = "daq_log_*.csv"
 
-# Fichiers optionnels lus automatiquement par ConfigArgParse s'ils existent.
+# Fichiers YAML optionnels lus automatiquement par ConfigArgParse s'ils existent.
 DEFAULT_CONFIG_FILES = [
-    PROJECT_ROOT / "preprocess_ewma.ini",
-    SCRIPT_DIR / "preprocess_ewma.ini",
+    PROJECT_ROOT / "preprocess_ewma.yaml",
+    SCRIPT_DIR / "preprocess_ewma.yaml",
 ]
 
 # Mettre a True pour ecrire les noms de colonnes dans les CSV de sortie.
@@ -79,12 +78,13 @@ def parse_args(argv=None):
     parser = configargparse.ArgParser(
         description="Pretraite les logs du dashboard PMSM avec des EWMA adaptees a la frequence d'acquisition.",
         default_config_files=[str(path) for path in DEFAULT_CONFIG_FILES],
+        config_file_parser_class=configargparse.YAMLConfigFileParser,
     )
     parser.add_argument(
         "-c",
         "--config",
         is_config_file=True,
-        help="Fichier de configuration optionnel au format key=value.",
+        help="Fichier de configuration optionnel au format YAML.",
     )
     parser.add_argument(
         "--input-dir",
