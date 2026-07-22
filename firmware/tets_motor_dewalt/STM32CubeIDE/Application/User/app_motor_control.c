@@ -44,7 +44,7 @@
 #define APP_OVERSPEED_MARGIN_RPM            150.0f
 
 #define APP_CFG_MIN_TARGET_SPEED_RPM        100.0f
-#define APP_CFG_MAX_TARGET_SPEED_RPM        1600.0f
+#define APP_CFG_MAX_TARGET_SPEED_RPM        2000.0f
 #define APP_CFG_MAX_IQ_LIMIT_A              12.0f
 #define APP_CFG_MAX_HARD_STOP_CURRENT_A     14.0f
 #define APP_CFG_MAX_ACCEL_ELEC_HZ_S         50.0f

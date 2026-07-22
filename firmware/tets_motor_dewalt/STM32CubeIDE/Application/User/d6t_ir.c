@@ -16,7 +16,7 @@
 #define D6TIR_OBJECT_COUNT          16U
 
 /* Pixel instantane logge dans d6t_temp_c : 5 = ligne 2, colonne 2 sur la matrice 4x4. */
-#define D6TIR_SELECTED_PIXEL_INDEX  5U
+#define D6TIR_SELECTED_PIXEL_INDEX  10U
 
 #define D6TIR_PERIOD_PRESENT_MS     250U
 #define D6TIR_PERIOD_MISSING_MS     2000U
