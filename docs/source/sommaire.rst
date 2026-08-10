@@ -29,9 +29,10 @@ Arborescence principale
 Flux fonctionnel
 ----------------
 
-1. Le firmware attend les commandes PC ``SYNC``, ``CFG``, ``START`` et ``STOP``.
-2. Le dashboard ouvre le port série, envoie la configuration moteur et reçoit le
-	flux ``#CSV_HEADER`` / ``DATA``.
+1. Le firmware attend ``SYNC``, ``CFG``/``START`` pour un essai moteur ou
+   ``ACQ_START`` pour une collecte moteur arrêté, puis ``STOP``.
+2. Le dashboard ouvre le port série, envoie la séquence choisie et reçoit le
+   flux ``#CSV_HEADER`` / ``DATA``.
 3. Les logs bruts sont sauvegardés en CSV dans ``datalogging/logs``.
 4. Le prétraitement lit ces logs, conserve ``d6t_temp_c`` comme première colonne
 	cible, calcule les features physiques et ajoute les EWMA.

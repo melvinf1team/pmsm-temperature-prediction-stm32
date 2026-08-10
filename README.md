@@ -27,7 +27,7 @@ pip install -r requirements.txt
 python .\datalogging\motor_datalog_gui_dashboard.py
 ```
 
-Le dashboard permet de sélectionner le port COM, configurer le profil moteur, envoyer `SYNC`, `CFG`, `START` et `STOP`, afficher les mesures en temps réel et écrire les CSV bruts dans `datalogging/logs`.
+Le dashboard propose deux modes : **moteur + collecte** (`SYNC`, `CFG`, `START`) et **collecte seule moteur arrêté** (`SYNC`, `ACQ_START`). Le second ne demande aucun paramètre moteur et permet d'enregistrer le refroidissement après un essai. `STOP` termine proprement les deux types de session.
 
 Colonnes brutes conservées :
 
@@ -78,8 +78,13 @@ Le protocole série applicatif utilise :
 SYNC
 CFG,<target_rpm>,<iq_limit_a>,<hard_limit_a>,<accel_elec_hz_s>,<datalog_ms>,<ds18b20_ms>
 START
+ACQ_START,<datalog_ms>,<ds18b20_ms>
 STOP
 ```
+
+La consigne applicative est bornée à 2500 rpm, 12 A sur `Iq` et 14 A sur le seuil
+de courant total. Le bouton B2 de la B-G473E-ZEST1S démarre ou arrête un profil
+autonome fixe à 2000 rpm, 10 A `Iq` et 12 A de courant total maximal.
 
 ## Documentation
 

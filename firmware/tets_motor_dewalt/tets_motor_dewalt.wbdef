@@ -52,8 +52,8 @@
         <define key="M1_BOARD_LIMIT_ACCEL_LOW" value="7.5" />
         <define key="M1_BOARD_LIMIT_REGEN_HIGH" value="19.44" />
         <define key="M1_BOARD_LIMIT_REGEN_LOW" value="17.28" />
-        <define key="M1_BOARD_MAX_CURRENT" value="5" />
-        <define key="M1_BOARD_SOFT_OVERCURRENT_TRIP" value="6" />
+        <define key="M1_BOARD_MAX_CURRENT" value="12" />
+        <define key="M1_BOARD_SOFT_OVERCURRENT_TRIP" value="14" />
         <define key="M1_BUS_PROTECTION" value="FALSE" />
         <define key="M1_BUS_VOLTAGE_READING" value="ENABLE" />
         <define key="M1_CONSTANT1_D" value="27069" />
@@ -118,7 +118,7 @@
         <define key="M1_INT_AMP_OPAMP4_PIN" value="[{'mode':'Standalone','name':'PB11','signal':'OPAMP4_VINP','label':'SHUNT_P_V'},{'mode':'Standalone','name':'PB10','signal':'OPAMP4_VINM','label':'SHUNT_M_V'},{'mode':'Standalone','name':'PB12','signal':'OPAMP4_VOUT','label':'CURR_AMP_V'}]" />
         <define key="M1_INT_AMP_OPAMP5_PIN" value="[{'mode':'Standalone','name':'PB14','signal':'OPAMP5_VINP','label':'SHUNT_P_W'},{'mode':'Standalone','name':'PB15','signal':'OPAMP5_VINM','label':'SHUNT_M_W'},{'mode':'Standalone','name':'PA8','signal':'OPAMP5_VOUT','label':'CURR_AMP_W'}]" />
         <define key="M1_INT_AMP_OPAMPS" value="['OPAMP3','OPAMP4','OPAMP5']" />
-        <define key="M1_IQMAX" value="5" />
+        <define key="M1_IQMAX" value="12" />
         <define key="M1_KSAMPLE_DELAY" value="0.2" />
         <define key="M1_LDLQ_RATIO" value="1.000" />
         <define key="M1_LOW_SIDE_IDLE_STATE" value="TURN_OFF" />
@@ -132,7 +132,7 @@
         <define key="M1_MOTOR_RATED_FLUX" value="0.013006791" />
         <define key="M1_MOTOR_VOLTAGE_CONSTANT" value="0.5" />
         <define key="M1_NOMINAL_BUS_VOLTAGE_V" value="18" />
-        <define key="M1_NOMINAL_CURRENT" value="5" />
+        <define key="M1_NOMINAL_CURRENT" value="12" />
         <define key="M1_OCP_BKIN_FILTER" value="4" />
         <define key="M1_OCP_BKIN_MODE" value="INT_MODE" />
         <define key="M1_OCP_BKIN_POLARITY" value="EMSTOP_ACTIVE_HIGH" />
@@ -379,10 +379,10 @@
         <define key="WB_UI_GOP" value="15" />
         <define key="WB_UI_INERTIA" value="5" />
         <define key="WB_UI_MAGNETIC_STRUCTURE" value="SM-PMSM" />
-        <define key="WB_UI_MAX_CURRENT" value="5" />
+        <define key="WB_UI_MAX_CURRENT" value="12" />
         <define key="WB_UI_MAX_NOMINAL_DC_VOLTAGE" value="18" />
         <define key="WB_UI_MAX_PWMFREQUENCY" value="80000" />
-        <define key="WB_UI_MOTOR_DESCRIPTION" value="Estimated low-current debug profile for DeWalt DCD996NT-TY2 18V XR brushless drill motor. Public sources provide tool/gearbox specs, not internal PMSM electrical parameters; verify Rs, Ls, Ke/BEMF and pole pairs experimentally before nominal operation." />
+        <define key="WB_UI_MOTOR_DESCRIPTION" value="Estimated DeWalt DCD996NT-TY2 18V XR brushless drill motor profile with a 12 A application current ceiling. Public sources provide tool/gearbox specs, not internal PMSM electrical parameters; verify Rs, Ls, Ke/BEMF and pole pairs experimentally before nominal operation." />
         <define key="WB_UI_OCP_THRESHOLD" value="110" />
         <define key="WB_UI_PW_BOARD_MAX_RATED_CURRENT" value="110" />
         <define key="WB_UI_PW_BOARD_MAX_VOLTAGE" value="48" />

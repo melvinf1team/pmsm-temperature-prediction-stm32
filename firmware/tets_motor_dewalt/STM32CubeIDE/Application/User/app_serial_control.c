@@ -25,9 +25,6 @@
 /* Sécurités firmware : aucune commande PC corrompue ne doit pouvoir envoyer
  * une consigne dangereuse au moteur. Ajuste ces valeurs seulement après validation. */
 #define APP_CFG_MIN_TARGET_RPM       100.0f
-#define APP_CFG_MAX_TARGET_RPM       2000.0f
-#define APP_CFG_MAX_IQ_LIMIT_A       12.0f
-#define APP_CFG_MAX_HARD_LIMIT_A     14.0f
 #define APP_CFG_MAX_ACCEL_HZ_S       2000.0f
 #define APP_CFG_MIN_DATALOG_MS       1U
 #define APP_CFG_MAX_DATALOG_MS       10000U
@@ -208,6 +205,12 @@ static char *AppSerial_FindCommand(char *line)
   }
 
   p = strstr(line, "CFG,");
+  if (p != NULL)
+  {
+    return p;
+  }
+
+  p = strstr(line, "ACQ_START,");
   if (p != NULL)
   {
     return p;
@@ -412,6 +415,34 @@ static bool AppSerial_ParseCfg(const char *line,
   return true;
 }
 
+static bool AppSerial_ParseAcqStart(const char *line,
+                                    uint32_t *datalog_ms,
+                                    uint32_t *ds18b20_ms)
+{
+  char *p = (char *)line;
+
+  /* Format attendu : ACQ_START,<datalog_ms>,<ds18b20_ms> */
+  if (strncmp(p, "ACQ_START", 9U) != 0)
+  {
+    return false;
+  }
+
+  p += 9U;
+
+  if (!AppSerial_ExpectComma(&p)) return false;
+  if (!AppSerial_ParseU32(&p, datalog_ms)) return false;
+
+  if (!AppSerial_ExpectComma(&p)) return false;
+  if (!AppSerial_ParseU32(&p, ds18b20_ms)) return false;
+
+  while ((*p == ' ') || (*p == '\t'))
+  {
+    p++;
+  }
+
+  return ((*p == '\0') || (*p == '\r') || (*p == '\n'));
+}
+
 /*
  * ================================
  * COMMAND HANDLERS
@@ -445,9 +476,11 @@ static void AppSerial_HandleCfg(const char *line)
       (!isfinite(hard_limit_a)) ||
       (!isfinite(accel_elec_hz_s)) ||
       (target_rpm < APP_CFG_MIN_TARGET_RPM) ||
-      (target_rpm > APP_CFG_MAX_TARGET_RPM) ||
+      (target_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM) ||
       (iq_limit_a <= 0.0f) ||
+      (iq_limit_a > APP_MOTOR_MAX_IQ_LIMIT_A) ||
       (hard_limit_a <= 0.0f) ||
+      (hard_limit_a > APP_MOTOR_MAX_TOTAL_CURRENT_A) ||
       (accel_elec_hz_s <= 0.0f) ||
       (accel_elec_hz_s > APP_CFG_MAX_ACCEL_HZ_S) ||
       (datalog_ms < APP_CFG_MIN_DATALOG_MS) ||
@@ -458,13 +491,6 @@ static void AppSerial_HandleCfg(const char *line)
     AppSerial_SendErr("CFG_VALUE_OUT_OF_RANGE");
     return;
   }
-
-  /*
-   * Iq et hard_limit ne sont volontairement plus comparés ici.
-   * Le PC peut envoyer la paire de valeurs souhaitée sans rejet firmware.
-   * Si hard_limit est inférieur au courant réel, le hard-stop applicatif peut
-   * quand même arrêter le moteur pendant RUN.
-   */
 
   if (ds18b20_ms < APP_CFG_MIN_DS18B20_MS)
   {
@@ -495,6 +521,54 @@ static void AppSerial_HandleCfg(const char *line)
              (unsigned long)datalog_ms,
              (unsigned long)ds18b20_ms);
     AppDatalog_SendText(line);
+  }
+}
+
+static void AppSerial_HandleAcqStart(const char *line)
+{
+  uint32_t datalog_ms;
+  uint32_t ds18b20_ms;
+
+  if (!AppSerial_ParseAcqStart(line, &datalog_ms, &ds18b20_ms))
+  {
+    AppSerial_SendErr("BAD_ACQ_START");
+    return;
+  }
+
+  if ((datalog_ms < APP_CFG_MIN_DATALOG_MS) ||
+      (datalog_ms > APP_CFG_MAX_DATALOG_MS) ||
+      (ds18b20_ms > APP_CFG_MAX_DS18B20_MS))
+  {
+    AppSerial_SendErr("ACQ_VALUE_OUT_OF_RANGE");
+    return;
+  }
+
+  if (ds18b20_ms < APP_CFG_MIN_DS18B20_MS)
+  {
+    ds18b20_ms = APP_CFG_MIN_DS18B20_MS;
+  }
+
+  /* Ce mode force d'abord le moteur à l'arrêt, puis arme uniquement le logger.
+   * Aucun CFG moteur préalable n'est nécessaire. */
+  AppMotorControl_Stop();
+  AppDatalog_StopLogging();
+  cfg_received = false;
+
+  HAL_Delay(20);
+
+  AppDatalog_SetRuntimePeriods(datalog_ms, ds18b20_ms);
+  AppDatalog_StartLogging();
+
+  AppSerial_SendAck("ACQ_START");
+
+  {
+    char status_line[112];
+    snprintf(status_line,
+             sizeof(status_line),
+             "#ACQ_IDLE,datalog_ms=%lu,ds18b20_ms=%lu,motor=off\r\n",
+             (unsigned long)datalog_ms,
+             (unsigned long)ds18b20_ms);
+    AppDatalog_SendText(status_line);
   }
 }
 
@@ -564,6 +638,10 @@ static void AppSerial_HandleLine(char *line)
   else if (strncmp(cmd, "CFG,", 4U) == 0)
   {
     AppSerial_HandleCfg(cmd);
+  }
+  else if (strncmp(cmd, "ACQ_START,", 10U) == 0)
+  {
+    AppSerial_HandleAcqStart(cmd);
   }
   else if (strcmp(cmd, "START") == 0)
   {

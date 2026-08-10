@@ -19,7 +19,8 @@ Le projet sépare clairement les responsabilités :
       └─ UART texte -> #CSV_HEADER / DATA
 
    Python datalogging
-      ├─ SYNC / CFG / START / STOP
+      ├─ moteur : SYNC / CFG / START / STOP
+      ├─ arrêt : SYNC / ACQ_START / STOP
       ├─ affichage live Tkinter
       └─ CSV brut dans datalogging/logs
 

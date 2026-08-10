@@ -3,6 +3,11 @@
 
 #include <stdbool.h>
 
+/* Bornes applicatives communes au contrôle moteur et au protocole série. */
+#define APP_MOTOR_MAX_TARGET_SPEED_RPM       2500.0f
+#define APP_MOTOR_MAX_IQ_LIMIT_A             12.0f
+#define APP_MOTOR_MAX_TOTAL_CURRENT_A        14.0f
+
 void AppMotorControl_Init(void);
 void AppMotorControl_Task(void);
 

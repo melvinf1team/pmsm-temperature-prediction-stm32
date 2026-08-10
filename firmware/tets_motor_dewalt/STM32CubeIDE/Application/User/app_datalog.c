@@ -1,4 +1,5 @@
 #include "app_datalog.h"
+#include "app_motor_control.h"
 #include "main.h"
 #include "ds18b20.h"
 #include "d6t_ir.h"
@@ -323,6 +324,10 @@ static void AppDatalog_SendDataLine(uint32_t now)
 {
   char line[APP_DATALOG_LINE_SIZE];
   size_t used = 0U;
+  float ud_v = 0.0f;
+  float uq_v = 0.0f;
+  float speed_mech_rpm = 0.0f;
+  dq_float_t idq = { .D = 0.0f, .Q = 0.0f };
 
   /*
    * Ddq_out_pu contient la sortie réelle du régulateur courant sous forme
@@ -336,15 +341,21 @@ static void AppDatalog_SendDataLine(uint32_t now)
    *   +1.0 = 100 % high, -1.0 = 100 % low, 0.0 = point milieu.
    * La tension phase-neutre équivalente vaut donc environ duty * Vbus / 2.
    */
-  Duty_Ddq_t ddq_pu = CurrCtrl_M1.Ddq_out_pu;
-  float vbus_v = FIXP30_toF(VBus_M1.Udcbus_in_pu) * VOLTAGE_SCALE;
-  float ud_v = FIXP30_toF(ddq_pu.D) * vbus_v * 0.5f;
-  float uq_v = FIXP30_toF(ddq_pu.Q) * vbus_v * 0.5f;
+  /* En STOP/IDLE, les structures MCSDK conservent parfois le dernier échantillon
+   * calculé. Ces valeurs seraient fausses dans un dataset de refroidissement.
+   * On publie donc explicitement 0 pour les grandeurs électriques tant que le
+   * moteur n'est pas réellement en RUN. */
+  if (AppMotorControl_IsRunning())
+  {
+    Duty_Ddq_t ddq_pu = CurrCtrl_M1.Ddq_out_pu;
+    float vbus_v = FIXP30_toF(VBus_M1.Udcbus_in_pu) * VOLTAGE_SCALE;
+    float speed_elec_hz = MC_GetSpeedMotor1_F();
 
-  float speed_elec_hz = MC_GetSpeedMotor1_F();
-  float speed_mech_rpm = (speed_elec_hz * 60.0f) / (float)POLE_PAIR_NUM;
-
-  dq_float_t idq = MC_GetCurrentMotor1_F();
+    ud_v = FIXP30_toF(ddq_pu.D) * vbus_v * 0.5f;
+    uq_v = FIXP30_toF(ddq_pu.Q) * vbus_v * 0.5f;
+    speed_mech_rpm = (speed_elec_hz * 60.0f) / (float)POLE_PAIR_NUM;
+    idq = MC_GetCurrentMotor1_F();
+  }
 
   AppDatalog_LineAppend(line,
                         sizeof(line),

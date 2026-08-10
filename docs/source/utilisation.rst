@@ -7,9 +7,10 @@ Séquence recommandée
 1. Flasher le firmware STM32 depuis STM32CubeIDE.
 2. Brancher les capteurs et vérifier le port COM de la carte.
 3. Lancer ``datalogging/motor_datalog_gui_dashboard.py``.
-4. Sélectionner le port COM, le baudrate et le profil moteur.
-5. Choisir la période ``DATA`` et la période DS18B20.
-6. Cliquer sur le lancement pour envoyer ``SYNC``, ``CFG`` puis ``START``.
+4. Sélectionner le port COM, le baudrate et le mode de session.
+5. En mode moteur, choisir le profil ; en mode collecte seule, aucun paramètre
+   moteur n'est requis.
+6. Choisir la période ``DATA`` et la période DS18B20, puis lancer la session.
 7. Arrêter la session avec ``STOP``.
 8. Exécuter ``pretraitement/preprocess_logs_ewma.py`` pour générer les fichiers
    exploitables par NanoEdge AI Studio.
@@ -54,6 +55,7 @@ Commandes envoyées par le dashboard :
    SYNC
    CFG,<target_rpm>,<iq_limit_a>,<hard_limit_a>,<accel_elec_hz_s>,<datalog_ms>,<ds18b20_ms>
    START
+   ACQ_START,<datalog_ms>,<ds18b20_ms>
    STOP
 
 Réponses et messages attendus :
@@ -63,6 +65,7 @@ Réponses et messages attendus :
    ACK,SYNC
    ACK,CFG
    ACK,START
+   ACK,ACQ_START
    ACK,STOP
    ERR,<raison>
    #CSV_HEADER,<colonnes>
@@ -70,6 +73,11 @@ Réponses et messages attendus :
 
 Le dashboard ignore les lignes ``DATA`` reçues avant ``#CSV_HEADER`` afin de ne
 pas écrire un CSV incohérent.
+
+``ACQ_START`` est utilisé seul après ``SYNC`` pour enregistrer un refroidissement
+moteur arrêté. Dans cet état, le firmware publie explicitement zéro pour les
+tensions, courants et vitesse afin de ne pas réutiliser le dernier échantillon
+MCSDK mémorisé avant l'arrêt.
 
 Import NanoEdge AI Studio
 -------------------------

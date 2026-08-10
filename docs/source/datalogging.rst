@@ -10,7 +10,7 @@ Il combine :
 * une interface Tkinter sombre avec cartes de valeurs instantanées ;
 * la gestion des profils moteur dans ``motor_profiles.json`` ;
 * la détection et l'ouverture du port série ;
-* l'envoi des commandes ``SYNC``, ``CFG``, ``START`` et ``STOP`` ;
+* l'envoi des commandes ``SYNC``, ``CFG``, ``START``, ``ACQ_START`` et ``STOP`` ;
 * la réception du flux UART ;
 * l'écriture CSV dans ``datalogging/logs`` ;
 * un graphe temps réel si ``matplotlib`` est disponible.
@@ -26,10 +26,11 @@ chargés au démarrage du dashboard.
 Validation utilisateur
 ----------------------
 
-Avant le lancement, ``validate_form`` contrôle les champs : port COM, baudrate,
-vitesse, paires de pôles, limites courant, accélération, périodes et chemin CSV.
-Le dashboard signale notamment qu'un DS18B20 ne peut pas fournir une nouvelle
-mesure fiable sous 750 ms.
+Avant le lancement, ``validate_form`` contrôle le port COM, le baudrate, les
+périodes et le chemin CSV. En mode moteur, il contrôle également la vitesse, les
+paires de pôles, les limites courant et l'accélération. Les champs moteur sont
+désactivés et ignorés en mode collecte seule. Le dashboard signale notamment
+qu'un DS18B20 ne peut pas fournir une nouvelle mesure fiable sous 750 ms.
 
 Séquence de lancement
 ---------------------
@@ -45,6 +46,16 @@ série et démarre le thread lecteur. ``launch_sequence_thread`` envoie ensuite 
 
 Chaque commande attend un ``ACK`` ou un ``ERR``. En cas d'échec, le dashboard
 remonte l'erreur et ferme proprement les ressources.
+
+En mode ``Collecte seule (moteur arrêté)``, la séquence devient :
+
+.. code-block:: text
+
+   SYNC
+   ACQ_START,<datalog_ms>,<ds18b20_ms>
+
+Cette commande ne dépend d'aucun ``CFG`` moteur et force le moteur à l'arrêt
+avant d'armer le logger.
 
 Réception UART et CSV
 ---------------------

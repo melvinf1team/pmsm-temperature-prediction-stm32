@@ -5,10 +5,12 @@
 #include "mc_api.h"
 #include "mc_interface.h"
 #include "mc_type.h"
+#include "mc_tasks.h"
 #include "pmsm_motor_parameters.h"
 #include "drive_parameters.h"
 #include "pidreg_speed.h"
 #include "fixpmath.h"
+#include "app_datalog.h"
 
 #include <stdbool.h>
 
@@ -20,8 +22,8 @@
 
 /*
  * IMPORTANT :
- * Avec le GUI Python, l'autostart doit être désactivé.
- * Le moteur démarre seulement quand le PC envoie START.
+ * Avec le GUI Python, l'autostart au boot doit être désactivé.
+ * Le moteur démarre uniquement après START côté PC ou après un appui sur B2.
  */
 #define APP_MOTOR_AUTOSTART_ENABLE          0
 
@@ -44,10 +46,14 @@
 #define APP_OVERSPEED_MARGIN_RPM            150.0f
 
 #define APP_CFG_MIN_TARGET_SPEED_RPM        100.0f
-#define APP_CFG_MAX_TARGET_SPEED_RPM        2000.0f
-#define APP_CFG_MAX_IQ_LIMIT_A              12.0f
-#define APP_CFG_MAX_HARD_STOP_CURRENT_A     14.0f
 #define APP_CFG_MAX_ACCEL_ELEC_HZ_S         50.0f
+
+/* Profil autonome appliqué par le bouton bleu B2 (PC13). */
+#define APP_BUTTON_TARGET_SPEED_RPM         2000.0f
+#define APP_BUTTON_IQ_LIMIT_A               10.0f
+#define APP_BUTTON_HARD_STOP_CURRENT_A      12.0f
+#define APP_BUTTON_ACCEL_ELEC_HZ_S          50.0f
+#define APP_BUTTON_DEBOUNCE_MS              250U
 
 /*
  * Le PI vitesse généré par Workbench est trop agressif lorsque l'on autorise
@@ -84,6 +90,12 @@ static uint32_t app_mc_run_enter_ms = 0U;
 static uint32_t app_mc_overcurrent_since_ms = 0U;
 static uint32_t app_mc_overspeed_since_ms = 0U;
 
+/* L'IRQ B2 ne pilote jamais directement le MCSDK : elle dépose une requête
+ * traitée ensuite dans la boucle principale. */
+static volatile bool app_button_toggle_pending = false;
+static volatile bool app_button_irq_seen = false;
+static volatile uint32_t app_button_last_irq_ms = 0U;
+
 static float app_target_speed_rpm = APP_DEFAULT_TARGET_SPEED_RPM;
 static float app_iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
 static float app_active_iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
@@ -111,9 +123,9 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
     limit_a = APP_DEFAULT_IQ_LIMIT_A;
   }
 
-  if (limit_a > APP_CFG_MAX_IQ_LIMIT_A)
+  if (limit_a > APP_MOTOR_MAX_IQ_LIMIT_A)
   {
-    limit_a = APP_CFG_MAX_IQ_LIMIT_A;
+    limit_a = APP_MOTOR_MAX_IQ_LIMIT_A;
   }
 
   /* Met à jour la limite MCSDK principale. */
@@ -122,7 +134,7 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
   /*
    * Important : dans le MCSDK HSO, MCI_SetMaxCurrent() met à jour I_max_pu
    * mais ne remet pas forcément à jour les limites internes du PI vitesse.
-   * Si ces limites restent à NOMINAL_CURRENT_A=12/20 A, le PI peut intégrer
+   * Si ces limites restent à NOMINAL_CURRENT_A=12 A, le PI peut intégrer
    * trop fort et demander 6-8 A d'un coup. On force donc la limite du PI à la
    * même valeur que l'Iq limite runtime.
    */
@@ -166,9 +178,9 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   {
     target_rpm = APP_CFG_MIN_TARGET_SPEED_RPM;
   }
-  else if (target_rpm > APP_CFG_MAX_TARGET_SPEED_RPM)
+  else if (target_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM)
   {
-    target_rpm = APP_CFG_MAX_TARGET_SPEED_RPM;
+    target_rpm = APP_MOTOR_MAX_TARGET_SPEED_RPM;
   }
   app_target_speed_rpm = target_rpm;
 
@@ -176,9 +188,9 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   {
     iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
   }
-  else if (iq_limit_a > APP_CFG_MAX_IQ_LIMIT_A)
+  else if (iq_limit_a > APP_MOTOR_MAX_IQ_LIMIT_A)
   {
-    iq_limit_a = APP_CFG_MAX_IQ_LIMIT_A;
+    iq_limit_a = APP_MOTOR_MAX_IQ_LIMIT_A;
   }
   app_iq_limit_a = iq_limit_a;
 
@@ -186,9 +198,9 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   {
     hard_limit_a = APP_DEFAULT_HARD_STOP_CURRENT_A;
   }
-  else if (hard_limit_a > APP_CFG_MAX_HARD_STOP_CURRENT_A)
+  else if (hard_limit_a > APP_MOTOR_MAX_TOTAL_CURRENT_A)
   {
-    hard_limit_a = APP_CFG_MAX_HARD_STOP_CURRENT_A;
+    hard_limit_a = APP_MOTOR_MAX_TOTAL_CURRENT_A;
   }
   app_hard_stop_current_a = hard_limit_a;
 
@@ -292,6 +304,67 @@ bool AppMotorControl_IsRunning(void)
   return (app_mc_state == APP_MC_RUNNING) || (MC_GetSTMStateMotor1() == RUN);
 }
 
+/* Remplace l'implémentation faible générée dans mc_tasks.c. Cette fonction est
+ * appelée depuis EXTI15_10_IRQHandler() et doit donc rester non bloquante. */
+void UI_HandleStartStopButton_cb(void)
+{
+  uint32_t now = HAL_GetTick();
+
+  if ((!app_button_irq_seen) ||
+      ((now - app_button_last_irq_ms) >= APP_BUTTON_DEBOUNCE_MS))
+  {
+    app_button_toggle_pending = true;
+    app_button_last_irq_ms = now;
+    app_button_irq_seen = true;
+  }
+}
+
+static bool AppMotorControl_TakeButtonToggleRequest(void)
+{
+  bool pending;
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  pending = app_button_toggle_pending;
+  app_button_toggle_pending = false;
+
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+
+  return pending;
+}
+
+static void AppMotorControl_HandleButtonToggle(void)
+{
+  if (!AppMotorControl_TakeButtonToggleRequest())
+  {
+    return;
+  }
+
+  if ((app_mc_state == APP_MC_STARTING) || AppMotorControl_IsRunning())
+  {
+    AppMotorControl_Stop();
+    AppDatalog_SendText("#B2,STOP,motor_off\r\n");
+    return;
+  }
+
+  AppMotorControl_SetRuntimeConfig(APP_BUTTON_TARGET_SPEED_RPM,
+                                   APP_BUTTON_IQ_LIMIT_A,
+                                   APP_BUTTON_HARD_STOP_CURRENT_A,
+                                   APP_BUTTON_ACCEL_ELEC_HZ_S);
+
+  if (AppMotorControl_Start())
+  {
+    AppDatalog_SendText("#B2,START,target_rpm=2000,iq_limit_a=10,hard_limit_a=12\r\n");
+  }
+  else
+  {
+    AppDatalog_SendText("#B2,START_FAILED\r\n");
+  }
+}
+
 static void AppMotorControl_UpdateIqLimitRamp(uint32_t now)
 {
   if (app_active_iq_limit_a >= app_iq_limit_a)
@@ -326,6 +399,9 @@ static void AppMotorControl_UpdateIqLimitRamp(uint32_t now)
 void AppMotorControl_Task(void)
 {
   uint32_t now = HAL_GetTick();
+
+  AppMotorControl_HandleButtonToggle();
+
   uint32_t current_faults = MC_GetCurrentFaultsMotor1();
   MCI_State_t mc_state = MC_GetSTMStateMotor1();
 

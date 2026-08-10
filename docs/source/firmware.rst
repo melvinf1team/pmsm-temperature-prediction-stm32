@@ -61,6 +61,8 @@ connue même si des octets parasites précèdent la commande.
 ``CFG`` est validé par bornes : vitesse cible, limite ``Iq``, hard stop,
 accélération, période DATA et période DS18B20. Une configuration valide appelle
 ``AppMotorControl_SetRuntimeConfig`` et ``AppDatalog_SetRuntimePeriods``.
+``ACQ_START`` valide uniquement les deux périodes, force le moteur à l'arrêt et
+arme le logger sans exiger de configuration moteur.
 
 Contrôle moteur
 ---------------
@@ -69,6 +71,11 @@ Contrôle moteur
 et démarre le moteur via MCSDK avec polarisation. La limite ``Iq`` est rampée en
 RUN pour éviter une demande de couple brutale. ``AppMotorControl_Task`` surveille
 les faults MCSDK, le dépassement de courant et la survitesse.
+
+Le bouton B2 sur ``PC13`` dépose une requête dans l'interruption, puis la boucle
+principale applique le profil autonome 2000 rpm / 10 A ``Iq`` / 12 A total. Un
+second appui arrête le moteur. Le traitement différé et un anti-rebond de 250 ms
+évitent d'appeler le MCSDK directement depuis l'interruption.
 
 Datalogging embarqué
 --------------------
@@ -82,7 +89,9 @@ header envoyé est :
 
 Chaque ligne ``DATA`` contient le tick STM32, les températures, les tensions d/q
 reconstruites, la vitesse mécanique et les courants d/q. Les tensions d/q sont
-calculées depuis ``CurrCtrl_M1.Ddq_out_pu`` et la tension bus DC.
+calculées depuis ``CurrCtrl_M1.Ddq_out_pu`` et la tension bus DC. Hors état RUN,
+les grandeurs moteur sont forcées à zéro pour éviter d'enregistrer les dernières
+valeurs mémorisées par le MCSDK.
 
 Capteur D6T
 -----------
@@ -106,4 +115,7 @@ Sécurités
 
 Les sécurités sont réparties entre PC et firmware. Le dashboard valide les
 entrées utilisateur pour guider l'opérateur. Le firmware garde les bornes finales
-et coupe le moteur en cas de fault MCSDK, courant trop élevé ou survitesse.
+de 2500 rpm, 12 A ``Iq`` et 14 A total, puis coupe le moteur en cas de fault
+MCSDK, courant trop élevé ou survitesse. Les sources Workbench et les fichiers C
+générés utilisent tous une limite applicative de 12 A afin qu'une régénération ne
+réintroduise pas l'ancien plafond de 5 A.

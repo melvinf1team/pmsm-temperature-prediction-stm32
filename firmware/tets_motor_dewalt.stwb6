@@ -2461,7 +2461,7 @@
           "FOC",
           "sixStep"
         ],
-        "nominalCurrent": 5,
+        "nominalCurrent": 12,
         "nominalDCVoltage": 18,
         "rs": 0.01,
         "ls": 0.017,

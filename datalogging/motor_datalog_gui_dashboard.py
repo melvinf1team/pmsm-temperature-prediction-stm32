@@ -15,6 +15,7 @@ une ligne par message::
     SYNC
     CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>,<datalog_ms>,<ds18b20_ms>
     START
+    ACQ_START,<datalog_ms>,<ds18b20_ms>
     STOP
     ACK,<commande>
     ERR,<raison>
@@ -65,6 +66,15 @@ LOG_TRIM_LINES = 300
 CSV_FLUSH_EVERY_ROWS = 10
 CSV_FLUSH_INTERVAL_S = 1.0
 IQ_WARNING_RATIO = 0.90
+MAX_TARGET_SPEED_RPM = 2500.0
+MAX_IQ_LIMIT_A = 12.0
+MAX_HARD_LIMIT_A = 14.0
+MAX_DATALOG_MS = 10000
+MAX_DS18B20_MS = 10000
+
+ACQUISITION_MODE_MOTOR = "Moteur + collecte"
+ACQUISITION_MODE_IDLE = "Collecte seule (moteur arrêté)"
+ACQUISITION_MODES = (ACQUISITION_MODE_MOTOR, ACQUISITION_MODE_IDLE)
 
 # Colonnes effectivement écrites dans le CSV final.
 # La carte peut recevoir davantage de colonnes pour l'affichage live, mais seules
@@ -365,6 +375,7 @@ class MotorDatalogGui(tk.Tk):
         self.port_display_to_device = {}
         self.baud_var = tk.StringVar(value=str(BAUD_DEFAULT))
         self.profile_var = tk.StringVar(value=initial_profile)
+        self.acquisition_mode_var = tk.StringVar(value=ACQUISITION_MODE_MOTOR)
         self.speed_rpm_var = tk.StringVar()
         self.speed_hz_var = tk.StringVar()
         self.pole_pairs_var = tk.StringVar(value=str(POLE_PAIRS_DEFAULT))
@@ -377,6 +388,7 @@ class MotorDatalogGui(tk.Tk):
         self.status_var = tk.StringVar(value="Prêt")
         self.status_detail_var = tk.StringVar(value="Sélectionne un port COM et une configuration.")
         self.warning_var = tk.StringVar(value="")
+        self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
 
         self.live_fields = list(DEFAULT_LIVE_FIELDS)
         self.live_vars = {key: tk.StringVar(value=self.default_live_value(key)) for key in self.live_fields}
@@ -406,6 +418,7 @@ class MotorDatalogGui(tk.Tk):
 
         self.entry_widgets = {}
         self.combo_widgets = {}
+        self.motor_profile_widgets = []
 
         self.setup_style()
         self.build_ui()
@@ -414,6 +427,7 @@ class MotorDatalogGui(tk.Tk):
         self.refresh_ports()
         self.apply_profile(self.profiles[initial_profile])
         self._user_edit_ready = True
+        self.update_acquisition_mode_ui()
         self.validate_form()
         self.after(50, self.process_gui_queue)
         self.after(PLOT_REFRESH_MS, self.redraw_plot_periodic)
@@ -808,6 +822,16 @@ class MotorDatalogGui(tk.Tk):
         self.save_profile_button.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         self.save_profile_button.grid_remove()
 
+        self.motor_profile_widgets = [
+            self.profile_combo,
+            self.speed_rpm_entry,
+            self.speed_hz_entry,
+            self.pole_entry,
+            self.accel_entry,
+            self.iq_entry,
+            self.hard_entry,
+        ]
+
         csv_card, csv_box = self.card(parent, "Sortie CSV", padx=14, pady=12, accent=COLORS["amber"])
         csv_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         csv_box.grid_columnconfigure(0, weight=1)
@@ -824,17 +848,27 @@ class MotorDatalogGui(tk.Tk):
         for i in range(2):
             acq.grid_columnconfigure(i, weight=1)
 
+        self.form_label(acq, "Mode de session", 0, 0)
+        self.acquisition_mode_combo = ttk.Combobox(
+            acq,
+            textvariable=self.acquisition_mode_var,
+            values=ACQUISITION_MODES,
+            state="readonly",
+        )
+        self.combo_widgets["acquisition_mode"] = self.acquisition_mode_combo
+        self.acquisition_mode_combo.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+
         self.datalog_entry = ttk.Entry(acq, textvariable=self.datalog_ms_var)
         self.entry_widgets["datalog_ms"] = self.datalog_entry
-        self.form_row(acq, "Periode DATA (ms)", self.datalog_entry, 0, 0)
+        self.form_row(acq, "Periode DATA (ms)", self.datalog_entry, 2, 0)
 
         self.ds18b20_entry = ttk.Entry(acq, textvariable=self.ds18b20_ms_var)
         self.entry_widgets["ds18b20_ms"] = self.ds18b20_entry
-        self.form_row(acq, "Periode DS18B20 (ms)", self.ds18b20_entry, 0, 1)
+        self.form_row(acq, "Periode DS18B20 (ms)", self.ds18b20_entry, 2, 1)
 
         self.warning_label = ttk.Label(acq, textvariable=self.warning_var, style="Warn.TLabel", wraplength=340)
         self.warning_label.configure(wraplength=380)
-        self.warning_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.warning_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
 
     def build_live_cards(self, parent):
@@ -1007,6 +1041,7 @@ class MotorDatalogGui(tk.Tk):
         self.speed_rpm_var.trace_add("write", self.on_speed_rpm_changed)
         self.speed_hz_var.trace_add("write", self.on_speed_hz_changed)
         self.pole_pairs_var.trace_add("write", self.on_pole_pairs_changed)
+        self.acquisition_mode_var.trace_add("write", self.on_acquisition_mode_changed)
 
         for var in [
             self.iq_limit_var,
@@ -1201,10 +1236,43 @@ class MotorDatalogGui(tk.Tk):
         """
         if not hasattr(self, "save_profile_button"):
             return
-        if self.profile_var.get() == "Personnalisé":
+        if (self.profile_var.get() == "Personnalisé" and
+                not self.is_idle_acquisition_mode()):
             self.save_profile_button.grid()
         else:
             self.save_profile_button.grid_remove()
+
+    def is_idle_acquisition_mode(self):
+        """Indique si la session demandée doit uniquement collecter à l'arrêt."""
+        return self.acquisition_mode_var.get() == ACQUISITION_MODE_IDLE
+
+    def update_acquisition_mode_ui(self):
+        """Adapte les champs et actions au mode moteur ou collecte seule."""
+        if not hasattr(self, "acquisition_mode_combo"):
+            return
+
+        controls_locked = self.is_running or self.is_launching or self.is_stopping
+        idle_mode = self.is_idle_acquisition_mode()
+
+        self.acquisition_mode_combo.configure(state="disabled" if controls_locked else "readonly")
+
+        for widget in self.motor_profile_widgets:
+            if widget is self.profile_combo:
+                widget.configure(state="disabled" if (idle_mode or controls_locked) else "readonly")
+            else:
+                widget.configure(state="disabled" if (idle_mode or controls_locked) else "normal")
+
+        if idle_mode:
+            self.save_profile_button.grid_remove()
+            self.start_button.configure(text="LANCER COLLECTE")
+        else:
+            self.update_save_profile_button()
+            self.start_button.configure(text="LANCER")
+
+    def on_acquisition_mode_changed(self, *_args):
+        """Réagit au choix entre pilotage moteur et collecte à l'arrêt."""
+        self.update_acquisition_mode_ui()
+        self.validate_form()
 
     def switch_to_custom_due_to_edit(self):
         """Bascule automatiquement sur le profil ``Personnalisé`` après édition.
@@ -1224,7 +1292,8 @@ class MotorDatalogGui(tk.Tk):
         Args:
             *_args: Arguments fournis par ``trace_add`` et non utilisés.
         """
-        self.switch_to_custom_due_to_edit()
+        if not self.is_idle_acquisition_mode():
+            self.switch_to_custom_due_to_edit()
         self.validate_form()
 
     def on_speed_rpm_changed(self, *_args):
@@ -1373,7 +1442,9 @@ class MotorDatalogGui(tk.Tk):
             color = COLORS["accent_2"]
         elif state.lower().startswith("lancement"):
             color = COLORS["warning"]
-        elif state.lower().startswith("datalogging") or state.lower().startswith("moteur"):
+        elif (state.lower().startswith("datalogging") or
+              state.lower().startswith("moteur") or
+              state.lower().startswith("collecte")):
             color = COLORS["accent_2"]
         elif state.lower().startswith("arrêt"):
             color = COLORS["muted"]
@@ -1529,48 +1600,74 @@ class MotorDatalogGui(tk.Tk):
 
         Returns:
             dict[str, object]: Configuration prête à être utilisée pour l'ouverture du
-            port série et l'envoi de la commande ``CFG``.
+            port série et l'envoi de ``CFG`` ou ``ACQ_START`` selon le mode.
 
         Raises:
             ValueError: Si une valeur obligatoire est absente ou incohérente.
         """
+        acquisition_mode = self.acquisition_mode_var.get()
+        if acquisition_mode not in ACQUISITION_MODES:
+            raise ValueError("Mode d'acquisition invalide.")
+
         port = self.get_selected_port_device()
         baud = int(self.baud_var.get().strip())
-        target_rpm = float(self.speed_rpm_var.get().replace(",", "."))
-        speed_hz = float(self.speed_hz_var.get().replace(",", "."))
-        pole_pairs = int(self.pole_pairs_var.get().strip())
-        iq_limit = float(self.iq_limit_var.get().replace(",", "."))
-        hard_limit = float(self.hard_limit_var.get().replace(",", "."))
-        accel = float(self.accel_var.get().replace(",", "."))
         datalog_ms = int(self.datalog_ms_var.get().strip())
         ds18b20_ms = int(self.ds18b20_ms_var.get().strip())
         csv_path = self.csv_path_from_text(self.csv_path_var.get())
 
-        if target_rpm <= 0:
-            raise ValueError("La vitesse doit être > 0.")
-        if iq_limit <= 0:
-            raise ValueError("Iq limite doit être > 0.")
-        if hard_limit <= 0:
-            raise ValueError("Hard stop doit être > 0.")
-        if accel <= 0:
-            raise ValueError("L'accélération doit être > 0.")
-        if datalog_ms < 1:
-            raise ValueError("La période DATA doit être >= 1 ms.")
-        if ds18b20_ms < 1:
-            raise ValueError("La période DS18B20 doit être >= 1 ms.")
         if not port:
             raise ValueError("Aucun port COM sélectionné.")
-        return {
+        if baud <= 0:
+            raise ValueError("Le baudrate doit être > 0.")
+        if not 1 <= datalog_ms <= MAX_DATALOG_MS:
+            raise ValueError(f"La période DATA doit être comprise entre 1 et {MAX_DATALOG_MS} ms.")
+        if not DS18B20_MIN_MS <= ds18b20_ms <= MAX_DS18B20_MS:
+            raise ValueError(
+                f"La période DS18B20 doit être comprise entre {DS18B20_MIN_MS} et {MAX_DS18B20_MS} ms."
+            )
+
+        config = {
+            "acquisition_mode": acquisition_mode,
             "port": port,
             "baud": baud,
-            "target_rpm": target_rpm,
-            "iq_limit": iq_limit,
-            "hard_limit": hard_limit,
-            "accel": accel,
             "datalog_ms": datalog_ms,
             "ds18b20_ms": ds18b20_ms,
             "csv_path": csv_path,
         }
+
+        if acquisition_mode == ACQUISITION_MODE_MOTOR:
+            target_rpm = float(self.speed_rpm_var.get().replace(",", "."))
+            speed_hz = float(self.speed_hz_var.get().replace(",", "."))
+            pole_pairs = int(self.pole_pairs_var.get().strip())
+            iq_limit = float(self.iq_limit_var.get().replace(",", "."))
+            hard_limit = float(self.hard_limit_var.get().replace(",", "."))
+            accel = float(self.accel_var.get().replace(",", "."))
+
+            if not all(math.isfinite(value) for value in (
+                    target_rpm, speed_hz, iq_limit, hard_limit, accel)):
+                raise ValueError("Les paramètres moteur doivent être des nombres finis.")
+            if not 0 < target_rpm <= MAX_TARGET_SPEED_RPM:
+                raise ValueError(f"La vitesse doit être comprise entre 0 et {MAX_TARGET_SPEED_RPM:g} rpm.")
+            if pole_pairs <= 0:
+                raise ValueError("Le nombre de paires de pôles doit être > 0.")
+            expected_hz = (target_rpm * pole_pairs) / 60.0
+            if abs(expected_hz - speed_hz) > max(0.05, abs(expected_hz) * 0.01):
+                raise ValueError("La vitesse Hz ne correspond pas aux rpm et aux paires de pôles.")
+            if not 0 < iq_limit <= MAX_IQ_LIMIT_A:
+                raise ValueError(f"Iq limite doit être compris entre 0 et {MAX_IQ_LIMIT_A:g} A.")
+            if not 0 < hard_limit <= MAX_HARD_LIMIT_A:
+                raise ValueError(f"Hard stop doit être compris entre 0 et {MAX_HARD_LIMIT_A:g} A.")
+            if accel <= 0:
+                raise ValueError("L'accélération doit être > 0.")
+
+            config.update({
+                "target_rpm": target_rpm,
+                "iq_limit": iq_limit,
+                "hard_limit": hard_limit,
+                "accel": accel,
+            })
+
+        return config
 
     def set_field_invalid(self, key, invalid=True):
         """Applique le style invalide à un champ de saisie.
@@ -1698,12 +1795,22 @@ class MotorDatalogGui(tk.Tk):
             errors.append("Aucun port COM sélectionné.")
 
         baud = parse_int("baud", self.baud_var, "Baudrate", 0)
-        target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Vitesse rpm", 0)
-        speed_hz = parse_float("speed_hz", self.speed_hz_var, "Vitesse Hz", 0)
-        pole_pairs = parse_int("pole_pairs", self.pole_pairs_var, "Paires de pôles", 0)
-        iq_limit = parse_float("iq_limit", self.iq_limit_var, "Iq limite", 0)
-        hard_limit = parse_float("hard_limit", self.hard_limit_var, "Hard stop", 0)
-        accel = parse_float("accel", self.accel_var, "Accélération", 0)
+        idle_mode = self.is_idle_acquisition_mode()
+
+        target_rpm = None
+        speed_hz = None
+        pole_pairs = None
+        iq_limit = None
+        hard_limit = None
+
+        if not idle_mode:
+            target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Vitesse rpm", 0)
+            speed_hz = parse_float("speed_hz", self.speed_hz_var, "Vitesse Hz", 0)
+            pole_pairs = parse_int("pole_pairs", self.pole_pairs_var, "Paires de pôles", 0)
+            iq_limit = parse_float("iq_limit", self.iq_limit_var, "Iq limite", 0)
+            hard_limit = parse_float("hard_limit", self.hard_limit_var, "Hard stop", 0)
+            parse_float("accel", self.accel_var, "Accélération", 0)
+
         datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "Période DATA", 0)
         ds18b20_ms = parse_int("ds18b20_ms", self.ds18b20_ms_var, "Période DS18B20", 0)
 
@@ -1719,6 +1826,27 @@ class MotorDatalogGui(tk.Tk):
                 self.set_field_invalid("speed_hz", True)
                 errors.append("La vitesse Hz ne correspond pas au rpm/paires de pôles.")
                 warnings.append("La vitesse Hz ne correspond pas exactement au rpm. Elle sera recalculée automatiquement à la prochaine édition.")
+
+        if target_rpm is not None and target_rpm > MAX_TARGET_SPEED_RPM:
+            self.set_field_invalid("speed_rpm", True)
+            self.set_field_invalid("speed_hz", True)
+            errors.append(f"La vitesse maximale autorisée est {MAX_TARGET_SPEED_RPM:g} rpm.")
+
+        if iq_limit is not None and iq_limit > MAX_IQ_LIMIT_A:
+            self.set_field_invalid("iq_limit", True)
+            errors.append(f"La limite Iq maximale autorisée est {MAX_IQ_LIMIT_A:g} A.")
+
+        if hard_limit is not None and hard_limit > MAX_HARD_LIMIT_A:
+            self.set_field_invalid("hard_limit", True)
+            errors.append(f"Le hard stop maximal autorisé est {MAX_HARD_LIMIT_A:g} A.")
+
+        if datalog_ms is not None and datalog_ms > MAX_DATALOG_MS:
+            self.set_field_invalid("datalog_ms", True)
+            errors.append(f"La période DATA doit être <= {MAX_DATALOG_MS} ms.")
+
+        if ds18b20_ms is not None and ds18b20_ms > MAX_DS18B20_MS:
+            self.set_field_invalid("ds18b20_ms", True)
+            errors.append(f"La période DS18B20 doit être <= {MAX_DS18B20_MS} ms.")
 
         if datalog_ms is not None and datalog_ms < DS18B20_MIN_MS:
             warnings.append(
@@ -1737,7 +1865,10 @@ class MotorDatalogGui(tk.Tk):
         if not self.is_running and not self.is_launching and not self.is_stopping:
             if is_valid:
                 self.start_button.configure(state=tk.NORMAL, bg=COLORS["accent_2"], fg="white")
-                self.set_status("Configuration valide", "Prêt à lancer.")
+                if idle_mode:
+                    self.set_status("Configuration valide", "Prêt à collecter avec le moteur à l'arrêt.")
+                else:
+                    self.set_status("Configuration valide", "Prêt à lancer le moteur et la collecte.")
             else:
                 self.start_button.configure(state=tk.DISABLED, bg=COLORS["panel_3"], fg=COLORS["muted"])
                 self.set_status("Erreur configuration", errors[0])
@@ -1746,10 +1877,10 @@ class MotorDatalogGui(tk.Tk):
         return is_valid
 
     def start_run(self):
-        """Démarre une session moteur et datalogging.
+        """Démarre une session moteur+collecte ou une collecte à l'arrêt.
 
         La méthode valide la configuration, prépare le fichier CSV, ouvre le port série,
-        lance le thread de lecture puis délègue la séquence ``SYNC/CFG/START`` à un
+        lance le thread de lecture puis délègue la séquence série adaptée au mode à un
         thread de lancement.
         """
         if self.is_running or self.is_launching:
@@ -1798,10 +1929,15 @@ class MotorDatalogGui(tk.Tk):
         self.is_launching = True
         self.is_running = False
         self.is_stopping = False
+        self.active_acquisition_mode = cfg["acquisition_mode"]
 
         self.start_button.configure(state=tk.DISABLED, bg="#14532D", fg="white")
         self.stop_button.configure(state=tk.NORMAL)
-        self.set_status("Lancement", "Synchronisation avec la carte...")
+        self.update_acquisition_mode_ui()
+        if cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE:
+            self.set_status("Lancement", "Préparation de la collecte moteur arrêté...")
+        else:
+            self.set_status("Lancement", "Synchronisation et démarrage moteur...")
         self.log("Port série ouvert.")
 
         self.launch_thread = threading.Thread(target=self.launch_sequence_thread, args=(cfg,), daemon=True)
@@ -1814,10 +1950,7 @@ class MotorDatalogGui(tk.Tk):
             cfg: Configuration validée retournée par ``parse_config``.
         """
         try:
-            cfg_cmd = (
-                f"CFG,{cfg['target_rpm']:.3f},{cfg['iq_limit']:.3f},{cfg['hard_limit']:.3f},"
-                f"{cfg['accel']:.3f},{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n"
-            )
+            idle_mode = cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE
 
             self.clear_ack_queue()
             self.send_command("SYNC\n", char_delay=0.002)
@@ -1828,28 +1961,41 @@ class MotorDatalogGui(tk.Tk):
                     ignored_errors={"ERR,UNKNOWN_CMD", "ERR,BAD_CFG", "ERR,NO_VALID_CFG"},
                 )
                 if not sync_ok:
-                    self.gui_queue.put(("log", "SYNC non supporté/ignoré par la carte, poursuite avec CFG."))
+                    next_command = "ACQ_START" if idle_mode else "CFG"
+                    self.gui_queue.put(("log", f"SYNC non supporté/ignoré par la carte, poursuite avec {next_command}."))
             except TimeoutError:
-                self.gui_queue.put(("log", "Pas de réponse SYNC, poursuite avec CFG."))
+                next_command = "ACQ_START" if idle_mode else "CFG"
+                self.gui_queue.put(("log", f"Pas de réponse SYNC, poursuite avec {next_command}."))
 
             time.sleep(0.1)
 
-            self.clear_ack_queue()
-            self.send_command(cfg_cmd, char_delay=0.003)
-            self.wait_for_ack("CFG", timeout=5.0)
+            if idle_mode:
+                acq_cmd = f"ACQ_START,{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n"
+                self.clear_ack_queue()
+                self.send_command(acq_cmd, char_delay=0.002)
+                self.wait_for_ack("ACQ_START", timeout=5.0)
+            else:
+                cfg_cmd = (
+                    f"CFG,{cfg['target_rpm']:.3f},{cfg['iq_limit']:.3f},{cfg['hard_limit']:.3f},"
+                    f"{cfg['accel']:.3f},{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n"
+                )
 
-            time.sleep(0.1)
+                self.clear_ack_queue()
+                self.send_command(cfg_cmd, char_delay=0.003)
+                self.wait_for_ack("CFG", timeout=5.0)
 
-            self.clear_ack_queue()
-            self.send_command("START\n", char_delay=0.002)
-            self.wait_for_ack("START", timeout=5.0)
+                time.sleep(0.1)
 
-            self.gui_queue.put(("launch_success", None))
+                self.clear_ack_queue()
+                self.send_command("START\n", char_delay=0.002)
+                self.wait_for_ack("START", timeout=5.0)
+
+            self.gui_queue.put(("launch_success", cfg["acquisition_mode"]))
         except Exception as exc:
             self.gui_queue.put(("launch_failed", str(exc)))
 
     def stop_run(self):
-        """Demande l'arrêt moteur et lance la séquence ``STOP``."""
+        """Arrête le moteur si nécessaire, puis termine la collecte avec ``STOP``."""
         if self.is_stopping:
             return
         if self.serial_obj is None:
@@ -1907,6 +2053,7 @@ class MotorDatalogGui(tk.Tk):
         self.is_launching = False
         self.is_stopping = False
         self.stop_button.configure(state=tk.DISABLED)
+        self.update_acquisition_mode_ui()
         self.validate_form()
         self.set_status("Arrêté", "Session terminée.")
 
@@ -2031,7 +2178,11 @@ class MotorDatalogGui(tk.Tk):
                     self.is_launching = False
                     self.is_running = True
                     self.is_stopping = False
-                    self.set_status("Moteur lancé", "Datalogging en attente/actif.")
+                    self.update_acquisition_mode_ui()
+                    if payload == ACQUISITION_MODE_IDLE:
+                        self.set_status("Collecte active", "Moteur arrêté, réception des températures et mesures nulles.")
+                    else:
+                        self.set_status("Moteur lancé", "Datalogging en attente/actif.")
                     self.start_button.configure(state=tk.DISABLED, bg="#14532D", fg="white")
                     self.stop_button.configure(state=tk.NORMAL)
                 elif kind == "launch_failed":
@@ -2227,6 +2378,13 @@ class MotorDatalogGui(tk.Tk):
         if label is None:
             return
 
+        if self.is_idle_acquisition_mode():
+            try:
+                label.configure(foreground=COLORS["text"])
+            except Exception:
+                pass
+            return
+
         iq_value = self.safe_float(self.live_vars.get("motor_iq_a", tk.StringVar(value="")).get())
         iq_limit = self.get_iq_limit_safe()
         color = COLORS["text"]
@@ -2388,7 +2546,7 @@ class MotorDatalogGui(tk.Tk):
         séquence d'arrêt moteur avant de détruire la fenêtre.
         """
         if self.is_running or self.is_launching:
-            if not messagebox.askyesno("Quitter", "Un essai est en cours. Arrêter le moteur et quitter ?"):
+            if not messagebox.askyesno("Quitter", "Une session est en cours. L'arrêter et quitter ?"):
                 return
             self.close_requested = True
             self.stop_run()
