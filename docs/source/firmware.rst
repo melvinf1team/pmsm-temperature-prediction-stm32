@@ -119,3 +119,17 @@ de 2500 rpm, 12 A ``Iq`` et 14 A total, puis coupe le moteur en cas de fault
 MCSDK, courant trop élevé ou survitesse. Les sources Workbench et les fichiers C
 générés utilisent tous une limite applicative de 12 A afin qu'une régénération ne
 réintroduise pas l'ancien plafond de 5 A.
+
+Firmware de validation IA
+-------------------------
+
+``firmware_validation`` est un second projet autonome, simplifié pour la
+validation NanoEdge. Il ne contient plus le protocole de commandes du dashboard
+ni le module de debug ASCII. Le flux UART démarre automatiquement et son format
+dépend uniquement de ``APP_NEAI_MODEL_ENABLED`` : deux températures lorsque le
+modèle est actif, ou les 55 features lorsque le modèle est inactif.
+
+La bibliothèque est stockée dans ``firmware_validation/AI_Model`` et liée par
+les configurations Debug et Release. ``app_ai_model.c`` vérifie à la compilation
+que le header annonce un signal de longueur 1 et 55 axes, puis contrôle encore
+les dimensions retournées par la bibliothèque avant son initialisation.

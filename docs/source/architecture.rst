@@ -8,7 +8,9 @@ Le projet sépare clairement les responsabilités :
 
 * le firmware produit les mesures et applique les sécurités moteur ;
 * le dashboard PC pilote la session et enregistre les données brutes ;
-* le prétraitement prépare un dataset orienté NanoEdge AI Studio.
+* le prétraitement prépare un dataset orienté NanoEdge AI Studio ;
+* le firmware de validation reproduit les EWMA et exécute éventuellement le
+   modèle NanoEdge directement sur la carte.
 
 .. code-block:: text
 
@@ -29,6 +31,11 @@ Le projet sépare clairement les responsabilités :
       ├─ features physiques dérivées
       ├─ EWMA remises à l'échelle
       └─ CSV NanoEdge dans pretraitement/logs_processed_ewma
+
+   STM32 firmware_validation
+      ├─ prétraitement EWMA 55D à 10 Hz
+      ├─ modèle désactivé -> 55 features vers Serial Emulator
+      └─ modèle activé -> D6T réelle ; température prédite
 
 Règle de fréquence des EWMA
 ---------------------------

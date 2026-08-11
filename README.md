@@ -9,6 +9,8 @@ L'objectif est de récupérer les grandeurs moteur et températures depuis une c
 - `datalogging/` : dashboard Python Tkinter, profils moteur et logs CSV bruts dans `datalogging/logs`.
 - `pretraitement/` : script de génération des features et EWMA pour NanoEdge AI Studio.
 - `firmware/` : projet STM32CubeIDE/MCSDK et code applicatif embarqué.
+- `firmware_validation/` : projet STM32CubeIDE autonome avec prétraitement EWMA temps réel et modèle NanoEdge activable.
+- `validation/` : interface graphique D6T face à la prédiction IA en temps réel.
 - `docs/` : documentation Sphinx locale du projet.
 - `requirements.txt` : dépendances Python du dashboard, du prétraitement et de la documentation.
 
@@ -85,6 +87,58 @@ STOP
 La consigne applicative est bornée à 2500 rpm, 12 A sur `Iq` et 14 A sur le seuil
 de courant total. Le bouton B2 de la B-G473E-ZEST1S démarre ou arrête un profil
 autonome fixe à 2000 rpm, 10 A `Iq` et 12 A de courant total maximal.
+
+## Firmware de validation NanoEdge
+
+Le projet `firmware_validation/STM32CubeIDE` calcule directement sur la carte
+les 55 features produites par `preprocess_logs_ewma.py`. Le choix se fait dans
+`firmware_validation/Inc/app_config.h` :
+
+```c
+#define APP_NEAI_MODEL_ENABLED  1U
+```
+
+- `1U` : le modèle de `firmware_validation/AI_Model/libneai.a` est exécuté et
+	l'UART émet `d6t_temp_c;predicted_temp_c` à 10 Hz ;
+- `0U` : le modèle n'est pas appelé et l'UART émet les 55 features numériques
+	attendues par le Serial Emulator NanoEdge AI Studio.
+
+Le modèle courant est une régression Ridge pour Cortex-M4 hard-float, avec une
+entrée `1 x 55`. Pour changer de modèle, remplacer `libneai.a`, `NanoEdgeAI.h`,
+`metadata.json` et le dossier `artifacts` dans `firmware_validation/AI_Model`,
+puis effectuer un clean build. Le nouvel export doit conserver une entrée de
+55 axes et l'API d'extrapolation standard.
+
+Contrôle du port série :
+
+```powershell
+python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
+python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
+```
+
+La procédure complète et les contraintes de remplacement sont détaillées dans
+`firmware_validation/README.md`.
+
+## Interface de validation thermique
+
+Avec `APP_NEAI_MODEL_ENABLED` à `1U`, lancer l'interface qui compare en direct
+la température D6T et la prédiction produite dans la carte :
+
+```powershell
+.\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py
+```
+
+Connexion automatique ou démonstration sans matériel :
+
+```powershell
+.\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --port COM5
+.\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --demo
+```
+
+Les deux températures sont affichées en grand avec une décimale. L'interface
+présente également l'erreur instantanée et la MAE cumulée de la session, avec
+les seuils vert, bleu, orange et rouge, un graphique sur 90 secondes et un
+export CSV. Voir `validation/README.md` pour le détail des calculs.
 
 ## Documentation
 

@@ -1,8 +1,13 @@
-sphinx
-sphinx-rtd-theme
-ConfigArgParse
-PyYAML
+# Dashboard et outils de validation serie
 pyserial
 matplotlib
+
+# Pretraitement et tests de parite firmware
 numpy
 pandas
+ConfigArgParse
+PyYAML
+
+# Documentation locale
+sphinx
+sphinx-rtd-theme

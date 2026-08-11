@@ -1,0 +1,95 @@
+{
+    "accelerators": [],
+    "algorithm_type": "regression",
+    "commit": "HEAD",
+    "compilation_date": "2026-08-11T09:51:21.713587",
+    "compilation_flags": {
+        "float_abi": "hard",
+        "fshort_enums": true,
+        "short_wchar": false
+    },
+    "compilation_str": "{'compilation_dict':{'request_type':'library','api':{'env':'PROD','version':'v3'},'version':{'web_api':{'env':'PROD','version':'v3'},'local_api':{'version':'2026.06.22.0','platform':'win64'},'studio':'5.2.0'},'compilation_flags':{'float_abi':'hard','short_wchar':false,'fshort_enums':true,'use_knowledge':false},'mcu':'cortex-m4_st_stm32g4_b-g473e-zest1s','sensor':'','accelerators':[],'request_origin':'manual','algorithm_type':'regression','lib_version':'v3_b0d8eda','info':{'progression':{'evals_done':56,'optimization_progress':0.0028,'elapsed_time':2142,'cpu_info':{'cpu_nb_cores':8,'cpu_nb_cores_for_optimization':5},'state':'paused'},'max_ram':128000,'max_flash':512000,'optimization_global_id':'9a91b44f0485fb0e0fcb88e3793a0fe2','version':{'local_api':'2026.06.22.0','studio':'5.2.0'},'creation_date':'2026-08-11T09:09:27+00:00'},'class_names':'nominal','results':[{'result_id':33,'combination':{'type':'regression','name':'RIDGE','params':{'alpha':0.0024851790288933618,'solver':'lsqr','tol':6.211732932361038e-05,'max_iter':4000,'tmp_dir_path':null},'preprocessing_chain':[{'absolute':{}},{'pooling':{'strategy':'moving_average','output_percentage':29,'n_windows':1}},{'normalize':{'method':'robust','q_low':0.22,'q_high':0.76}},{'quadratic_expansion':{}}]},'model':null,'performance':{'performance':{'score':0.9774,'main_kpi':0.9953},'memory_usage':{'estimated_ram':464,'estimated_flash':892,'estimated_flash_knowledge':null}},'learning_min_lines':null,'knowledge':'eNrVV1tvGkkW_iuRn8dR1an7SPuAjQE7vnD1LYpabbpNME2DocEYK_99v9NFJrPzsNqHkVaTKIn7UF11zncr8nG0XOXL1WKcr9fTcnL0-6evH0fp03pRbKocTx9H03K5qZJsOs_L9XRR1rUyWafzZZGv8SRJyd8-ofScp9VmFWt1Yfw9Lcu84IIxP1BabKq_ba_xoqzyXYXnclMUP1D6OFouFkUc4h_SNgrrapVW-eQdlaP5Yov2k3Sbr9JJfvTr6GW-GudlxcXfP1Got36bltnirT4qTl8uVvO0mO7_IbR9YPS0Wtc_zadlsk2LX6jM091fCnn6lyXrKvvPwmtSLN4OpY-jLK1SxrSj1-eN06cyny9OE7qebG6-aJ_IYqeKp8uX6nXZktRqDqy7mjROLrObzqqZvQ-Wcykvlw_lcygvZtngdHeaXnQyGl4nrqmPby9byl7ciBM9q6j79OX4ud_vPGbuZDLbXJqn1kY3z7avr5d3z3ftjru1raJ63eXZ5GEyGsyT27EYOrXvdJzLl103rlpycSmT4jFN-9nbPBT57e2wc19dtBuDHV21LrPtpnl2-rxORuNkTaa8n4zv36l6TqdqNr8Z9cpWsxq_7DPVOC-y8e124l-HzzS8K26u2nJbDIetQZ9eWy_NMHxZ3d_m2-NVvsmkWY8no0Z758Vd9tbAr3-x4rLqfckKOnouFmmliGvr72ld-wpSjflW0zhHbqzXeZaUm_nyPUlXq5Q1XK02-Y-ajO_Tyff_zsZbZ9w47SbLTvOxl7W2NGpfXGfFye76_qGXvV_QWev04WZ0LNvNaXd28aT3plxsHo5ptF12y-vF2zABOD6514OkS0O_3YdBzzeSblna_rloHM8Gt83n5Vn50rX9UzM6nvVOto1Rcjovm93u4O58KKpdtxeS8W2nWy5oK5o28yeNmd2f9K5G5k00Lzu-3yi-bC-6yeNgt_dn-_U42Zb7865c7d6bXg-x3uzuT3rN4vpt1pip9XVj6p_Peufp7kG0i_b84uR9FF56Dyv1OGp_KSg7OZ-du36xueqePZ7vh7K9Ks-Sfmk2vbOHh7vKtM-uu-P-onelZmm225y0H8rVtL_dPz6V92Om6e9iiVMDvqq-LzLeabV42qyro59GQkl8JvqDyvrZ2Rg1r5s0Q2xNx0m-W6a_QuH_HTr0v90VjM18keVRm-vppEyLpMjLQzd_PtMYFOJY6xitUgo-ZTNPqnQ1yaufM7zlQKl--grgrFD4bQS5YKVTv306Fp-F0WQ9aRHIWx1CXZQkvdFeaTLeGKscqvKzNIQtnBdKae0IRdSkJG8sv0qB6peVdE45o4PRSnnhNK8zOFB6bZUPzgn0j3VCW6v4ZBGMs_UyrY0W0nnnDP5S9TriDoUQyljrtAw6noImnJDKBHKED3ml1FIr4b02IVh05bjohPCGAubWxgsbuKat0RJACByLpjwfLazHUGStDNhQW14nMAu_roCDcpL7wchAirwPCktrwHAGfrZWeDRlvLN12866oMg5sspqqer9lDaSyHmtHN7Vuj4DOHsejrwMAKJuWivgLxVR4FZ97AZtOKANIAMJ52wcWeMYY4zUAojXMHjCgZLnUQGb2xovIu2JsE5IEipIzyvRIJkgNangme26R29c4JUgwkqp6i1NADbKEza1SouDdKRwgpTh_Yw0gC2KB3MY0A6RWQeG4_kyeAZc4Q2rhVFxCwykLQjn_okk1TrzkJ-F8PCqhF7irjhUBgHhGbBjgSqqBEky8sEpifmlqrGDACz0BNigYshU1u9Du0AXqg9YS3F8yTOBEozKWqLYExox2oFNnB5AYpyVLNUHgQ_rMXjUh9CCqGYJ7iEhTZwVyGkbsIic8WRiFRL2IaB_H6wJgMzL2C5OwhgCeHEvcQaFIZXFxg5TwDs1rwa4wRXCEmg5NGaVUbAAPsMwxJJHMQg4KIAvWM16f-hKKklG4B9IAV3Vp8PTDBM8aMC_FBSLUgaJlICloSOraloUnwnloxqwS6TFSNAnIAzMYIFsPEkJAQwV9lEOgqGDAi2mV1iNPxZkRB-H4ILESsQIlB2LOoATi66sU0qEyIvTBrzCNQCStJaxKQeBBwNm4CpN0VE4CX0BZZgEZEXLS82-0wQVGkNRKgYRwwJmByh4oI4bnEqgAcLQAZ6vkcexUGcAyiDARJChJTRvHUMlQ_RJcMymp1Dnp_HRyypA-N4i5qAzLkFLHjQE0IHEiJmECIAD4GtQhACFHaNqmFyIic3PCWGi64OG6yEnmA5YRYshH70ixCorDWlX7wq54BzoEJoOPo5jPUOBYMI-ZGXcsu6PEwaWEwd9Axiv2SUYnxNH_zS4k5LVgUS10h9iH8MAMTCOSFa1jsGPQAYFhLIzEBk-j0qQrCy2jmVSxUGfCp6FeWEyzCUObkQagw5ifwfWck2blNbz9eKwCfTHqQxfAxIHBRlcciEGJn6WSCGEFiTv6nf5soAHIUTH4UwR-oAxWfM4GGySPeSbFGxvqBl8sCzqMhzIMg6BoxA3XFwL0tl_SCgMq6OS0KfC2dgWExz4RO6zAzEB35M6Uq-RYh6vQzEypgLyD5cQXz-4bYKJFAVOE8nhg9S2kUvJDBKnBBjCtXXA0gm-7FFxIEu42CTUr9jQHneOdi6mLV8GiHSkFG5t9ZMLFjaYhO4QIfDOYUiElJZIX7gI4j2QKXHV8aWNCwt71cDDoMAMQyNt6_wBQR4PwAzpWl9ikSB8ceALE3mFIeJ9DR4EmwzIHbQJwvDNAQo2fCH5Q0gIiSDhTEKSQrYhzgi4oReHQAUw5L7V35Qq_q_qMn4PUoq_J0gENnSN69N8-_Hj33q9My4=','knowledge_dat':null,'commit_tag_used':'v3_b0d8eda'}],'data':{'nb_cols':55,'nb_lines':[[{'file_type':'nominal','nb_lines':8931},{'file_type':'nominal','nb_lines':63889},{'file_type':'nominal','nb_lines':50357}]]},'toolchain_type':'gcc','only_emulators':false},'sign':167484,'license_key':'***'}",
+    "compile_emulators": true,
+    "compile_library": true,
+    "data": {
+        "nb_cols": 55,
+        "nb_lines": [
+            [
+                {
+                    "file_type": "nominal",
+                    "nb_lines": 8931
+                },
+                {
+                    "file_type": "nominal",
+                    "nb_lines": 63889
+                },
+                {
+                    "file_type": "nominal",
+                    "nb_lines": 50357
+                }
+            ]
+        ]
+    },
+    "learning_min_lines": null,
+    "lib_limited": false,
+    "library_id": "6a7af0997fbdd7bdafe362fa",
+    "library_md5sum": "47f27edfb826fc2ad9028bbd04156ac7",
+    "mcu": "cortex-m4_st_stm32g4_b-g473e-zest1s",
+    "mcu_cpn": "B-G473E-ZEST1S",
+    "mcu_display_name": "B-G473E-ZEST1S - STMicroelectronics",
+    "mcu_family": "STM32G4 Series",
+    "mcu_group": "demo",
+    "mcu_type": "cortex-m4",
+    "mcu_vendor": "STMicroelectronics",
+    "optimization_info": {
+        "creation_date": "2026-08-11T09:09:27+00:00",
+        "max_flash": 512000,
+        "max_ram": 128000,
+        "optimization_global_id": "9a91b44f0485fb0e0fcb88e3793a0fe2",
+        "progression": {
+            "cpu_info": {
+                "cpu_nb_cores": 8,
+                "cpu_nb_cores_for_optimization": 5
+            },
+            "elapsed_time": 2142,
+            "evals_done": 56,
+            "optimization_progress": 0.0028,
+            "state": "paused"
+        },
+        "version": {
+            "local_api": "2026.06.22.0",
+            "studio": "5.2.0"
+        }
+    },
+    "performance": {
+        "memory_usage": {
+            "estimated_flash": 892,
+            "estimated_flash_knowledge": null,
+            "estimated_ram": 464
+        },
+        "performance": {
+            "main_kpi": 0.9953,
+            "score": 0.9774
+        }
+    },
+    "request_type": "library",
+    "sensor": "",
+    "studio_info": {
+        "local_api": {
+            "platform": "win64",
+            "version": "2026.06.22.0"
+        },
+        "studio": "5.2.0",
+        "web_api": {
+            "env": "PROD",
+            "version": "v3"
+        }
+    },
+    "toolchain_version": "arm-none-eabi-gcc (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 13.2.1 20231009",
+    "user_info": {
+        "company": "Stmicroelectronics",
+        "email": "melvin.pellegrino@st.com",
+        "first_name": "Melvin",
+        "last_name": "Pellegrino"
+    }
+}

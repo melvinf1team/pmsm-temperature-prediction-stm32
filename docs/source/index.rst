@@ -4,7 +4,7 @@ PMSM Temperature Prediction STM32
 Ce projet regroupe toute la chaîne de mesure et de préparation de données pour
 prédire ou extrapoler une température moteur PMSM avec NanoEdge AI Studio.
 
-La chaîne complète est composée de trois blocs :
+La chaîne complète est composée de quatre blocs :
 
 * un firmware STM32 qui pilote le moteur, lit les capteurs et publie des lignes
   UART textuelles ;
@@ -12,7 +12,9 @@ La chaîne complète est composée de trois blocs :
   mesures en temps réel et écrit les CSV bruts ;
 * un script de prétraitement qui transforme les logs bruts en dataset NanoEdge
   AI, avec ``d6t_temp_c`` comme target et des EWMA adaptées à la fréquence réelle
-  d'acquisition.
+  d'acquisition ;
+* un firmware de validation qui reproduit ces EWMA et exécute éventuellement le
+  modèle NanoEdge sur la carte.
 
 .. toctree::
    :maxdepth: 2
@@ -26,4 +28,5 @@ La chaîne complète est composée de trois blocs :
    datalogging
    pretraitement
    firmware
+   validation_ia
    api

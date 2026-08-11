@@ -31,7 +31,7 @@ DEFAULT_CONFIG_FILES = [
 ]
 
 # Mettre a True pour ecrire les noms de colonnes dans les CSV de sortie.
-WRITE_HEADER = True
+WRITE_HEADER = False
 
 # Mettre a True si vous voulez garder stm32_time_ms dans les CSV de sortie.
 INCLUDE_TIME_MS = False

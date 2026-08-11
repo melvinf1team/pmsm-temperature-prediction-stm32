@@ -85,3 +85,16 @@ Import NanoEdge AI Studio
 Après prétraitement, le fichier CSV commence par ``d6t_temp_c``. Cette première
 colonne doit être utilisée comme target d'extrapolation. Les autres colonnes
 représentent les features instantanées, dérivées et lissées par EWMA.
+
+Validation embarquée
+--------------------
+
+Le projet ``firmware_validation`` ne se pilote pas avec les commandes du
+dashboard. Son flux commence automatiquement au boot :
+
+* modèle activé : ``d6t_temp_c;predicted_temp_c`` ;
+* modèle désactivé : 55 valeurs numériques pour le Serial Emulator.
+
+Le choix se fait avec ``APP_NEAI_MODEL_ENABLED`` dans ``Inc/app_config.h``.
+Effectuer un clean build et reflasher la carte après chaque changement. La page
+:doc:`validation_ia` décrit la procédure complète et le remplacement du modèle.
