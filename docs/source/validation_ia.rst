@@ -69,9 +69,13 @@ seuils aux deux indicateurs : vert sous 0,5 °C, bleu de 0,5 à moins de 1,0 °C
 orange de 1,0 à 1,5 °C et rouge au-dessus de 1,5 °C.
 
 Le graphique conserve les 90 dernières secondes visibles. Les mesures de la
-session peuvent être exportées en CSV avec leur précision complète. Les
-dépendances ``pyserial`` et ``matplotlib`` sont déjà déclarées dans
-``requirements.txt`` ; Tkinter est fourni avec Python sous Windows.
+session sont enregistrées automatiquement dans un nouveau CSV du dossier
+``validation`` à chaque connexion. Chaque ligne est vidée immédiatement sur
+disque et le bouton d'export reste disponible pour créer une copie ailleurs.
+Sous Windows, les erreurs ``ClearCommError`` ponctuelles sont retentées pendant
+1,5 seconde avant de fermer la liaison. Les dépendances ``pyserial`` et
+``matplotlib`` sont déjà déclarées dans ``requirements.txt`` ; Tkinter est
+fourni avec Python sous Windows.
 
 Remplacement du modèle
 ----------------------

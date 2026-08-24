@@ -59,6 +59,17 @@ Aucune ligne n'est emise tant que le D6T n'a pas fourni une mesure valide ou si
 l'initialisation/inference NanoEdge echoue. Le bouton bleu `B2` conserve le
 profil moteur autonome : premier appui pour demarrer, second appui pour arreter.
 
+L'appui B2 est memorise jusqu'a ce que la machine d'etats MCSDK soit reellement
+revenue dans `IDLE`. Apres un etat transitoire `STOP` ou `FAULT_OVER`, le
+firmware acquitte le fault puis retente le demarrage toutes les 100 ms sans
+bloquer la boucle principale. Un nouvel appui annule une demande encore en
+attente. Les securites courant, survitesse et timeout restent prioritaires.
+
+La pompe USART1 verifie aussi l'etat du peripherique et efface les erreurs
+`ORE`, `FE` et `NE` avant de poursuivre la file TX. Une deconnexion physique du
+ST-Link/VCP reste du ressort du PC et du cable, mais une erreur UART locale ne
+necessite plus de reset applicatif.
+
 Verifier le flux :
 
 ```powershell
@@ -120,6 +131,19 @@ Pour chaque signal, le vecteur contient la valeur instantanee, puis ses quatre
 EWMA. Le total est donc de 55 floats. La recurrence reproduit
 `pandas.Series.ewm(span=..., adjust=False)` et les valeurs non finies des
 features sont remplacees par zero comme dans le script Python.
+
+### Persistance lors d'un reset
+
+Deux snapshots alternes du contexte EWMA sont conserves dans la section SRAM
+`.noinit`. Chaque snapshot contient une version, une sequence et un CRC32 ; il
+n'est marque valide qu'apres la copie complete. Au boot, le snapshot valide le
+plus recent est restaure. Un reset CPU, un appui sur Reset ou un reset depuis le
+debugger conserve donc l'historique tant que la SRAM reste alimentee.
+
+Une coupure d'alimentation peut effacer la SRAM. Dans ce cas, ou si le CRC/la
+version ne correspond pas, le firmware repart automatiquement avec un EWMA
+neuf. Aucune ecriture Flash periodique n'est utilisee, donc ce mecanisme
+n'entraine aucune usure de la Flash.
 
 Verifier la parite embarque/Python :
 

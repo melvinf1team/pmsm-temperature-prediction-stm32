@@ -165,6 +165,17 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM
 
+  /* Conserved across CPU/NRST resets while SRAM remains powered. */
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(8);
+    __noinit_start__ = .;
+    KEEP(*(.noinit))
+    KEEP(*(.noinit.*))
+    . = ALIGN(8);
+    __noinit_end__ = .;
+  } >RAM
+
   /* User_heap_stack section, used to check that there is enough "RAM" Ram  type memory left */
   ._user_heap_stack :
   {

@@ -53,6 +53,7 @@
 #define APP_BUTTON_HARD_STOP_CURRENT_A      12.0f
 #define APP_BUTTON_ACCEL_ELEC_HZ_S          50.0f
 #define APP_BUTTON_DEBOUNCE_MS              250U
+#define APP_START_RETRY_PERIOD_MS            100U
 
 /*
  * Le PI vitesse généré par Workbench est trop agressif lorsque l'on autorise
@@ -94,6 +95,8 @@ static uint32_t app_mc_overspeed_since_ms = 0U;
 static volatile bool app_button_toggle_pending = false;
 static volatile bool app_button_irq_seen = false;
 static volatile uint32_t app_button_last_irq_ms = 0U;
+static bool app_motor_start_requested = false;
+static uint32_t app_motor_next_start_attempt_ms = 0U;
 
 static float app_target_speed_rpm = APP_DEFAULT_TARGET_SPEED_RPM;
 static float app_iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
@@ -232,6 +235,8 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 void AppMotorControl_Init(void)
 {
   app_mc_boot_ms = HAL_GetTick();
+  app_motor_start_requested = false;
+  app_motor_next_start_attempt_ms = 0U;
 
 #if APP_MOTOR_AUTOSTART_ENABLE
   app_mc_state = APP_MC_WAIT_AUTOSTART;
@@ -257,7 +262,7 @@ bool AppMotorControl_Start(void)
 
   state = MC_GetSTMStateMotor1();
 
-  if ((state != IDLE) && (state != STOP))
+  if (state != IDLE)
   {
     return false;
   }
@@ -273,6 +278,7 @@ bool AppMotorControl_Start(void)
 
   if (MC_StartWithPolarizationMotor1() == MC_SUCCESS)
   {
+    app_motor_start_requested = false;
     app_mc_state = APP_MC_STARTING;
     app_mc_start_ms = HAL_GetTick();
     AppMotorControl_ResetSpeedPi();
@@ -281,12 +287,12 @@ bool AppMotorControl_Start(void)
     return true;
   }
 
-  app_mc_state = APP_MC_FAULT;
   return false;
 }
 
 void AppMotorControl_Stop(void)
 {
+  app_motor_start_requested = false;
   MC_StopMotor1();
 
   app_mc_state = APP_MC_IDLE;
@@ -342,7 +348,9 @@ static void AppMotorControl_HandleButtonToggle(void)
     return;
   }
 
-  if ((app_mc_state == APP_MC_STARTING) || AppMotorControl_IsRunning())
+  if (app_motor_start_requested ||
+      (app_mc_state == APP_MC_STARTING) ||
+      AppMotorControl_IsRunning())
   {
     AppMotorControl_Stop();
     return;
@@ -352,8 +360,37 @@ static void AppMotorControl_HandleButtonToggle(void)
                                    APP_BUTTON_IQ_LIMIT_A,
                                    APP_BUTTON_HARD_STOP_CURRENT_A,
                                    APP_BUTTON_ACCEL_ELEC_HZ_S);
+  app_motor_start_requested = true;
+  app_motor_next_start_attempt_ms = 0U;
+}
 
-  (void)AppMotorControl_Start();
+static void AppMotorControl_ServiceStartRequest(uint32_t now,
+                                                uint32_t current_faults,
+                                                MCI_State_t mc_state)
+{
+  if (!app_motor_start_requested)
+  {
+    return;
+  }
+
+  if (mc_state == FAULT_OVER)
+  {
+    MC_AcknowledgeFaultsMotor1();
+    app_motor_next_start_attempt_ms = now + APP_START_RETRY_PERIOD_MS;
+    return;
+  }
+
+  if ((current_faults != MC_NO_FAULTS) ||
+      (mc_state != IDLE) ||
+      ((int32_t)(now - app_motor_next_start_attempt_ms) < 0))
+  {
+    return;
+  }
+
+  if (!AppMotorControl_Start())
+  {
+    app_motor_next_start_attempt_ms = now + APP_START_RETRY_PERIOD_MS;
+  }
 }
 
 static void AppMotorControl_UpdateIqLimitRamp(uint32_t now)
@@ -396,9 +433,14 @@ void AppMotorControl_Task(void)
   uint32_t current_faults = MC_GetCurrentFaultsMotor1();
   MCI_State_t mc_state = MC_GetSTMStateMotor1();
 
+  AppMotorControl_ServiceStartRequest(now, current_faults, mc_state);
+
   if (current_faults != MC_NO_FAULTS)
   {
-    MC_StopMotor1();
+    if (app_mc_state != APP_MC_FAULT)
+    {
+      MC_StopMotor1();
+    }
     app_mc_state = APP_MC_FAULT;
     return;
   }

@@ -26,13 +26,24 @@ from serial.tools import list_ports
 
 
 BAUD_RATE = 115200
-SERIAL_TIMEOUT_S = 0.2
+SERIAL_TIMEOUT_S = 1.0
+SERIAL_RETRY_DELAY_S = 0.15
+SERIAL_TRANSIENT_RETRY_LIMIT = 100
 QUEUE_REFRESH_MS = 40
 PLOT_REFRESH_MS = 250
 STATUS_REFRESH_MS = 250
 PLOT_WINDOW_SECONDS = 90.0
 PLOT_MAX_POINTS = 1800
 STALE_DATA_SECONDS = 2.0
+VALIDATION_DIRECTORY = Path(__file__).resolve().parents[1]
+CSV_HEADER = (
+    "elapsed_s",
+    "d6t_temp_c",
+    "predicted_temp_c",
+    "signed_error_c",
+    "absolute_error_c",
+    "cumulative_mae_c",
+)
 
 COLORS = {
     "background": "#E9EDF1",
@@ -132,6 +143,41 @@ def is_current_connection_event(event_generation: int, current_generation: int) 
     return event_generation == current_generation
 
 
+def is_transient_serial_error(error: Exception) -> bool:
+    """Identifie l'erreur Windows ClearCommError qui peut etre temporaire."""
+    message = str(error).casefold()
+    return "clearcommerror" in message or "does not recognize the command" in message
+
+
+def csv_sample_row(sample: ValidationSample) -> tuple[str, ...]:
+    return (
+        f"{sample.elapsed_s:.3f}",
+        f"{sample.actual_c:.6f}",
+        f"{sample.predicted_c:.6f}",
+        f"{sample.signed_error_c:.6f}",
+        f"{sample.absolute_error_c:.6f}",
+        f"{sample.cumulative_mae_c:.6f}",
+    )
+
+
+class CsvSessionRecorder:
+    """Ecrit une session CSV progressivement pour limiter les pertes de donnees."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.stream = path.open("x", newline="", encoding="utf-8")
+        self.writer = csv.writer(self.stream, delimiter=";")
+        self.writer.writerow(CSV_HEADER)
+        self.stream.flush()
+
+    def append(self, sample: ValidationSample) -> None:
+        self.writer.writerow(csv_sample_row(sample))
+        self.stream.flush()
+
+    def close(self) -> None:
+        self.stream.close()
+
+
 class SessionAccumulator:
     """Calcule les erreurs instantanee et moyenne absolue cumulee (MAE)."""
 
@@ -180,6 +226,7 @@ class TemperatureValidationApp(tk.Tk):
         self.reader_stop_event = threading.Event()
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.connection_generation = 0
+        self.automatic_export: CsvSessionRecorder | None = None
 
         self.accumulator = SessionAccumulator()
         self.session_samples: list[ValidationSample] = []
@@ -704,6 +751,17 @@ class TemperatureValidationApp(tk.Tk):
             return
 
         self.reset_session()
+        try:
+            self.start_automatic_export()
+        except OSError as exc:
+            connection.close()
+            self.set_status("Echec export automatique", COLORS["red"])
+            messagebox.showerror(
+                "Export automatique impossible",
+                f"Impossible de creer le fichier CSV :\n{exc}",
+            )
+            return
+
         self.serial_connection = connection
         self.reader_stop_event = threading.Event()
         self.connection_generation += 1
@@ -724,6 +782,7 @@ class TemperatureValidationApp(tk.Tk):
         self.serial_connection = None
         self.connection_generation += 1
         self.reader_stop_event.set()
+        self.stop_automatic_export()
 
         if connection is not None:
             try:
@@ -743,14 +802,26 @@ class TemperatureValidationApp(tk.Tk):
         generation: int,
     ) -> None:
         buffer = b""
+        transient_error_count = 0
         while not stop_event.is_set():
             try:
                 chunk = connection.read(512)
             except Exception as exc:
+                if (
+                    is_transient_serial_error(exc)
+                    and transient_error_count < SERIAL_TRANSIENT_RETRY_LIMIT
+                ):
+                    transient_error_count += 1
+                    if transient_error_count == 1:
+                        self.events.put(("serial_warning", (generation, str(exc))))
+                    if stop_event.wait(SERIAL_RETRY_DELAY_S):
+                        break
+                    continue
                 if not stop_event.is_set():
                     self.events.put(("serial_error", (generation, str(exc))))
                 break
 
+            transient_error_count = 0
             if not chunk:
                 continue
 
@@ -779,6 +850,10 @@ class TemperatureValidationApp(tk.Tk):
                     if is_current_connection_event(generation, self.connection_generation):
                         self.invalid_frame_count += 1
                         self.invalid_var.set(str(self.invalid_frame_count))
+                elif event == "serial_warning":
+                    generation, _message = payload  # type: ignore[misc]
+                    if is_current_connection_event(generation, self.connection_generation):
+                        self.set_status("Perturbation serie - nouvelle tentative", COLORS["orange"])
                 elif event == "serial_error":
                     generation, message = payload  # type: ignore[misc]
                     if is_current_connection_event(generation, self.connection_generation):
@@ -816,6 +891,32 @@ class TemperatureValidationApp(tk.Tk):
         self.rate_var.set(f"{self.current_rate_hz():.1f} Hz".replace(".", ","))
         self.export_button.configure(state=tk.NORMAL)
         self.set_status("Acquisition active", COLORS["green"])
+        self.record_automatic_sample(sample)
+
+    def start_automatic_export(self) -> None:
+        self.stop_automatic_export()
+        filename = f"validation_ia_{datetime.now():%Y%m%d_%H%M%S_%f}.csv"
+        self.automatic_export = CsvSessionRecorder(VALIDATION_DIRECTORY / filename)
+
+    def stop_automatic_export(self) -> None:
+        if self.automatic_export is None:
+            return
+        self.automatic_export.close()
+        self.automatic_export = None
+
+    def record_automatic_sample(self, sample: ValidationSample) -> None:
+        if self.automatic_export is None:
+            return
+        try:
+            self.automatic_export.append(sample)
+        except OSError as exc:
+            failed_path = self.automatic_export.path
+            self.stop_automatic_export()
+            self.set_status("Erreur export automatique", COLORS["red"])
+            messagebox.showerror(
+                "Export automatique interrompu",
+                f"Impossible d'ecrire dans {failed_path.name} :\n{exc}",
+            )
 
     def update_error_panel(
         self,
@@ -969,27 +1070,9 @@ class TemperatureValidationApp(tk.Tk):
         try:
             with output_path.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.writer(stream, delimiter=";")
-                writer.writerow(
-                    [
-                        "elapsed_s",
-                        "d6t_temp_c",
-                        "predicted_temp_c",
-                        "signed_error_c",
-                        "absolute_error_c",
-                        "cumulative_mae_c",
-                    ]
-                )
+                writer.writerow(CSV_HEADER)
                 for sample in self.session_samples:
-                    writer.writerow(
-                        [
-                            f"{sample.elapsed_s:.3f}",
-                            f"{sample.actual_c:.6f}",
-                            f"{sample.predicted_c:.6f}",
-                            f"{sample.signed_error_c:.6f}",
-                            f"{sample.absolute_error_c:.6f}",
-                            f"{sample.cumulative_mae_c:.6f}",
-                        ]
-                    )
+                    writer.writerow(csv_sample_row(sample))
         except OSError as exc:
             messagebox.showerror("Export impossible", str(exc))
             return

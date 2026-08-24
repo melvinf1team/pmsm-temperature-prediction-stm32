@@ -30,6 +30,9 @@
 #define APP_DATALOG_UART_PUMP_MAX_BYTES  256U
 #define APP_DATALOG_LINE_SIZE            1024U
 #define APP_DATALOG_MAX_FLOAT_WHOLE      4294967040.0f
+#define APP_EWMA_SNAPSHOT_MAGIC           0x45574D41UL
+#define APP_EWMA_SNAPSHOT_VERSION         1UL
+#define APP_EWMA_SNAPSHOT_COUNT           2U
 
 _Static_assert(PREPROCESS_EWMA_OUTPUT_COUNT == 55U,
                "Le pipeline NanoEdge attend exactement 55 features");
@@ -49,9 +52,119 @@ static PreprocessEwmaContext_t preprocess_context;
 static float preprocess_features[PREPROCESS_EWMA_OUTPUT_COUNT];
 static char app_datalog_line[APP_DATALOG_LINE_SIZE];
 
+typedef struct
+{
+  uint32_t magic;
+  uint32_t version;
+  uint32_t context_size;
+  uint32_t sequence;
+  PreprocessEwmaContext_t context;
+  uint32_t crc32;
+} AppEwmaSnapshot_t;
+
+static volatile AppEwmaSnapshot_t ewma_snapshots[APP_EWMA_SNAPSHOT_COUNT]
+  __attribute__((section(".noinit.ewma"), aligned(8), used));
+static uint32_t ewma_snapshot_sequence = 0U;
+
 static char tx_buffer[APP_DATALOG_TX_BUFFER_SIZE];
 static volatile uint16_t tx_head = 0U;
 static volatile uint16_t tx_tail = 0U;
+
+static uint32_t AppDatalog_Crc32Update(uint32_t crc,
+                                      const volatile void *data,
+                                      size_t size)
+{
+  const volatile uint8_t *bytes = (const volatile uint8_t *)data;
+
+  for (size_t index = 0U; index < size; index++)
+  {
+    crc ^= bytes[index];
+    for (uint32_t bit = 0U; bit < 8U; bit++)
+    {
+      crc = ((crc & 1U) != 0U)
+              ? ((crc >> 1U) ^ 0xEDB88320UL)
+              : (crc >> 1U);
+    }
+  }
+
+  return crc;
+}
+
+static uint32_t AppDatalog_EwmaSnapshotCrc(
+  const volatile AppEwmaSnapshot_t *snapshot)
+{
+  uint32_t crc = 0xFFFFFFFFUL;
+
+  crc = AppDatalog_Crc32Update(crc,
+                               &snapshot->sequence,
+                               sizeof(snapshot->sequence));
+  crc = AppDatalog_Crc32Update(crc,
+                               &snapshot->context,
+                               sizeof(snapshot->context));
+  return crc ^ 0xFFFFFFFFUL;
+}
+
+static bool AppDatalog_EwmaSnapshotIsValid(
+  const volatile AppEwmaSnapshot_t *snapshot)
+{
+  return (snapshot->magic == APP_EWMA_SNAPSHOT_MAGIC) &&
+         (snapshot->version == APP_EWMA_SNAPSHOT_VERSION) &&
+         (snapshot->context_size == sizeof(PreprocessEwmaContext_t)) &&
+         (snapshot->crc32 == AppDatalog_EwmaSnapshotCrc(snapshot));
+}
+
+static bool AppDatalog_RestoreEwma(void)
+{
+  bool valid_0 = AppDatalog_EwmaSnapshotIsValid(&ewma_snapshots[0]);
+  bool valid_1 = AppDatalog_EwmaSnapshotIsValid(&ewma_snapshots[1]);
+  const volatile AppEwmaSnapshot_t *selected;
+
+  if (!valid_0 && !valid_1)
+  {
+    ewma_snapshots[0].magic = 0U;
+    ewma_snapshots[1].magic = 0U;
+    ewma_snapshot_sequence = 0U;
+    return false;
+  }
+
+  if (valid_0 && valid_1)
+  {
+    selected = ((int32_t)(ewma_snapshots[1].sequence -
+                          ewma_snapshots[0].sequence) > 0)
+                 ? &ewma_snapshots[1]
+                 : &ewma_snapshots[0];
+  }
+  else
+  {
+    selected = valid_1 ? &ewma_snapshots[1] : &ewma_snapshots[0];
+  }
+
+  preprocess_context = selected->context;
+  ewma_snapshot_sequence = selected->sequence;
+  return true;
+}
+
+static void AppDatalog_CheckpointEwma(void)
+{
+  uint32_t next_sequence = ewma_snapshot_sequence + 1U;
+  volatile AppEwmaSnapshot_t *target =
+    &ewma_snapshots[next_sequence % APP_EWMA_SNAPSHOT_COUNT];
+
+  target->magic = 0U;
+  __DMB();
+
+  target->version = APP_EWMA_SNAPSHOT_VERSION;
+  target->context_size = sizeof(PreprocessEwmaContext_t);
+  target->sequence = next_sequence;
+  target->context = preprocess_context;
+  target->crc32 = AppDatalog_EwmaSnapshotCrc(target);
+
+  __DMB();
+  target->magic = APP_EWMA_SNAPSHOT_MAGIC;
+  __DMB();
+
+  ewma_snapshot_sequence = next_sequence;
+}
 
 static void AppDatalog_TakeOverUsart1(void)
 {
@@ -117,9 +230,32 @@ static bool AppDatalog_UartQueueText(const char *text)
   return true;
 }
 
+static void AppDatalog_UartRecover(void)
+{
+  if (!LL_USART_IsEnabled(USART1))
+  {
+    LL_USART_Enable(USART1);
+  }
+
+  if (LL_USART_IsActiveFlag_ORE(USART1))
+  {
+    LL_USART_ClearFlag_ORE(USART1);
+  }
+  if (LL_USART_IsActiveFlag_FE(USART1))
+  {
+    LL_USART_ClearFlag_FE(USART1);
+  }
+  if (LL_USART_IsActiveFlag_NE(USART1))
+  {
+    LL_USART_ClearFlag_NE(USART1);
+  }
+}
+
 static void AppDatalog_UartPump(void)
 {
   uint32_t sent = 0U;
+
+  AppDatalog_UartRecover();
 
   while ((tx_tail != tx_head) &&
          (sent < APP_DATALOG_UART_PUMP_MAX_BYTES) &&
@@ -291,6 +427,8 @@ static void AppDatalog_SendDataLine(void)
     return;
   }
 
+  AppDatalog_CheckpointEwma();
+
 #if APP_NEAI_MODEL_ENABLED
   float actual_temperature_c;
   float predicted_temperature_c;
@@ -339,7 +477,10 @@ void AppDatalog_Init(void)
 
   D6TIR_Init();
   DS18B20_Init();
-  PreprocessEwma_Reset(&preprocess_context);
+  if (!AppDatalog_RestoreEwma())
+  {
+    PreprocessEwma_Reset(&preprocess_context);
+  }
   AppAiModel_Init();
 
   now = HAL_GetTick();

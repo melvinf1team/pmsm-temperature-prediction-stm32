@@ -133,3 +133,20 @@ La bibliothèque est stockée dans ``firmware_validation/AI_Model`` et liée par
 les configurations Debug et Release. ``app_ai_model.c`` vérifie à la compilation
 que le header annonce un signal de longueur 1 et 55 axes, puis contrôle encore
 les dimensions retournées par la bibliothèque avant son initialisation.
+
+Le bouton B2 dépose une intention de démarrage persistante dans la machine
+d'états applicative. Si MCSDK est encore dans ``STOP`` ou ``FAULT_OVER``, cette
+intention attend le retour réel à ``IDLE`` au lieu d'être perdue. Les faults
+terminés sont acquittés et le démarrage est retenté à cadence limitée, sans
+attente bloquante. L'ordre ``MC_StopMotor1`` n'est émis qu'une fois à l'entrée
+d'un défaut afin de laisser MCSDK atteindre son état acquittable.
+
+Le contexte des 44 EWMA est sauvegardé après chaque échantillon dans deux
+snapshots alternés de la section SRAM ``.noinit``. Une signature, une version,
+une séquence et un CRC32 permettent de restaurer le dernier snapshot complet
+après un reset CPU/NRST tant que la carte reste alimentée. Une coupure
+d'alimentation ou un snapshot incohérent provoque une réinitialisation propre du
+contexte. Cette stratégie n'écrit pas dans la Flash.
+
+Enfin, la pompe USART1 réactive le périphérique si nécessaire et purge les
+drapeaux ``ORE``, ``FE`` et ``NE`` avant de continuer la file TX non bloquante.

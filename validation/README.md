@@ -40,6 +40,10 @@ Mode visuel sans carte :
 Fermer le dashboard de datalogging et tout terminal serie avant la connexion :
 un port COM ne peut etre ouvert que par une application a la fois.
 
+Sous Windows, une erreur `ClearCommError` ponctuelle est retentee automatiquement
+pendant 1,5 seconde. Si la liaison ne repond toujours pas apres dix tentatives,
+l'application ferme le port et affiche l'erreur serie.
+
 ## Affichage
 
 Les deux valeurs principales sont affichees en grand :
@@ -67,9 +71,16 @@ en degres Celsius comparable aux memes seuils :
 | `1,0 °C a 1,5 °C` | orange |
 | `> 1,5 °C` | rouge |
 
-`Reinitialiser` efface la session et remet la MAE a zero. `Exporter CSV`
-enregistre les mesures brutes a six decimales, les erreurs signee/absolue et la
-MAE cumulee ; la limitation a une decimale concerne uniquement l'affichage.
+Chaque connexion cree automatiquement un fichier
+`validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv` dans le dossier `validation`.
+Chaque mesure est videe immediatement sur disque et le fichier est ferme a la
+deconnexion. `Exporter CSV` reste disponible pour enregistrer une copie dans un
+autre emplacement.
+
+`Reinitialiser` efface la session et remet la MAE a zero sans interrompre le
+fichier automatique de la connexion en cours. Les CSV enregistrent les mesures
+brutes a six decimales, les erreurs signee/absolue et la MAE cumulee ; la
+limitation a une decimale concerne uniquement l'affichage.
 
 ## Verification
 
