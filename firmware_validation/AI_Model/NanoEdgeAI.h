@@ -35,7 +35,7 @@ provided that the following conditions are met:
 #include <stdint.h>
 
 /* NEAI ID */
-#define NEAI_ID "6a7af0997fbdd7bdafe362fa"
+#define NEAI_ID "6a8c351467dc61da627e5d30"
 
 /* Input signal configuration */
 #define NEAI_INPUT_SIGNAL_LENGTH 1
