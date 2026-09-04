@@ -22,8 +22,6 @@ une ligne par message::
     #CSV_HEADER,<colonne_1>,<colonne_2>,...
     DATA,<valeur_1>,<valeur_2>,...
 
-Le style de documentation suit les conventions Google docstring afin que Sphinx
-puisse générer une référence API cohérente avec la documentation projet.
 """
 
 import csv
