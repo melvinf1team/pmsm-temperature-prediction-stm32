@@ -1,94 +1,121 @@
 # Interface de validation thermique
 
-L'application `test/temperature_validation_gui.py` affiche en direct la
-temperature reelle mesuree par le D6T et la temperature estimee par le modele
-NanoEdge execute dans la carte STM32.
+L'application `test/temperature_validation_gui.py` compare en temps réel la
+température mesurée par le D6T et la température estimée par NanoEdge AI sur la
+carte STM32. Elle est destinée au firmware de `firmware_validation`, pas au
+firmware piloté par le dashboard de datalogging.
 
-Le firmware doit etre compile avec le modele active dans
-`firmware_validation/Inc/app_config.h` :
+## Préparer le firmware
+
+Activer le modèle dans `firmware_validation/Inc/app_config.h` :
 
 ```c
 #define APP_NEAI_MODEL_ENABLED  1U
 ```
 
-Le protocole attendu sur USART1 est une ligne a deux nombres, a 115200 bauds :
+Effectuer ensuite un **Clean Project**, reconstruire le projet et reflasher la
+carte. Le flux USART1 démarre automatiquement au boot à 115200 bauds, 8N1. Une
+trame valide contient exactement deux nombres finis séparés par un point-virgule :
 
 ```text
 <d6t_temp_c>;<predicted_temp_c>
 ```
 
+Exemple :
+
+```text
+31.400000;30.872314
+```
+
 ## Lancement
 
-Selection manuelle du port dans l'interface :
+Sélection manuelle du port dans l'interface :
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py
 ```
 
-Connexion automatique a un port :
+Connexion automatique à un port :
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --port COM5
 ```
 
-Mode visuel sans carte :
+Mode de démonstration sans carte :
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --demo
 ```
 
-Fermer le dashboard de datalogging et tout terminal serie avant la connexion :
-un port COM ne peut etre ouvert que par une application a la fois.
+Fermer le dashboard, Motor Pilot et tout terminal série avant la connexion : un
+port COM ne peut appartenir qu'à une application à la fois.
 
-Sous Windows, une erreur `ClearCommError` ponctuelle est retentee automatiquement
-pendant 1,5 seconde. Si la liaison ne repond toujours pas apres dix tentatives,
-l'application ferme le port et affiche l'erreur serie.
+Sous Windows, une erreur transitoire `ClearCommError` est retentée jusqu'à
+100 fois, avec une pause de 150 ms entre les tentatives. La fenêtre de reprise
+est donc d'environ 15 secondes, hors durée des opérations série. Une autre
+erreur ou l'épuisement des tentatives ferme la liaison et remonte le diagnostic.
 
-## Affichage
+## Affichage et calculs
 
-Les deux valeurs principales sont affichees en grand :
+Les deux températures sont affichées avec une décimale. Le graphique conserve
+les 90 dernières secondes et jusqu'à 1800 points. Une donnée qui n'a pas été
+rafraîchie depuis plus de 2 secondes est considérée comme ancienne par
+l'interface.
 
-- temperature reelle D6T ;
-- temperature estimee par NanoEdge AI.
+Pour chaque échantillon :
 
-Toutes les temperatures et erreurs visibles sont arrondies a une decimale. Les
-compteurs restent des entiers. Le graphique montre les deux temperatures, leur
-intervalle et l'erreur absolue sur les 90 dernieres secondes.
+```text
+erreur_signée = prédiction - D6T
+erreur_absolue = abs(erreur_signée)
+MAE_cumulée = somme(erreurs_absolues) / nombre_échantillons
+```
 
-Deux indicateurs d'erreur sont calcules :
+La MAE reste exprimée en degrés Celsius. Les seuils visuels sont :
 
-- erreur instantanee : `abs(prediction - D6T)` ;
-- erreur cumulee : MAE de la session, soit la moyenne de toutes les erreurs
-  absolues depuis la derniere reinitialisation.
+| Écart absolu | Classe | Couleur |
+|---|---|---|
+| `< 0,5 °C` | Excellent | vert |
+| `0,5 °C à < 1,0 °C` | Bon | bleu |
+| `1,0 °C à 1,5 °C` | À surveiller | orange |
+| `> 1,5 °C` | Écart élevé | rouge |
 
-La MAE est utilisee plutot qu'une somme croissante afin de conserver une valeur
-en degres Celsius comparable aux memes seuils :
+Les trames non ASCII, non numériques, non finies ou n'ayant pas exactement deux
+champs sont ignorées et comptabilisées comme invalides.
 
-| Ecart absolu | Couleur |
-| --- | --- |
-| `< 0,5 °C` | vert |
-| `0,5 °C a < 1,0 °C` | bleu |
-| `1,0 °C a 1,5 °C` | orange |
-| `> 1,5 °C` | rouge |
+## Enregistrement CSV
 
-Chaque connexion cree automatiquement un fichier
-`validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv` dans le dossier `validation`.
-Chaque mesure est videe immediatement sur disque et le fichier est ferme a la
-deconnexion. `Exporter CSV` reste disponible pour enregistrer une copie dans un
-autre emplacement.
+Chaque connexion crée automatiquement dans `validation/` un fichier nommé :
 
-`Reinitialiser` efface la session et remet la MAE a zero sans interrompre le
-fichier automatique de la connexion en cours. Les CSV enregistrent les mesures
-brutes a six decimales, les erreurs signee/absolue et la MAE cumulee ; la
-limitation a une decimale concerne uniquement l'affichage.
+```text
+validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv
+```
 
-## Verification
+Chaque ligne est vidée immédiatement sur disque et contient :
 
-Les tests ne necessitent ni carte ni fenetre graphique :
+```text
+elapsed_s;d6t_temp_c;predicted_temp_c;signed_error_c;absolute_error_c;cumulative_mae_c
+```
+
+Les nombres sont enregistrés à leur précision de calcul, avec six décimales.
+Le bouton **Exporter CSV** crée une copie ailleurs. **Réinitialiser** efface les
+données affichées et remet la MAE à zéro, sans interrompre l'enregistreur
+automatique de la connexion en cours.
+
+## Vérification
+
+Les tests unitaires ne nécessitent ni carte ni fenêtre graphique :
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\test_temperature_validation_gui.py
 ```
 
-Ils couvrent le parseur serie, les quatre seuils, la MAE et le formatage a une
-decimale.
+Ils vérifient actuellement trois comportements : la détection d'une erreur
+`ClearCommError`, la reprise de lecture après cette erreur et l'écriture avec
+flush immédiat d'un échantillon CSV. Ils ne valident pas le rendu visuel, le
+port COM réel ni les performances statistiques du modèle.
+
+Le contrôle matériel du protocole se lance depuis la racine du dépôt :
+
+```powershell
+.\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
+```

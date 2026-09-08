@@ -1,6 +1,10 @@
 Référence API Python
 ====================
 
+Cette page est générée par ``sphinx.ext.autodoc`` à partir des docstrings. Elle
+décrit les API internes utiles aux tests et à la maintenance ; les procédures
+opérateur restent dans :doc:`utilisation`.
+
 Dashboard de datalogging
 ------------------------
 
@@ -19,3 +23,13 @@ Prétraitement EWMA
    :members:
    :undoc-members:
    :show-inheritance:
+
+Interface de validation thermique
+---------------------------------
+
+.. automodule:: temperature_validation_gui
+   :no-index:
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :special-members: __init__

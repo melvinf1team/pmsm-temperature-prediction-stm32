@@ -1,80 +1,166 @@
-# PMSM Temperature Prediction STM32
+# Datalog PMSM et prédiction thermique sur STM32
 
-Projet complet de mesure, datalogging et prétraitement pour construire un dataset NanoEdge AI Studio autour d'un moteur PMSM piloté par STM32.
+Ce dépôt regroupe la chaîne complète d'acquisition, de préparation des données
+et de validation embarquée d'un modèle NanoEdge AI pour estimer la température
+interne d'un moteur PMSM. La cible d'apprentissage est `d6t_temp_c` ; les
+variables explicatives proviennent du capteur DS18B20 et de la commande moteur.
 
-L'objectif est de récupérer les grandeurs moteur et températures depuis une carte STM32 B-G473E-ZEST1S avec power board STDES-LVHP01, puis de préparer un fichier où `d6t_temp_c` est la target d'extrapolation thermique.
+Le banc repose sur une carte **B-G473E-ZEST1S**, une carte de puissance
+**STDES-LVHP01**, un capteur infrarouge **Omron D6T** et un capteur
+**DS18B20**. Les échanges avec le PC utilisent l'USART1 à 115200 bauds.
 
-## Structure
+## Architecture du dépôt
 
-- `datalogging/` : dashboard Python Tkinter, profils moteur et logs CSV bruts dans `datalogging/logs`.
-- `pretraitement/` : script de génération des features et EWMA pour NanoEdge AI Studio.
-- `firmware/` : projet STM32CubeIDE/MCSDK et code applicatif embarqué.
-- `firmware_validation/` : projet STM32CubeIDE autonome avec prétraitement EWMA temps réel et modèle NanoEdge activable.
-- `validation/` : interface graphique D6T face à la prédiction IA en temps réel.
-- `docs/` : documentation Sphinx locale du projet.
-- `requirements.txt` : dépendances Python du dashboard, du prétraitement et de la documentation.
+| Chemin | Rôle |
+|---|---|
+| `datalogging/` | Dashboard Tkinter, profils moteur et journaux CSV bruts |
+| `pretraitement/` | Génération des grandeurs physiques et des EWMA pour NanoEdge AI |
+| `firmware_acquisition/tets_motor_dewalt/` | Firmware STM32CubeIDE/MCSDK piloté par le dashboard |
+| `firmware_validation/` | Firmware autonome de calcul des 55 features et d'inférence NanoEdge AI |
+| `validation/` | Interface PC de comparaison entre température mesurée et prédite |
+| `inventories/` | Scripts d'inventaire des jeux de données |
+| `docs/` | Documentation Sphinx détaillée |
+| `dashboard_config.yaml` | Chemins par défaut du dashboard |
+| `preprocess_ewma.yaml` | Entrées et sorties par défaut du prétraitement |
 
-## Installation Python
+La chaîne de traitement est la suivante :
+
+```text
+Capteurs + MCSDK
+			|
+			v
+Firmware d'acquisition --USART1--> Dashboard Python --> CSV bruts
+																											|
+																											v
+																					Prétraitement Python
+																											|
+																											v
+																		 CSV cible + 55 features
+																											|
+																											v
+																			NanoEdge AI Studio
+																											|
+																											v
+																			Firmware de validation
+																											|
+															 +----------------------+------------------+
+															 |                                         |
+												 Serial Emulator                       Interface de validation
+```
+
+## Prérequis
+
+- Windows avec Python 3 et Tkinter ;
+- STM32CubeIDE avec une chaîne GNU Arm compatible Cortex-M4 hard-float ;
+- STM32CubeProgrammer/ST-LINK pour programmer la carte ;
+- NanoEdge AI Studio pour entraîner ou remplacer la bibliothèque embarquée ;
+- accès au port série de la B-G473E-ZEST1S.
+
+Créer l'environnement Python depuis la racine du dépôt :
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-## Lancer le dashboard
+## Acquisition et datalogging
+
+Lancer le dashboard :
 
 ```powershell
 python .\datalogging\motor_datalog_gui_dashboard.py
 ```
 
-Le dashboard propose deux modes : **moteur + collecte** (`SYNC`, `CFG`, `START`) et **collecte seule moteur arrêté** (`SYNC`, `ACQ_START`). Le second ne demande aucun paramètre moteur et permet d'enregistrer le refroidissement après un essai. `STOP` termine proprement les deux types de session.
+Deux modes sont disponibles :
 
-Colonnes brutes conservées :
+- **Moteur + collecte** : `SYNC`, `CFG`, puis `START` ;
+- **Collecte seule (moteur arrêté)** : `SYNC`, puis `ACQ_START`, notamment
+	pour enregistrer une phase de refroidissement.
+
+Dans les deux cas, `STOP` arrête proprement la session. Les profils moteur sont
+chargés depuis `datalogging/motor_profiles.json`.
+
+Le CSV brut utilise le point-virgule et conserve huit colonnes :
 
 ```text
 stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
 ```
 
+Les chemins peuvent être configurés dans `dashboard_config.yaml`, avec
+`--config`, ou avec les variables d'environnement suivantes :
+
+| Option | Variable d'environnement | Valeur par défaut |
+|---|---|---|
+| `--log-dir` | `PMSM_DATALOG_LOG_DIR` | `datalogging/logs` |
+| `--profile-store` | `PMSM_DATALOG_PROFILE_STORE` | `datalogging/motor_profiles.json` |
+| `--csv-path` | `PMSM_DATALOG_CSV_PATH` | nom horodaté dans le dossier des logs |
+
+Exemple :
+
+```powershell
+python .\datalogging\motor_datalog_gui_dashboard.py `
+	--config .\dashboard_config.yaml `
+	--log-dir .\datalogging\logs
+```
+
 ## Prétraitement NanoEdge AI
+
+Lancer le traitement avec la configuration par défaut :
 
 ```powershell
 python .\pretraitement\preprocess_logs_ewma.py
 ```
 
-Le script lit par défaut `datalogging/logs/daq_log_*.csv` et écrit les fichiers traités dans `pretraitement/logs_processed_ewma`.
+Le script lit `datalogging/logs/daq_log_*.csv` et écrit les résultats dans
+`pretraitement/logs_processed_ewma`. Il :
 
-Points importants :
+1. conserve `d6t_temp_c` comme première colonne et cible d'extrapolation ;
+2. utilise six mesures brutes comme variables explicatives ;
+3. calcule `u_s`, `i_s`, `S_el`, `speed_current` et `speed_power` ;
+4. ajoute quatre EWMA à chacune des onze variables explicatives ;
+5. produit donc **55 features** en plus de la cible.
 
-- `d6t_temp_c` reste la première colonne et sert de target NanoEdge AI.
-- Aucune EWMA n'est calculée sur `d6t_temp_c`.
-- Les spans EWMA de référence `[1320, 3360, 6360, 9480]` sont calibrés pour `2 Hz`.
-- Le script déduit la fréquence réelle avec `stm32_time_ms` et adapte les spans automatiquement.
-- Les features incluent les mesures instantanées, `u_s`, `i_s`, `S_el`, `speed_current` et `speed_power`.
+Les spans de référence `[1320, 3360, 6360, 9480]` correspondent à 2 Hz. La
+fréquence réelle est déduite de la médiane des écarts positifs de
+`stm32_time_ms`, puis les spans sont remis à l'échelle. À 10 Hz, ils deviennent
+`[6600, 16800, 31800, 47400]`.
 
-Options utiles :
+Par défaut, le fichier de sortie ne contient ni en-tête ni timestamp. Options
+principales :
 
 ```powershell
 python .\pretraitement\preprocess_logs_ewma.py --header
-python .\pretraitement\preprocess_logs_ewma.py --no-header
-python .\pretraitement\preprocess_logs_ewma.py --frequency-hz 10
 python .\pretraitement\preprocess_logs_ewma.py --include-time
+python .\pretraitement\preprocess_logs_ewma.py --frequency-hz 10
+python .\pretraitement\preprocess_logs_ewma.py --config .\preprocess_ewma.yaml
 ```
 
-## Firmware STM32
+Les variables `PMSM_PREPROCESS_INPUT_DIR`, `PMSM_PREPROCESS_OUTPUT_DIR` et
+`PMSM_PREPROCESS_PATTERN` remplacent respectivement le dossier d'entrée, le
+dossier de sortie et le motif des fichiers.
 
-Le firmware est dans `firmware/tets_motor_dewalt`.
+> **Qualité des données :** l'implémentation actuelle convertit les variables
+> explicatives en nombres et remplace leurs valeurs invalides ou infinies par
+> `0.0`. La cible `d6t_temp_c` n'est pas convertie : une chaîne `NaN` ou une
+> cellule vide reste donc telle quelle dans la sortie. Contrôler et filtrer ces
+> lignes avant l'import dans NanoEdge AI Studio.
 
-Les principaux modules utilisateur sont :
+## Firmware d'acquisition
 
-- `app_serial_control.c` : protocole UART textuel et validation des commandes PC.
-- `app_motor_control.c` : démarrage, arrêt, configuration moteur et sécurités.
-- `app_datalog.c` : envoi du header CSV et des lignes `DATA`.
-- `d6t_ir.c` : lecture I2C logiciel du capteur D6T, target `d6t_temp_c`.
-- `ds18b20.c` : lecture 1-Wire du capteur DS18B20, feature `ds18b20_temp_c`.
+Le projet à importer dans STM32CubeIDE se trouve dans
+`firmware_acquisition/tets_motor_dewalt/STM32CubeIDE`.
 
-Le protocole série applicatif utilise :
+Les modules applicatifs principaux sont :
+
+- `app_serial_control.c` : protocole UART, file de réception et validation ;
+- `app_motor_control.c` : commande MCSDK, rampes et protections ;
+- `app_datalog.c` : planification des capteurs et émission CSV non bloquante ;
+- `d6t_ir.c` : lecture I2C du capteur D6T ;
+- `ds18b20.c` : lecture 1-Wire du capteur DS18B20.
+
+Le protocole accepte :
 
 ```text
 SYNC
@@ -84,68 +170,87 @@ ACQ_START,<datalog_ms>,<ds18b20_ms>
 STOP
 ```
 
-La consigne applicative est bornée à 2500 rpm, 12 A sur `Iq` et 14 A sur le seuil
-de courant total. Le bouton B2 de la B-G473E-ZEST1S démarre ou arrête un profil
-autonome fixe à 2000 rpm, 10 A `Iq` et 12 A de courant total maximal.
+Les limites applicatives sont de 2500 rpm, 12 A sur `Iq` et 14 A sur le
+courant total. L'accélération réellement appliquée est plafonnée à 50 Hz
+électriques/s. Le bouton B2 commande un profil autonome fixé à 2000 rpm, 10 A
+sur `Iq` et 12 A de courant total maximal.
 
-## Firmware de validation NanoEdge
+## Firmware de validation NanoEdge AI
 
-Le projet `firmware_validation/STM32CubeIDE` calcule directement sur la carte
-les 55 features produites par `preprocess_logs_ewma.py`. Le choix se fait dans
-`firmware_validation/Inc/app_config.h` :
+Le projet `firmware_validation/STM32CubeIDE` recalcule sur la carte les mêmes
+55 features que le script Python, à une période fixe de 100 ms. Le mode est
+sélectionné dans `firmware_validation/Inc/app_config.h` :
 
 ```c
 #define APP_NEAI_MODEL_ENABLED  1U
 ```
 
-- `1U` : le modèle de `firmware_validation/AI_Model/libneai.a` est exécuté et
-	l'UART émet `d6t_temp_c;predicted_temp_c` à 10 Hz ;
-- `0U` : le modèle n'est pas appelé et l'UART émet les 55 features numériques
-	attendues par le Serial Emulator NanoEdge AI Studio.
+- `1U` : exécution du modèle et émission de
+	`d6t_temp_c;predicted_temp_c` à 10 Hz ;
+- `0U` : émission des 55 valeurs vers le Serial Emulator NanoEdge AI Studio.
 
-Le modèle courant est une régression Ridge pour Cortex-M4 hard-float, avec une
-entrée `1 x 55`. Pour changer de modèle, remplacer `libneai.a`, `NanoEdgeAI.h`,
-`metadata.json` et le dossier `artifacts` dans `firmware_validation/AI_Model`,
-puis effectuer un clean build. Le nouvel export doit conserver une entrée de
-55 axes et l'API d'extrapolation standard.
+L'export inclus est une régression Ridge `1 x 55` pour Cortex-M4 hard-float.
+Son identifiant est `6a99400cd097fef61cf265dc`. Les métadonnées exportées
+indiquent un score de `0.9827`, un KPI principal de `0.9944`, 464 octets de RAM
+estimés et 892 octets de Flash estimés.
 
-Contrôle du port série :
+Pour remplacer le modèle, remplacer ensemble `libneai.a`, `NanoEdgeAI.h`,
+`metadata.json` et `artifacts/` dans `firmware_validation/AI_Model`, conserver
+55 entrées et l'API d'extrapolation, puis effectuer un **Clean Project** suivi
+d'un **Build Project** dans STM32CubeIDE.
+
+## Validation
+
+Vérifications sans matériel :
+
+```powershell
+python .\firmware_validation\tests\validate_neai_export.py
+python .\validation\test\test_temperature_validation_gui.py
+python .\firmware_validation\tests\validate_preprocess_parity.py
+```
+
+Les deux premiers contrôles réussissent avec l'état actuel. Le test global de
+parité échoue sur `daq_log_20260827_080523.csv` : `0.000512959` sur
+`speed_power_ewma_6600`, pour une tolérance de `0.0005`. Voir la section
+validation de `firmware_validation/README.md` avant de modifier le seuil.
+
+Contrôle du contrat série avec une carte connectée :
 
 ```powershell
 python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
 python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
 ```
 
-La procédure complète et les contraintes de remplacement sont détaillées dans
-`firmware_validation/README.md`.
-
-## Interface de validation thermique
-
-Avec `APP_NEAI_MODEL_ENABLED` à `1U`, lancer l'interface qui compare en direct
-la température D6T et la prédiction produite dans la carte :
+Interface de validation thermique :
 
 ```powershell
-.\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py
+python .\validation\test\temperature_validation_gui.py --port COM5
+python .\validation\test\temperature_validation_gui.py --demo
 ```
 
-Connexion automatique ou démonstration sans matériel :
-
-```powershell
-.\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --port COM5
-.\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --demo
-```
-
-Les deux températures sont affichées en grand avec une décimale. L'interface
-présente également l'erreur instantanée et la MAE cumulée de la session, avec
-les seuils vert, bleu, orange et rouge, un graphique sur 90 secondes et un
-export CSV. Voir `validation/README.md` pour le détail des calculs.
+L'interface affiche les deux températures, l'erreur signée, l'erreur absolue,
+la MAE cumulée et un historique de 90 secondes. Elle peut exporter la session
+au format CSV.
 
 ## Documentation
 
-Générer la documentation HTML locale :
+Construire la documentation HTML :
 
 ```powershell
 python -m sphinx -b html .\docs\source .\docs\build\html
 ```
 
-La documentation décrit l'architecture complète, le dashboard, le prétraitement, le firmware, le câblage et la référence API Python.
+Le point d'entrée généré est `docs/build/html/index.html`. La documentation
+détaille l'architecture, le câblage, le protocole, les traitements, les deux
+firmwares, la validation IA et l'API Python. L'audit technique, les risques et
+le plan d'action sont conservés dans `docs/source/etat_projet.rst`.
+
+## Limites actuelles
+
+- aucun pipeline d'intégration continue n'est fourni ;
+- les firmwares se construisent depuis STM32CubeIDE, sans commande de build
+	autonome versionnée ;
+- le test série nécessite une carte programmée et un port COM disponible ;
+- la parité float32/pandas dépasse légèrement sa tolérance sur le dernier log ;
+- les métriques indépendantes de validation doivent rester accompagnées de
+	leur CSV source pour être reproductibles.

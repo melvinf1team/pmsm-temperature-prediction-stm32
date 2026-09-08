@@ -5,36 +5,73 @@ Arborescence principale
 -----------------------
 
 ``datalogging/``
-	Interface PC Tkinter et logs CSV bruts. Le script principal est
-	``motor_datalog_gui_dashboard.py``. Les acquisitions sont écrites par défaut
-	dans ``datalogging/logs``.
+	Interface Tkinter, profils moteur et logs bruts. Le point d'entrée est
+	``motor_datalog_gui_dashboard.py``.
 
 ``pretraitement/``
-	Préparation des logs pour NanoEdge AI Studio. Le script principal est
-	``preprocess_logs_ewma.py``. Les CSV traités sont écrits par défaut dans
+	Préparation des logs pour NanoEdge AI Studio avec
+	``preprocess_logs_ewma.py``. Les résultats sont écrits par défaut dans
 	``pretraitement/logs_processed_ewma``.
 
-``firmware/``
-	Projet STM32CubeIDE et code applicatif embarqué. Il contient le projet MCSDK,
-	les fichiers générés par STM32CubeMX/Workbench et les modules utilisateur de
-	contrôle, de datalogging et de lecture capteurs.
+``firmware_acquisition/tets_motor_dewalt/``
+	Projet STM32CubeIDE/MCSDK utilisé avec le dashboard. Il reçoit les commandes
+	du PC, commande le moteur, échantillonne les capteurs et publie le flux brut.
+
+``firmware_validation/``
+	Projet STM32CubeIDE autonome. Il reproduit le prétraitement à 10 Hz et
+	publie soit 55 features, soit la mesure D6T et la prédiction du modèle.
+
+``validation/``
+	Interface PC de comparaison thermique, tests unitaires associés et exports
+	CSV des sessions de validation.
+
+``inventories/``
+	Outils de génération d'inventaires sur les journaux et jeux de données.
 
 ``docs/``
-	Documentation Sphinx locale du projet.
+	Sources Sphinx dans ``docs/source`` et sortie HTML dans ``docs/build/html``.
+
+``dashboard_config.yaml`` et ``preprocess_ewma.yaml``
+	Valeurs par défaut des chemins du dashboard et du prétraitement.
 
 ``requirements.txt``
-	Dépendances Python nécessaires au dashboard, au prétraitement et à la
-	génération de documentation.
+	Dépendances Python du dashboard, du prétraitement, des tests et de Sphinx.
 
 Flux fonctionnel
 ----------------
 
-1. Le firmware attend ``SYNC``, ``CFG``/``START`` pour un essai moteur ou
-   ``ACQ_START`` pour une collecte moteur arrêté, puis ``STOP``.
-2. Le dashboard ouvre le port série, envoie la séquence choisie et reçoit le
-   flux ``#CSV_HEADER`` / ``DATA``.
-3. Les logs bruts sont sauvegardés en CSV dans ``datalogging/logs``.
-4. Le prétraitement lit ces logs, conserve ``d6t_temp_c`` comme première colonne
-	cible, calcule les features physiques et ajoute les EWMA.
-5. Les fichiers traités sont importables dans NanoEdge AI Studio pour travailler
-	sur une extrapolation de température.
+1. Le firmware d'acquisition attend une séquence de commandes du dashboard.
+2. Le dashboard reçoit ``#CSV_HEADER`` puis les lignes ``DATA`` et écrit un CSV
+	brut séparé par des points-virgules.
+3. Le prétraitement conserve ``d6t_temp_c`` comme cible, calcule cinq grandeurs
+	physiques et quatre EWMA pour chacune des onze variables explicatives.
+4. Le fichier cible plus 55 features est importé dans NanoEdge AI Studio.
+5. L'export du modèle est intégré au firmware de validation.
+6. La parité des features puis les sorties série sont contrôlées avant de
+	comparer la prédiction à la température D6T.
+
+Fichiers générés et sources de vérité
+-------------------------------------
+
+Les dossiers ``datalogging/logs``, ``pretraitement/logs_processed_ewma`` et les
+CSV de ``validation`` contiennent des données générées. Les sources de vérité
+pour reproduire la chaîne sont :
+
+* les scripts Python et les deux fichiers YAML ;
+* les modules applicatifs des deux firmwares ;
+* ``firmware_validation/AI_Model/metadata.json`` pour l'identité et les
+  caractéristiques de l'export NanoEdge AI ;
+* ``firmware_validation/AI_Model/feature_order.txt`` pour l'ordre contractuel
+  des 55 features.
+
+Les bibliothèques MCSDK, CMSIS et HAL sont des dépendances générées ou tierces.
+La logique propre au projet se trouve principalement dans les dossiers
+``STM32CubeIDE/Application/User`` et dans les en-têtes ``Inc``.
+
+Périmètre des vérifications
+---------------------------
+
+Les contrôles sans matériel couvrent la parité du prétraitement, la cohérence
+de l'export NanoEdge et les calculs de l'interface de validation. Le test du
+contrat UART et les builds STM32 nécessitent respectivement une carte connectée
+et STM32CubeIDE. Aucun pipeline d'intégration continue n'est versionné.

@@ -15,6 +15,38 @@ Il combine :
 * l'écriture CSV dans ``datalogging/logs`` ;
 * un graphe temps réel si ``matplotlib`` est disponible.
 
+Lancement et configuration
+--------------------------
+
+Depuis la racine du dépôt :
+
+.. code-block:: powershell
+
+    python .\datalogging\motor_datalog_gui_dashboard.py
+
+``dashboard_config.yaml`` est chargé automatiquement. Un autre fichier peut
+être fourni avec ``--config``. Les options de chemin sont :
+
+.. list-table:: Configuration du dashboard
+    :header-rows: 1
+
+    * - Option
+      - Variable d'environnement
+      - Valeur par défaut
+    * - ``--log-dir``
+      - ``PMSM_DATALOG_LOG_DIR``
+      - ``datalogging/logs``
+    * - ``--profile-store``
+      - ``PMSM_DATALOG_PROFILE_STORE``
+      - ``datalogging/motor_profiles.json``
+    * - ``--csv-path``
+      - ``PMSM_DATALOG_CSV_PATH``
+      - fichier horodaté dans le dossier des logs
+
+Les options de ligne de commande ont priorité sur les variables
+d'environnement et les fichiers de configuration. Les chemins relatifs sont
+résolus depuis la racine du projet.
+
 Configuration moteur
 --------------------
 
@@ -22,6 +54,12 @@ La classe ``MotorProfile`` décrit les paramètres envoyés à la carte : vitess
 unité de vitesse, limite ``Iq``, seuil hard stop, accélération, période DATA et
 période DS18B20. Les profils intégrés et ceux sauvegardés par l'utilisateur sont
 chargés au démarrage du dashboard.
+
+Le profil intégré ``Personnalisé`` fournit une base de 600 rpm, 2 A sur ``Iq``,
+8 A de hard stop, 5 Hz électriques/s, 100 ms pour ``DATA`` et 1000 ms pour le
+DS18B20. Les profils ajoutés dans l'interface sont sérialisés en JSON. Un fichier
+absent recrée simplement le profil intégré ; un contenu invalide est signalé
+dans le journal de l'interface.
 
 Validation utilisateur
 ----------------------
@@ -31,6 +69,11 @@ périodes et le chemin CSV. En mode moteur, il contrôle également la vitesse, 
 paires de pôles, les limites courant et l'accélération. Les champs moteur sont
 désactivés et ignorés en mode collecte seule. Le dashboard signale notamment
 qu'un DS18B20 ne peut pas fournir une nouvelle mesure fiable sous 750 ms.
+
+Le firmware impose en plus une vitesse minimale de 100 rpm et ramène toute
+accélération acceptée supérieure à 50 Hz électriques/s à cette limite. Pour que
+l'interface reflète exactement la commande appliquée, rester dans les plages de
+:doc:`utilisation`.
 
 Séquence de lancement
 ---------------------
@@ -70,6 +113,20 @@ Réception UART et CSV
 
 Le dashboard écrit uniquement ``CSV_OUTPUT_COLUMNS`` afin que les fichiers bruts
 gardent un format stable même si le firmware ajoute des colonnes de diagnostic.
+Le tampon du fichier est vidé au plus tard toutes les dix lignes ou toutes les
+secondes, puis une dernière fois lors de la fermeture propre de la session.
+
+Modèle d'exécution
+------------------
+
+Tkinter et les mises à jour graphiques restent dans le thread principal. Un
+thread lit le port série ; les séquences de lancement et d'arrêt utilisent des
+threads distincts. Des files ``queue.Queue`` transportent les événements GUI et
+les acquittements sans accès concurrent direct aux widgets.
+
+Le graphe conserve au maximum 1500 points par série et se rafraîchit toutes les
+250 ms. L'absence de Matplotlib ne bloque pas l'acquisition : seule la zone de
+tracé est indisponible.
 
 Chemins
 -------
@@ -77,3 +134,14 @@ Chemins
 ``default_csv_path`` construit un nom ``daq_log_YYYYMMDD_HHMMSS.csv`` dans
 ``datalogging/logs`` à partir du chemin du script, pas du répertoire courant. Le
 comportement est donc identique depuis VS Code, PowerShell ou un raccourci.
+
+Diagnostic
+----------
+
+* Aucun port : vérifier ST-LINK/VCP, le câble USB et fermer les autres clients.
+* ``ERR`` après ``CFG`` : contrôler les bornes, notamment 100 rpm minimum et
+   750 ms minimum pour le DS18B20.
+* ``DATA`` sans CSV : rechercher d'abord ``#CSV_HEADER`` dans le journal.
+* Mesures D6T à ``NaN`` : vérifier l'alimentation, les pull-up et le PEC I2C.
+* Arrêt brutal du programme : considérer le dernier bloc tamponné comme
+   potentiellement incomplet et repartir dans un nouveau fichier.

@@ -4,9 +4,11 @@ Firmware STM32
 Organisation
 ------------
 
-Le firmware se trouve dans ``firmware/tets_motor_dewalt``. Il combine un projet
+Le firmware d'acquisition se trouve dans
+``firmware_acquisition/tets_motor_dewalt``. Il combine un projet
 STM32CubeIDE/MCSDK généré et plusieurs modules utilisateur situés dans
-``STM32CubeIDE/Application/User`` et déclarés dans ``Inc``.
+``STM32CubeIDE/Application/User`` et déclarés dans ``Inc``. Le projet à importer
+dans STM32CubeIDE est le sous-dossier ``STM32CubeIDE``.
 
 Les modules applicatifs principaux sont :
 
@@ -64,6 +66,14 @@ accélération, période DATA et période DS18B20. Une configuration valide appe
 ``ACQ_START`` valide uniquement les deux périodes, force le moteur à l'arrêt et
 arme le logger sans exiger de configuration moteur.
 
+Les bornes du protocole sont 100 à 2500 rpm, 12 A maximum sur ``Iq``, 14 A
+maximum pour le hard stop, 1 à 10 000 ms pour ``DATA`` et 10 000 ms maximum
+pour le DS18B20. Une période DS18B20 inférieure à 750 ms est acceptée puis
+ramenée à 750 ms. Le parseur accepte une accélération jusqu'à 2000 Hz
+électriques/s, mais ``AppMotorControl_SetRuntimeConfig`` la borne ensuite à
+50 Hz électriques/s. Les valeurs effectives à utiliser côté opérateur sont
+donc au moins 750 ms et au plus 50 Hz électriques/s.
+
 Contrôle moteur
 ---------------
 
@@ -120,6 +130,20 @@ MCSDK, courant trop élevé ou survitesse. Les sources Workbench et les fichiers
 générés utilisent tous une limite applicative de 12 A afin qu'une régénération ne
 réintroduise pas l'ancien plafond de 5 A.
 
+Compilation et programmation
+-----------------------------
+
+Importer ``firmware_acquisition/tets_motor_dewalt/STM32CubeIDE`` comme projet
+existant. Choisir ``Debug`` ou ``Release``, exécuter un clean build, puis
+programmer la B-G473E-ZEST1S avec ST-LINK. Les sources sous ``Drivers``,
+``MCSDK_v6.4.2-Full`` et une partie de ``Src``/``Inc`` sont générées ou tierces ;
+les modifications fonctionnelles propres au dépôt doivent rester concentrées
+dans ``STM32CubeIDE/Application/User`` et les interfaces applicatives associées.
+
+Une régénération depuis STM32CubeMX ou Motor Control Workbench doit être revue
+avant compilation : elle peut modifier les fichiers générés, les affectations
+de broches et les constantes de courant.
+
 Firmware de validation IA
 -------------------------
 
@@ -150,3 +174,8 @@ contexte. Cette stratégie n'écrit pas dans la Flash.
 
 Enfin, la pompe USART1 réactive le périphérique si nécessaire et purge les
 drapeaux ``ORE``, ``FE`` et ``NE`` avant de continuer la file TX non bloquante.
+
+Le firmware de validation s'importe séparément depuis
+``firmware_validation/STM32CubeIDE``. Son mode UART est choisi à la compilation ;
+il faut donc effectuer un clean build et reflasher après toute modification de
+``APP_NEAI_MODEL_ENABLED``.
