@@ -12,6 +12,7 @@
 #include "fixpmath.h"
 
 #include <stdbool.h>
+#include <math.h>
 
 /*
  * ================================
@@ -47,11 +48,16 @@
 #define APP_CFG_MIN_TARGET_SPEED_RPM        100.0f
 #define APP_CFG_MAX_ACCEL_ELEC_HZ_S         50.0f
 
-/* Profil autonome appliqué par le bouton bleu B2 (PC13). */
-#define APP_BUTTON_TARGET_SPEED_RPM         2000.0f
-#define APP_BUTTON_IQ_LIMIT_A               10.0f
-#define APP_BUTTON_HARD_STOP_CURRENT_A      12.0f
-#define APP_BUTTON_ACCEL_ELEC_HZ_S          50.0f
+/* Profil autonome variable appliqué par le bouton bleu B2 (PC13). */
+#define APP_BUTTON_MIN_TARGET_SPEED_RPM     2000.0f
+#define APP_BUTTON_MAX_TARGET_SPEED_RPM     4000.0f
+#define APP_BUTTON_MIN_SPEED_STEP_RPM       200U
+#define APP_BUTTON_MAX_SPEED_STEP_RPM       500U
+#define APP_BUTTON_MIN_CHANGE_PERIOD_MS     10000U
+#define APP_BUTTON_MAX_CHANGE_PERIOD_MS     30000U
+#define APP_BUTTON_IQ_LIMIT_A               30.0f
+#define APP_BUTTON_HARD_STOP_CURRENT_A      30.0f
+#define APP_BUTTON_ACCEL_ELEC_HZ_S          10.0f
 #define APP_BUTTON_DEBOUNCE_MS              250U
 #define APP_START_RETRY_PERIOD_MS            100U
 
@@ -64,7 +70,7 @@
 #define APP_SPEED_PID_KI_FACTOR             0.20f
 
 /*
- * Même si l'utilisateur demande 8-12 A, on démarre avec une limite plus basse
+ * Même si l'utilisateur demande jusqu'à 30 A, on démarre avec une limite plus basse
  * puis on la rampe progressivement pendant RUN. Ça évite le pic brutal au moment
  * où le contrôle vitesse prend la main.
  */
@@ -97,6 +103,10 @@ static volatile bool app_button_irq_seen = false;
 static volatile uint32_t app_button_last_irq_ms = 0U;
 static bool app_motor_start_requested = false;
 static uint32_t app_motor_next_start_attempt_ms = 0U;
+static bool app_button_profile_active = false;
+static bool app_button_speed_change_scheduled = false;
+static uint32_t app_button_next_speed_change_ms = 0U;
+static uint32_t app_button_random_state = 0x6D2B79F5U;
 
 static float app_target_speed_rpm = APP_DEFAULT_TARGET_SPEED_RPM;
 static float app_iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
@@ -105,9 +115,129 @@ static uint32_t app_iq_ramp_last_ms = 0U;
 static float app_hard_stop_current_a = APP_DEFAULT_HARD_STOP_CURRENT_A;
 static float app_accel_elec_hz_s = APP_DEFAULT_ACCEL_ELEC_HZ_S;
 
+static void AppMotorControl_ApplySpeedReference(void);
+
 static float AppMotorControl_MechRpmToElecHz(float rpm)
 {
   return (rpm * (float)POLE_PAIR_NUM) / 60.0f;
+}
+
+static uint32_t AppMotorControl_ButtonRandomNext(void)
+{
+  uint32_t random_value = app_button_random_state;
+
+  random_value ^= random_value << 13;
+  random_value ^= random_value >> 17;
+  random_value ^= random_value << 5;
+  app_button_random_state = random_value;
+  return random_value;
+}
+
+static uint32_t AppMotorControl_ButtonRandomRange(uint32_t minimum,
+                                                   uint32_t maximum)
+{
+  uint32_t range = (maximum - minimum) + 1U;
+  return minimum + (AppMotorControl_ButtonRandomNext() % range);
+}
+
+static void AppMotorControl_ScheduleNextButtonSpeedChange(uint32_t now)
+{
+  uint32_t delay_ms = AppMotorControl_ButtonRandomRange(
+    APP_BUTTON_MIN_CHANGE_PERIOD_MS,
+    APP_BUTTON_MAX_CHANGE_PERIOD_MS);
+
+  app_button_next_speed_change_ms = now + delay_ms;
+  app_button_speed_change_scheduled = true;
+}
+
+static float AppMotorControl_SelectNextButtonSpeed(void)
+{
+  uint32_t step_rpm = AppMotorControl_ButtonRandomRange(
+    APP_BUTTON_MIN_SPEED_STEP_RPM,
+    APP_BUTTON_MAX_SPEED_STEP_RPM);
+  bool increase_speed;
+
+  if (app_target_speed_rpm <= APP_BUTTON_MIN_TARGET_SPEED_RPM)
+  {
+    increase_speed = true;
+  }
+  else if (app_target_speed_rpm >= APP_BUTTON_MAX_TARGET_SPEED_RPM)
+  {
+    increase_speed = false;
+  }
+  else
+  {
+    increase_speed = ((AppMotorControl_ButtonRandomNext() & 1U) != 0U);
+  }
+
+  float next_speed_rpm = app_target_speed_rpm;
+  if (increase_speed)
+  {
+    next_speed_rpm += (float)step_rpm;
+    if (next_speed_rpm > APP_BUTTON_MAX_TARGET_SPEED_RPM)
+    {
+      next_speed_rpm = APP_BUTTON_MAX_TARGET_SPEED_RPM;
+    }
+  }
+  else
+  {
+    next_speed_rpm -= (float)step_rpm;
+    if (next_speed_rpm < APP_BUTTON_MIN_TARGET_SPEED_RPM)
+    {
+      next_speed_rpm = APP_BUTTON_MIN_TARGET_SPEED_RPM;
+    }
+  }
+
+  return next_speed_rpm;
+}
+
+static void AppMotorControl_StartButtonProfile(uint32_t now)
+{
+  app_button_random_state ^= now + 0x9E3779B9U;
+  if (app_button_random_state == 0U)
+  {
+    app_button_random_state = 0x6D2B79F5U;
+  }
+
+  (void)AppMotorControl_ButtonRandomNext();
+  app_button_profile_active = true;
+  app_button_speed_change_scheduled = false;
+  app_button_next_speed_change_ms = 0U;
+
+  AppMotorControl_SetRuntimeConfig(APP_BUTTON_MIN_TARGET_SPEED_RPM,
+                                   APP_BUTTON_IQ_LIMIT_A,
+                                   APP_BUTTON_HARD_STOP_CURRENT_A,
+                                   APP_BUTTON_ACCEL_ELEC_HZ_S);
+}
+
+static void AppMotorControl_StopButtonProfile(void)
+{
+  app_button_profile_active = false;
+  app_button_speed_change_scheduled = false;
+  app_button_next_speed_change_ms = 0U;
+}
+
+static void AppMotorControl_ServiceButtonProfile(uint32_t now)
+{
+  if (!app_button_profile_active || (app_mc_state != APP_MC_RUNNING))
+  {
+    return;
+  }
+
+  if (!app_button_speed_change_scheduled)
+  {
+    AppMotorControl_ScheduleNextButtonSpeedChange(now);
+    return;
+  }
+
+  if ((int32_t)(now - app_button_next_speed_change_ms) < 0)
+  {
+    return;
+  }
+
+  app_target_speed_rpm = AppMotorControl_SelectNextButtonSpeed();
+  AppMotorControl_ApplySpeedReference();
+  AppMotorControl_ScheduleNextButtonSpeedChange(now);
 }
 
 static void AppMotorControl_ResetSpeedPi(void)
@@ -136,7 +266,7 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
   /*
    * Important : dans le MCSDK HSO, MCI_SetMaxCurrent() met à jour I_max_pu
    * mais ne remet pas forcément à jour les limites internes du PI vitesse.
-   * Si ces limites restent à NOMINAL_CURRENT_A=12 A, le PI peut intégrer
+  * Si ces limites restent différentes de NOMINAL_CURRENT_A=30 A, le PI peut intégrer
    * trop fort et demander 6-8 A d'un coup. On force donc la limite du PI à la
    * même valeur que l'Iq limite runtime.
    */
@@ -158,17 +288,20 @@ static void AppMotorControl_ApplySpeedPidTuning(void)
   MCI_SetPidSpeedKi(pMCI[M1], PID_SPD_KI * APP_SPEED_PID_KI_FACTOR);
 }
 
+static void AppMotorControl_ApplySpeedReference(void)
+{
+  MC_SetAccelerationMotor1_F(app_accel_elec_hz_s);
+  MC_SetSpeedReferenceMotor1_F(
+    AppMotorControl_MechRpmToElecHz(app_target_speed_rpm));
+}
+
 static void AppMotorControl_ApplyConfig(void)
 {
-  float target_elec_hz = AppMotorControl_MechRpmToElecHz(app_target_speed_rpm);
-
   AppMotorControl_ApplySpeedPidTuning();
   AppMotorControl_SetIqLimit(app_active_iq_limit_a, true);
 
-  MC_SetAccelerationMotor1_F(app_accel_elec_hz_s);
-
   MC_SetControlModeMotor1(MCM_SPEED_MODE);
-  MC_SetSpeedReferenceMotor1_F(target_elec_hz);
+  AppMotorControl_ApplySpeedReference();
 }
 
 void AppMotorControl_SetRuntimeConfig(float target_rpm,
@@ -176,7 +309,11 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
                                       float hard_limit_a,
                                       float accel_elec_hz_s)
 {
-  if (target_rpm < APP_CFG_MIN_TARGET_SPEED_RPM)
+  if (!isfinite(target_rpm))
+  {
+    target_rpm = APP_DEFAULT_TARGET_SPEED_RPM;
+  }
+  else if (target_rpm < APP_CFG_MIN_TARGET_SPEED_RPM)
   {
     target_rpm = APP_CFG_MIN_TARGET_SPEED_RPM;
   }
@@ -186,7 +323,7 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   }
   app_target_speed_rpm = target_rpm;
 
-  if (iq_limit_a <= 0.0f)
+  if (!isfinite(iq_limit_a) || (iq_limit_a <= 0.0f))
   {
     iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
   }
@@ -196,7 +333,7 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   }
   app_iq_limit_a = iq_limit_a;
 
-  if (hard_limit_a <= 0.0f)
+  if (!isfinite(hard_limit_a) || (hard_limit_a <= 0.0f))
   {
     hard_limit_a = APP_DEFAULT_HARD_STOP_CURRENT_A;
   }
@@ -206,7 +343,7 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   }
   app_hard_stop_current_a = hard_limit_a;
 
-  if (accel_elec_hz_s <= 0.0f)
+  if (!isfinite(accel_elec_hz_s) || (accel_elec_hz_s <= 0.0f))
   {
     accel_elec_hz_s = APP_DEFAULT_ACCEL_ELEC_HZ_S;
   }
@@ -237,6 +374,7 @@ void AppMotorControl_Init(void)
   app_mc_boot_ms = HAL_GetTick();
   app_motor_start_requested = false;
   app_motor_next_start_attempt_ms = 0U;
+  AppMotorControl_StopButtonProfile();
 
 #if APP_MOTOR_AUTOSTART_ENABLE
   app_mc_state = APP_MC_WAIT_AUTOSTART;
@@ -293,6 +431,7 @@ bool AppMotorControl_Start(void)
 void AppMotorControl_Stop(void)
 {
   app_motor_start_requested = false;
+  AppMotorControl_StopButtonProfile();
   MC_StopMotor1();
 
   app_mc_state = APP_MC_IDLE;
@@ -343,12 +482,15 @@ static bool AppMotorControl_TakeButtonToggleRequest(void)
 
 static void AppMotorControl_HandleButtonToggle(void)
 {
+  uint32_t now;
+
   if (!AppMotorControl_TakeButtonToggleRequest())
   {
     return;
   }
 
-  if (app_motor_start_requested ||
+  if (app_button_profile_active ||
+      app_motor_start_requested ||
       (app_mc_state == APP_MC_STARTING) ||
       AppMotorControl_IsRunning())
   {
@@ -356,10 +498,8 @@ static void AppMotorControl_HandleButtonToggle(void)
     return;
   }
 
-  AppMotorControl_SetRuntimeConfig(APP_BUTTON_TARGET_SPEED_RPM,
-                                   APP_BUTTON_IQ_LIMIT_A,
-                                   APP_BUTTON_HARD_STOP_CURRENT_A,
-                                   APP_BUTTON_ACCEL_ELEC_HZ_S);
+  now = HAL_GetTick();
+  AppMotorControl_StartButtonProfile(now);
   app_motor_start_requested = true;
   app_motor_next_start_attempt_ms = 0U;
 }
@@ -462,6 +602,7 @@ void AppMotorControl_Task(void)
         app_iq_ramp_last_ms = now;
         AppMotorControl_ResetSpeedPi();
         AppMotorControl_SetIqLimit(app_active_iq_limit_a, true);
+        AppMotorControl_ApplySpeedReference();
         app_mc_overcurrent_since_ms = 0U;
         app_mc_overspeed_since_ms = 0U;
       }
@@ -478,12 +619,22 @@ void AppMotorControl_Task(void)
 
     case APP_MC_RUNNING:
     {
+      AppMotorControl_ServiceButtonProfile(now);
       AppMotorControl_UpdateIqLimitRamp(now);
 
       dq_float_t idq = MC_GetCurrentMotor1_F();
 
       float i2 = (idq.D * idq.D) + (idq.Q * idq.Q);
       float i_max2 = app_hard_stop_current_a * app_hard_stop_current_a;
+
+      if (!isfinite(idq.D) || !isfinite(idq.Q) || !isfinite(i2))
+      {
+        app_motor_start_requested = false;
+        AppMotorControl_StopButtonProfile();
+        MC_StopMotor1();
+        app_mc_state = APP_MC_FAULT;
+        return;
+      }
 
       if ((now - app_mc_run_enter_ms) >= APP_CURRENT_CHECK_AFTER_RUN_MS)
       {
@@ -511,6 +662,20 @@ void AppMotorControl_Task(void)
         float speed_elec_hz = MC_GetSpeedMotor1_F();
         float speed_rpm = (speed_elec_hz * 60.0f) / (float)POLE_PAIR_NUM;
         float speed_limit_rpm = (app_target_speed_rpm * APP_OVERSPEED_RATIO) + APP_OVERSPEED_MARGIN_RPM;
+
+        if (!isfinite(speed_elec_hz) || !isfinite(speed_rpm))
+        {
+          app_motor_start_requested = false;
+          AppMotorControl_StopButtonProfile();
+          MC_StopMotor1();
+          app_mc_state = APP_MC_FAULT;
+          return;
+        }
+
+        if (speed_limit_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM)
+        {
+          speed_limit_rpm = APP_MOTOR_MAX_TARGET_SPEED_RPM;
+        }
 
         if (speed_rpm < 0.0f)
         {

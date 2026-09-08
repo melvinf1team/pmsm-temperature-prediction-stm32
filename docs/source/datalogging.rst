@@ -70,10 +70,10 @@ paires de pôles, les limites courant et l'accélération. Les champs moteur son
 désactivés et ignorés en mode collecte seule. Le dashboard signale notamment
 qu'un DS18B20 ne peut pas fournir une nouvelle mesure fiable sous 750 ms.
 
-Le firmware impose en plus une vitesse minimale de 100 rpm et ramène toute
-accélération acceptée supérieure à 50 Hz électriques/s à cette limite. Pour que
-l'interface reflète exactement la commande appliquée, rester dans les plages de
-:doc:`utilisation`.
+Le dashboard et le parseur firmware appliquent les mêmes bornes : 100 à
+4500 rpm, 30 A maximum pour ``Iq`` et le hard stop, et 50 Hz électriques/s
+maximum pour l'accélération. Les valeurs hors plage sont refusées avant le
+démarrage. Les détails et précautions sont donnés dans :doc:`utilisation`.
 
 Séquence de lancement
 ---------------------

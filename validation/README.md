@@ -27,6 +27,12 @@ Exemple :
 31.400000;30.872314
 ```
 
+Dans ce firmware, B2 lance désormais un profil moteur à 30 A maximum : départ à
+2000 rpm, puis cible pseudo-aléatoire entre 2000 et 4000 rpm, modifiée toutes
+les 10 à 30 secondes par pas de 200 à 500 rpm avec une rampe de 300 rpm/s. Ces
+changements ne modifient pas le protocole série ci-dessus. Ne les utiliser
+qu'après qualification électrique, thermique et mécanique du banc.
+
 ## Lancement
 
 Sélection manuelle du port dans l'interface :

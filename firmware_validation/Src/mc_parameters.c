@@ -125,7 +125,7 @@ const FLASH_Params_t  flashParams =
    .limitAccelLow = BOARD_LIMIT_ACCEL_LOW,
    .limitUnderVoltage = BOARD_LIMIT_UNDERVOLTAGE,
    .maxModulationIndex = BOARD_MAX_MODULATION,
-   .softOverCurrentTrip = (0.8*M1_MAX_READABLE_CURRENT),
+  .softOverCurrentTrip = BOARD_SOFT_OVERCURRENT_TRIP,
 },
   .KSampleDelay = KSAMPLE_DELAY,
   .throttle =

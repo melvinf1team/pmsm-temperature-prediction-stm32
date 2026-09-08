@@ -29,38 +29,26 @@ et un second firmware reproduit ce calcul avant l'inférence. Les contrats
 essentiels sont matérialisés par ``CSV_OUTPUT_COLUMNS``, ``feature_order.txt`` et
 les dimensions du header NanoEdge.
 
-Les principaux risques ne concernent pas l'organisation générale, mais la
-cohérence aux frontières : validations différentes entre le dashboard et le
-firmware, dérive numérique légèrement supérieure au seuil de parité sur le log
-le plus récent, et absence de politique stricte pour les cibles D6T invalides.
+Les limites du dashboard, des deux firmwares et des fichiers Workbench sont
+désormais alignées à 4500 rpm et 30 A. Le risque principal est donc leur
+qualification sur le banc réel, devant la dérive numérique légèrement
+supérieure au seuil de parité et l'absence de politique stricte pour les cibles
+D6T invalides.
 
 État des vérifications
 ----------------------
 
-.. list-table:: Résultats au 8 septembre 2026
-   :header-rows: 1
+.. csv-table:: Résultats au 8 septembre 2026
+    :header: "Vérification", "État", "Résultat"
+    :widths: 25, 20, 55
 
-   * - Vérification
-     - État
-     - Résultat
-   * - Build Sphinx strict
-     - Réussi
-     - Aucun avertissement avec ``-W --keep-going``
-   * - Cohérence export NanoEdge
-     - Réussie
-     - ID, ABI, symboles, dimensions et artefacts Ridge valides
-   * - Tests de l'interface thermique
-     - Réussis
-     - 3 tests exécutés
-   * - Parité Python/float32
-     - En échec
-     - ``0.000512959`` pour une limite de ``0.0005`` sur le dernier log
-   * - Build des firmwares
-     - Non exécuté
-     - STM32CubeIDE et la chaîne embarquée sont requis
-   * - Contrat USART1 sur cible
-     - Non exécuté
-     - Carte programmée et port COM requis
+    "Build Sphinx strict", "Réussi", "Aucun avertissement avec -W --keep-going"
+    "Cohérence export NanoEdge", "Réussie", "ID, ABI, symboles, dimensions et artefacts Ridge valides"
+    "Tests de l'interface thermique", "Réussis", "3 tests exécutés"
+    "Cohérence des limites moteur", "Réussie", "Dashboard, firmwares, IOC, WBDEF et Workbench contrôlés"
+    "Parité Python/float32", "En échec", "0.000512959 pour une limite de 0.0005 sur le dernier log"
+   "Build des firmwares", "Réussi en Debug et Release", "Les quatre ELF sont générés ; les contrôleurs modifiés compilent sans avertissement"
+    "Contrat USART1 sur cible", "Non exécuté", "Carte programmée et port COM requis"
 
 Points forts
 ------------
@@ -90,20 +78,20 @@ Traçabilité du modèle
 Risques prioritaires
 --------------------
 
-1. Contrat de configuration divergent
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Qualification des nouvelles limites moteur
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Priorité élevée.** Le dashboard accepte une vitesse strictement positive,
-alors que le firmware refuse moins de 100 rpm. Le dashboard ne borne pas
-l'accélération ; le parseur UART accepte jusqu'à 2000 Hz électriques/s, puis le
-contrôle moteur applique au maximum 50 Hz électriques/s. Enfin, une commande
-UART directe avec une période DS18B20 inférieure à 750 ms est acquittée puis
-ramenée à 750 ms.
+**Priorité élevée.** Les plafonds logiciels sont maintenant de 4500 rpm,
+30 A sur ``Iq`` et 30 A sur le courant total. La chaîne de mesure représente
+environ 110 A en pleine échelle et les deux builds Debug réussissent, mais ces
+faits ne prouvent pas la tenue électrique, thermique ou mécanique du banc.
 
-Conséquence : une valeur peut être acceptée par une couche, rejetée ou modifiée
-par la suivante, et l'opérateur peut croire qu'une configuration différente est
-active. Centraliser les bornes ou renvoyer systématiquement les valeurs
-effectivement appliquées supprimerait cette ambiguïté.
+Le profil B2 démarre à 2000 rpm puis varie entre 2000 et 4000 rpm, par pas de
+200 à 500 rpm toutes les 10 à 30 secondes. La rampe de 10 Hz électriques/s
+limite la pente à 300 rpm/s avec deux paires de pôles. Avant emploi, vérifier le
+moteur, la carte de puissance, l'alimentation, le câblage, le refroidissement,
+la fixation et l'arrêt d'urgence. Commencer à courant réduit et relever les
+températures ainsi que les défauts. La polarisation reste limitée à 14 A.
 
 2. Parité numérique au-delà du seuil
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -143,11 +131,14 @@ permettrait de transformer les performances en critère de recette.
 5. Couverture et automatisation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Priorité moyenne.** Il n'existe ni CI ni commande de test unique. Les trois
+**Priorité moyenne.** Il n'existe ni CI ni commande de test unique. Le contrôle
+``validate_motor_limits.py`` verrouille les constantes et fichiers générateurs,
+et les trois
 tests de l'interface couvrent la reprise série et l'écriture CSV, mais pas les
 seuils visuels, tous les cas du parseur, les arguments du dashboard ou le
-prétraitement de fichiers invalides. Les firmwares n'ont pas de build headless
-versionné ni de tests unitaires hôte sur les parseurs et machines d'états.
+prétraitement de fichiers invalides. Les builds headless ont été exécutés, mais
+leur commande n'est pas versionnée et les machines d'états n'ont pas de tests
+unitaires hôte.
 
 6. Dépendances et confidentialité
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -164,8 +155,8 @@ dépôt ou automatiser sa suppression dans le processus d'export.
 Plan d'action recommandé
 ------------------------
 
-1. Aligner les bornes du dashboard, du parseur UART et du contrôle moteur, puis
-   tester les valeurs limites et les valeurs juste hors plage.
+1. Qualifier progressivement 4500 rpm et 30 A sur le banc instrumenté, puis
+   valider le profil B2 sur sa plage complète avec les moyens d'arrêt actifs.
 2. Diagnostiquer la divergence de ``speed_power_ewma_6600`` sur le log du
    27 août avant de modifier la tolérance de parité.
 3. Valider explicitement ``d6t_temp_c`` et produire un rapport des lignes
@@ -173,7 +164,7 @@ Plan d'action recommandé
 4. Ajouter un test de performance reproductible lié à l'ID de bibliothèque et
    à un manifeste de dataset.
 5. Fournir une commande unique pour les tests hôte et le build Sphinx strict,
-   puis l'exécuter en intégration continue.
+   les builds firmware Debug/Release, puis l'exécuter en intégration continue.
 6. Figer les versions Python validées et documenter un build firmware
    reproductible en dehors de l'état local de STM32CubeIDE.
 

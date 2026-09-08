@@ -36,6 +36,28 @@ Les dossiers `Drivers`, `MCSDK_v6.4.2-Full`, `Src` et une partie de `Inc` sont
 issus des outils STM32. Une régénération CubeMX/Workbench doit être revue avant
 d'être intégrée.
 
+## Limites moteur et profil B2
+
+Les plafonds communs au dashboard et aux deux firmwares sont de 4500 rpm,
+30 A sur `Iq` et 30 A sur le courant total. Le capteur de courant reste
+configuré avec une pleine échelle calculée d'environ 110 A ; cela garantit la
+représentation numérique, pas la tenue thermique du banc. La polarisation de
+démarrage reste limitée à 14 A ; son seuil logiciel et le profileur DC ne
+peuvent pas dépasser 30 A.
+
+Un premier appui sur B2 démarre à 2000 rpm avec une limite `Iq` de 30 A. Une
+nouvelle cible est choisie toutes les 10 à 30 secondes dans la plage
+2000–4000 rpm. Chaque pas aléatoire vaut 200 à 500 rpm avant application des
+bornes, puis la rampe MCSDK de 10 Hz électriques/s réalise la transition. Avec
+deux paires de pôles, la pente mécanique est de 300 rpm/s. Un second appui
+arrête et désactive le profil.
+
+Une mesure MCSDK de courant ou de vitesse ``NaN``/infinie provoque un arrêt
+immédiat, désactive le profil B2 et place le contrôle moteur en défaut.
+
+> Ces limites élevées exigent une qualification électrique, thermique et
+> mécanique sur le banc réel avant utilisation.
+
 ## Modèle embarqué actuel
 
 Le contenu de `AI_Model/metadata.json` et `NanoEdgeAI.h` décrit l'export suivant :
@@ -92,8 +114,8 @@ Exemple :
 ```
 
 Aucune ligne n'est émise tant que le D6T n'a pas fourni de mesure valide, ni si
-l'initialisation ou l'inférence NanoEdge échoue. Le bouton B2 démarre ou arrête
-le profil moteur autonome sans ajouter de texte au flux de données.
+l'initialisation ou l'inférence NanoEdge échoue. Les changements de vitesse du
+profil B2 n'ajoutent aucun texte au flux de données.
 
 Contrôler le contrat avec une carte connectée :
 
@@ -215,6 +237,16 @@ Vérifier la structure de l'export :
 Ce contrôle réussit avec l'export versionné : ID, dimensions, ABI, symboles,
 ordre des features et artefacts Ridge sont cohérents.
 
+Vérifier les limites dans le dashboard, les deux firmwares et les fichiers
+Workbench/CubeMX :
+
+```powershell
+.\.venv\Scripts\python.exe .\firmware_validation\tests\validate_motor_limits.py
+```
+
+Ce contrôle vérifie 4500 rpm, 30 A, la polarisation à 14 A, la plage B2,
+les pas, les temporisations, la rampe et la plage analogique de courant.
+
 Comparer le prétraitement float32 simulé à pandas :
 
 ```powershell
@@ -227,5 +259,8 @@ l'échelle sur `speed_power_ewma_6600`, ligne 60913, pour une limite de `0.0005`
 Le test global échoue donc actuellement. Cette faible dérive float32 doit être
 qualifiée avant d'ajuster la tolérance ou l'implémentation.
 
-Le contrôle série nécessite une carte réelle. Aucun build STM32 automatisé ou
-pipeline d'intégration continue n'est fourni dans le dépôt.
+Les builds Debug et Release des deux firmwares produisent leurs ELF sous
+STM32CubeIDE 2.1.1, et les contrôleurs modifiés compilent sans avertissement.
+Le contrôle série et la qualification à 4500 rpm/30 A nécessitent une carte et
+un banc sécurisés. Aucun pipeline d'intégration continue n'est fourni dans le
+dépôt.

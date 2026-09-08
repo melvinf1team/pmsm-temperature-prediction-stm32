@@ -45,8 +45,8 @@ timestamp ou texte. Ce format correspond aux colonnes explicatives des CSV
 prétraités et peut être lu directement par le Serial Emulator d'extrapolation.
 
 Dans les deux modes, le flux démarre automatiquement au boot à 115200 bauds,
-8N1. Le bouton B2 permet de démarrer ou arrêter le profil moteur autonome sans
-ajouter de texte sur l'UART.
+8N1. Le bouton B2 démarre un profil à 30 A maximum dont la cible varie doucement
+entre 2000 et 4000 rpm, par pas de 200 à 500 rpm toutes les 10 à 30 secondes.
 
 Ordre de validation
 -------------------
@@ -62,6 +62,7 @@ Commandes sans matériel :
 .. code-block:: powershell
 
    .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
+   .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_motor_limits.py
    .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_preprocess_parity.py
 
 Commandes avec une carte connectée :
@@ -74,8 +75,11 @@ Commandes avec une carte connectée :
 État vérifié du dépôt
 ---------------------
 
-Le contrôle ``validate_neai_export.py`` réussit avec l'export versionné. Les
-trois tests unitaires de l'interface de validation réussissent également.
+Les contrôles ``validate_neai_export.py`` et ``validate_motor_limits.py``
+réussissent avec l'état versionné. Les trois tests unitaires de l'interface de
+validation réussissent également. Les builds Debug et Release des deux
+firmwares produisent leurs ELF sous STM32CubeIDE 2.1.1 ; les contrôleurs moteur
+modifiés compilent sans avertissement.
 
 Le contrôle global ``validate_preprocess_parity.py`` dépasse actuellement sa
 tolérance sur ``daq_log_20260827_080523.csv`` : l'erreur relative mise à

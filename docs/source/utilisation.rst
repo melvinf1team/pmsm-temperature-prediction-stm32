@@ -22,30 +22,40 @@ Plages opératoires
 Le dashboard applique les plages suivantes. Le firmware reste l'autorité
 finale pour les commandes reçues directement sur l'UART :
 
-.. list-table:: Paramètres d'acquisition
-    :header-rows: 1
+.. csv-table:: Paramètres d'acquisition
+    :header: "Paramètre", "Plage", "Remarque"
+    :widths: 25, 25, 50
 
-    * - Paramètre
-      - Plage
-      - Remarque
-    * - Vitesse cible
-      - 100 à 2500 rpm
-      - Une valeur inférieure à 100 rpm est refusée par le firmware
-    * - Limite ``Iq``
-      - strictement positive à 12 A
-      - La montée démarre au plus à 4,5 A puis suit une rampe
-    * - Arrêt sur courant total
-      - strictement positif à 14 A
-      - Protection applicative en plus des défauts MCSDK
-    * - Accélération
-      - strictement positive à 50 Hz électriques/s
-      - Limite effectivement appliquée par le contrôle moteur
-    * - Période ``DATA``
-      - 1 à 10 000 ms
-      - Détermine la cadence du CSV brut
-    * - Période DS18B20
-      - 750 à 10 000 ms
-      - Le dashboard refuse une valeur inférieure ; le firmware la ramène à 750 ms
+    "Vitesse cible", "100 à 4500 rpm", "Une valeur inférieure à 100 rpm est refusée"
+    "Limite Iq", "strictement positive à 30 A", "La montée démarre au plus à 4,5 A puis suit une rampe"
+    "Arrêt sur courant total", "strictement positif à 30 A", "Protection applicative en plus des défauts MCSDK"
+    "Accélération", "strictement positive à 50 Hz électriques/s", "Même limite dans le dashboard et le firmware"
+    "Période DATA", "1 à 10 000 ms", "Détermine la cadence du CSV brut"
+    "Période DS18B20", "750 à 10 000 ms", "Le firmware ramène une commande UART inférieure à 750 ms"
+
+.. danger::
+
+   Ne pas interpréter ces maxima comme des valeurs recommandées. Un essai à
+   4500 rpm ou 30 A nécessite la validation préalable du moteur, de l'étage de
+   puissance, de l'alimentation, du câblage, du refroidissement et des
+   protections mécaniques.
+
+Profil autonome B2
+------------------
+
+Dans les deux firmwares, un premier appui sur B2 lance le profil suivant :
+
+* vitesse initiale de 2000 rpm ;
+* cible maintenue entre 2000 et 4000 rpm ;
+* nouvelle cible après un délai pseudo-aléatoire de 10 à 30 secondes ;
+* pas pseudo-aléatoire de 200 à 500 rpm, tronqué aux bornes de la plage ;
+* rampe de 10 Hz électriques/s, soit 300 rpm/s avec deux paires de pôles ;
+* limite ``Iq`` et hard stop de 30 A.
+
+Le générateur pseudo-aléatoire est amorcé par l'instant de l'appui sur B2. La
+nouvelle consigne est traitée dans la boucle principale et non dans
+l'interruption. Un second appui arrête le moteur et désactive le profil.
+La polarisation utilisée au démarrage reste fixée à 14 A.
 
 Colonnes brutes du dashboard
 ----------------------------

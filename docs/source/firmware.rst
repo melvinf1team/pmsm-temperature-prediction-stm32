@@ -66,13 +66,10 @@ accélération, période DATA et période DS18B20. Une configuration valide appe
 ``ACQ_START`` valide uniquement les deux périodes, force le moteur à l'arrêt et
 arme le logger sans exiger de configuration moteur.
 
-Les bornes du protocole sont 100 à 2500 rpm, 12 A maximum sur ``Iq``, 14 A
-maximum pour le hard stop, 1 à 10 000 ms pour ``DATA`` et 10 000 ms maximum
-pour le DS18B20. Une période DS18B20 inférieure à 750 ms est acceptée puis
-ramenée à 750 ms. Le parseur accepte une accélération jusqu'à 2000 Hz
-électriques/s, mais ``AppMotorControl_SetRuntimeConfig`` la borne ensuite à
-50 Hz électriques/s. Les valeurs effectives à utiliser côté opérateur sont
-donc au moins 750 ms et au plus 50 Hz électriques/s.
+Les bornes du protocole sont 100 à 4500 rpm, 30 A maximum sur ``Iq`` et le hard
+stop, 50 Hz électriques/s maximum pour l'accélération, 1 à 10 000 ms pour
+``DATA`` et 10 000 ms maximum pour le DS18B20. Une période DS18B20 inférieure à
+750 ms est acceptée puis ramenée à 750 ms.
 
 Contrôle moteur
 ---------------
@@ -83,9 +80,19 @@ RUN pour éviter une demande de couple brutale. ``AppMotorControl_Task`` surveil
 les faults MCSDK, le dépassement de courant et la survitesse.
 
 Le bouton B2 sur ``PC13`` dépose une requête dans l'interruption, puis la boucle
-principale applique le profil autonome 2000 rpm / 10 A ``Iq`` / 12 A total. Un
-second appui arrête le moteur. Le traitement différé et un anti-rebond de 250 ms
-évitent d'appeler le MCSDK directement depuis l'interruption.
+principale démarre à 2000 rpm avec 30 A maximum sur ``Iq`` et le courant total.
+Toutes les 10 à 30 secondes, elle choisit un pas de 200 à 500 rpm et une
+nouvelle cible dans la plage 2000–4000 rpm. La rampe MCSDK de 10 Hz
+électriques/s lisse chaque transition ; avec deux paires de pôles, la pente
+mécanique vaut 300 rpm/s. Un second appui arrête le moteur. Le traitement
+différé et un anti-rebond de 250 ms évitent d'appeler le MCSDK depuis
+l'interruption.
+
+La consigne initiale est réappliquée lorsque MCSDK signale réellement ``RUN``.
+Si un nouvel appui demande un démarrage pendant la phase d'arrêt asynchrone, la
+requête attend ``IDLE`` et est retentée toutes les 100 ms. Les comparaisons de
+deadline utilisent une soustraction signée et restent valides lors du
+rebouclage du tick 32 bits.
 
 Datalogging embarqué
 --------------------
@@ -124,11 +131,28 @@ Sécurités
 ---------
 
 Les sécurités sont réparties entre PC et firmware. Le dashboard valide les
-entrées utilisateur pour guider l'opérateur. Le firmware garde les bornes finales
-de 2500 rpm, 12 A ``Iq`` et 14 A total, puis coupe le moteur en cas de fault
-MCSDK, courant trop élevé ou survitesse. Les sources Workbench et les fichiers C
-générés utilisent tous une limite applicative de 12 A afin qu'une régénération ne
-réintroduise pas l'ancien plafond de 5 A.
+entrées utilisateur pour guider l'opérateur. Le firmware garde les bornes
+finales de 4500 rpm et 30 A, puis coupe le moteur en cas de fault MCSDK, courant
+total trop élevé ou survitesse. Les sources Workbench, ``.ioc``, ``.wbdef`` et
+les fichiers C générés utilisent les mêmes plafonds afin qu'une régénération ne
+réintroduise pas les anciennes valeurs.
+
+Le seuil de survitesse suit la consigne avec une marge, mais il est toujours
+borné par le plafond absolu de 4500 rpm. Les appels directs à la configuration
+normalisent également les valeurs ``NaN`` ou infinies vers les valeurs par
+défaut avant de les transmettre à MCSDK.
+
+Une télémétrie MCSDK de courant ou de vitesse non finie est traitée en mode
+fail-safe : arrêt immédiat, désactivation du profil B2 et passage de la machine
+d'états applicative en défaut. Elle ne peut donc pas contourner les comparaisons
+de surintensité ou de survitesse.
+
+La pleine échelle calculée du capteur de courant vaut environ 110 A avec un
+shunt de 1 mΩ et un gain de 15. Cette marge de représentation ne constitue pas
+une validation thermique de la carte. La consigne PolPulse reste à 14 A pour ne
+pas transformer l'augmentation du plafond en impulsion de démarrage à 30 A. Le
+seuil logiciel actif pendant PolPulse et le courant maximal du profileur DC
+restent eux aussi bornés à 30 A.
 
 Compilation et programmation
 -----------------------------
@@ -143,6 +167,10 @@ dans ``STM32CubeIDE/Application/User`` et les interfaces applicatives associées
 Une régénération depuis STM32CubeMX ou Motor Control Workbench doit être revue
 avant compilation : elle peut modifier les fichiers générés, les affectations
 de broches et les constantes de courant.
+
+Le chemin CMSIS/DSP du projet d'acquisition est relatif au dépôt dans
+``.cproject`` ; le projet n'est plus dépendant d'un ancien dossier Workbench
+utilisateur.
 
 Firmware de validation IA
 -------------------------
@@ -179,3 +207,7 @@ Le firmware de validation s'importe séparément depuis
 ``firmware_validation/STM32CubeIDE``. Son mode UART est choisi à la compilation ;
 il faut donc effectuer un clean build et reflasher après toute modification de
 ``APP_NEAI_MODEL_ENABLED``.
+
+Le contrôle moteur et le profil B2 aléatoire utilisent les mêmes limites et les
+mêmes paramètres que le firmware d'acquisition. Le changement de vitesse
+n'ajoute aucun texte sur l'UART afin de préserver le contrat NanoEdge.

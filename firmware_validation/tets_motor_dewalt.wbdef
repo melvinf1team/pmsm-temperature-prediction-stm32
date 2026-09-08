@@ -52,8 +52,8 @@
         <define key="M1_BOARD_LIMIT_ACCEL_LOW" value="7.5" />
         <define key="M1_BOARD_LIMIT_REGEN_HIGH" value="19.44" />
         <define key="M1_BOARD_LIMIT_REGEN_LOW" value="17.28" />
-        <define key="M1_BOARD_MAX_CURRENT" value="12" />
-        <define key="M1_BOARD_SOFT_OVERCURRENT_TRIP" value="14" />
+        <define key="M1_BOARD_MAX_CURRENT" value="30" />
+        <define key="M1_BOARD_SOFT_OVERCURRENT_TRIP" value="30" />
         <define key="M1_BUS_PROTECTION" value="FALSE" />
         <define key="M1_BUS_VOLTAGE_READING" value="ENABLE" />
         <define key="M1_CONSTANT1_D" value="27069" />
@@ -124,15 +124,15 @@
         <define key="M1_LOW_SIDE_IDLE_STATE" value="TURN_OFF" />
         <define key="M1_LOW_SIDE_SIGNALS_ENABLING" value="LS_PWM_TIMER" />
         <define key="M1_LS" value="0.000017" />
-        <define key="M1_MAX_APPLICATION_SPEED" value="4000" />
+        <define key="M1_MAX_APPLICATION_SPEED" value="4500" />
         <define key="M1_MAX_MODULATION_INDEX" value="100" />
         <define key="M1_MIN_APPLICATION_SPEED" value="0" />
-        <define key="M1_MOTOR_MAX_SPEED_RPM" value="4000" />
+        <define key="M1_MOTOR_MAX_SPEED_RPM" value="4500" />
         <define key="M1_MOTOR_NAME" value="DeWalt DCD996NT-TY2 Brus" />
         <define key="M1_MOTOR_RATED_FLUX" value="0.013006791" />
         <define key="M1_MOTOR_VOLTAGE_CONSTANT" value="0.5" />
         <define key="M1_NOMINAL_BUS_VOLTAGE_V" value="18" />
-        <define key="M1_NOMINAL_CURRENT" value="12" />
+        <define key="M1_NOMINAL_CURRENT" value="30" />
         <define key="M1_OCP_BKIN_FILTER" value="4" />
         <define key="M1_OCP_BKIN_MODE" value="INT_MODE" />
         <define key="M1_OCP_BKIN_POLARITY" value="EMSTOP_ACTIVE_HIGH" />
@@ -170,7 +170,7 @@
         <define key="M1_POLPULSES_ACTIVATTION_FLAG" value="TRUE" />
         <define key="M1_POLPULSES_NB_DECAY_PERIODS" value="2" />
         <define key="M1_POLPULSES_NB_PULSE_PERIODS" value="2" />
-        <define key="M1_POLPULSES_PULSE_CURRENT_GOAL" value="30.44" />
+        <define key="M1_POLPULSES_PULSE_CURRENT_GOAL" value="14.0" />
         <define key="M1_POTENTIOMETER_ENABLE" value="FALSE" />
         <define key="M1_POWERBOARD_NAME" value="STDES-LVHP01_48V" />
         <define key="M1_PWM_CHARGE_BOOT_CAP_DUTY_CYCLES" value="0.000" />

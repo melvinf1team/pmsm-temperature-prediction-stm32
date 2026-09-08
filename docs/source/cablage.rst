@@ -10,7 +10,9 @@ STDES-LVHP01. Les capteurs externes partagent la masse de la carte et doivent
   Couper l'alimentation de puissance avant toute modification du câblage.
   Vérifier la révision des cartes, le brochage des connecteurs et les niveaux
   électriques dans leurs manuels officiels. Les repères CN ci-dessous décrivent
-  le banc de ce dépôt et ne remplacent pas les schémas constructeur.
+  le banc de ce dépôt et ne remplacent pas les schémas constructeur. Les
+  limites de 30 A et 4500 rpm exigent une qualification électrique,
+  thermique et mécanique complète avant utilisation.
 
 Capteur IR D6T
 --------------

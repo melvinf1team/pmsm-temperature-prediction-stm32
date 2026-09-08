@@ -31,7 +31,7 @@
 /******** MAIN AND AUXILIARY SPEED/POSITION SENSOR(S) SETTINGS SECTION ********/
 
 /*** Speed measurement settings ***/
-#define MAX_APPLICATION_SPEED_RPM           4000 /*!< rpm, mechanical */
+#define MAX_APPLICATION_SPEED_RPM           4500 /*!< rpm, mechanical */
 #define MIN_APPLICATION_SPEED_RPM           0 /*!< rpm, mechanical, absolute value */
 #define M1_SS_MEAS_ERRORS_BEFORE_FAULTS     3 /*!< Number of speed measurement errors before main sensor goes in fault */
 
@@ -44,14 +44,14 @@
 #define SPEED_POLE_RPS                      (float_t)(400) /*!< @brief Used for speed filtering in the HSO */
 #define KSAMPLE_DELAY                       0.2 /*!< @brief Compensation factor to mitigate the difference between voltage sampling instant and current sampling instant */
 #define ANGLE_COMPENSATION_FACTOR           (float_t)1.98
-#define BOARD_SOFT_OVERCURRENT_TRIP         (float_t)(14) /*!< @brief Threshold of software over current trip detection. */
-#define BOARD_MAX_CURRENT                   (float_t)(12) /*!< @brief Maximum current reference the user wants to ask from the board. */
+#define BOARD_SOFT_OVERCURRENT_TRIP         (float_t)(30) /*!< @brief Threshold of software over current trip detection. */
+#define BOARD_MAX_CURRENT                   (float_t)(30) /*!< @brief Maximum current reference the user wants to ask from the board. */
 #define BOARD_LIMIT_OVERVOLTAGE             (float_t)(21.6) /*!< Over-voltage threshold */
 #define BOARD_LIMIT_UNDERVOLTAGE            (float_t)(5.0) /*!< @brief under voltage threshold */
 #define BOARD_MAX_MODULATION                (float_t)((100 * 1.15f) /100.0f)
 #define NB_PULSE_PERIODS                    (2) /*!< @brief number of PWM periods to reach the current goal during PolPulse. */
 #define NB_DECAY_PERIODS                    (2) /*!< @brief number of PWM periods for the current to decay during PolPulse. */
-#define PULSE_CURRENT_GOAL                  (30.44) /*!< @brief pulse current goal. */
+#define PULSE_CURRENT_GOAL                  (14.0) /*!< @brief pulse current goal. */
 
 #define RSDC_TOTAL_MEASURE_TIME_MS  1000    /* milli-seconds */
 #define RSDC_SLOP_MS                 250    /* milli-seconds */
@@ -88,7 +88,7 @@
 /* USER CODE END PID_SPEED_INTEGRAL_INIT_DIV */
 
 #define SPD_DIFFERENTIAL_TERM_ENABLING      DISABLE
-#define IQMAX_A                             12
+#define IQMAX_A                             30
 
 /* Default settings */
 #define DEFAULT_CONTROL_MODE                MCM_SPEED_MODE

@@ -22,9 +22,11 @@ Parcours conseillé
 
 .. warning::
 
-   Le firmware pilote un étage de puissance et un moteur. Vérifier le câblage,
-   les limites de courant, la fixation mécanique et les moyens d'arrêt avant
-   de lancer une séquence. Le logiciel ne remplace pas les protections du banc.
+  Le firmware autorise jusqu'à 4500 rpm et 30 A. Ces plafonds logiciels ne
+  certifient ni le moteur ni l'étage de puissance. Vérifier le câblage, le
+  refroidissement, la fixation mécanique, l'alimentation et les moyens d'arrêt
+  avant de lancer une séquence. Le logiciel ne remplace pas les protections du
+  banc.
 
 État de référence
 -----------------

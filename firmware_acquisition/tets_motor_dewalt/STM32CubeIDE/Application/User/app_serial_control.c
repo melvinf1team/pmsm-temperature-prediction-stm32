@@ -25,7 +25,7 @@
 /* Sécurités firmware : aucune commande PC corrompue ne doit pouvoir envoyer
  * une consigne dangereuse au moteur. Ajuste ces valeurs seulement après validation. */
 #define APP_CFG_MIN_TARGET_RPM       100.0f
-#define APP_CFG_MAX_ACCEL_HZ_S       2000.0f
+#define APP_CFG_MAX_ACCEL_HZ_S       50.0f
 #define APP_CFG_MIN_DATALOG_MS       1U
 #define APP_CFG_MAX_DATALOG_MS       10000U
 #define APP_CFG_MIN_DS18B20_MS       750U

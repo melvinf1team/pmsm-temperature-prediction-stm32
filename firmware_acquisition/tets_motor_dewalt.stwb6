@@ -2456,12 +2456,12 @@
         "id": "user.DeWalt_DCD996NT_TY2_Brushless_18V_Debug_ESTIMATE",
         "label": "DeWalt DCD996NT-TY2 Brushless 18V - DEBUG ESTIMATE",
         "hardwareFamily": "MOTOR",
-        "description": "Estimated low-current debug profile for DeWalt DCD996NT-TY2 18V XR brushless drill motor. Public sources provide tool/gearbox specs, not internal PMSM electrical parameters; verify Rs, Ls, Ke/BEMF and pole pairs experimentally before nominal operation.",
+        "description": "Estimated profile for DeWalt DCD996NT-TY2 18V XR brushless drill motor. Public sources provide tool/gearbox specs, not internal PMSM electrical parameters; qualify the motor and power stage before using the configured 4500 rpm and 30 A software limits.",
         "compatibility": [
           "FOC",
           "sixStep"
         ],
-        "nominalCurrent": 12,
+        "nominalCurrent": 30,
         "nominalDCVoltage": 18,
         "rs": 0.01,
         "ls": 0.017,
@@ -2471,7 +2471,7 @@
         "BEmfConstant": 0.531,
         "inertia": 5,
         "friction": 14,
-        "maxRatedSpeed": 4000
+        "maxRatedSpeed": 4500
       }
     ],
     "connections": [

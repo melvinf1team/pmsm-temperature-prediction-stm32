@@ -99,9 +99,10 @@ Depuis la racine du dépôt :
 
    python .\firmware_validation\tests\validate_preprocess_parity.py
    python .\firmware_validation\tests\validate_neai_export.py
+   python .\firmware_validation\tests\validate_motor_limits.py
    python .\validation\test\test_temperature_validation_gui.py
 
-Les deux dernières commandes réussissent avec l'état documenté. Le test de
+Les trois dernières commandes réussissent avec l'état documenté. Le test de
 parité dépasse actuellement sa tolérance sur le log du 27 août 2026 ; consulter
 :doc:`validation_ia` pour le résultat exact avant de l'utiliser comme critère de
 recette.

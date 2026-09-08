@@ -64,9 +64,11 @@ LOG_TRIM_LINES = 300
 CSV_FLUSH_EVERY_ROWS = 10
 CSV_FLUSH_INTERVAL_S = 1.0
 IQ_WARNING_RATIO = 0.90
-MAX_TARGET_SPEED_RPM = 2500.0
-MAX_IQ_LIMIT_A = 12.0
-MAX_HARD_LIMIT_A = 14.0
+MIN_TARGET_SPEED_RPM = 100.0
+MAX_TARGET_SPEED_RPM = 4500.0
+MAX_IQ_LIMIT_A = 30.0
+MAX_HARD_LIMIT_A = 30.0
+MAX_ACCEL_ELEC_HZ_S = 50.0
 MAX_DATALOG_MS = 10000
 MAX_DS18B20_MS = 10000
 
@@ -1644,8 +1646,11 @@ class MotorDatalogGui(tk.Tk):
             if not all(math.isfinite(value) for value in (
                     target_rpm, speed_hz, iq_limit, hard_limit, accel)):
                 raise ValueError("Les paramètres moteur doivent être des nombres finis.")
-            if not 0 < target_rpm <= MAX_TARGET_SPEED_RPM:
-                raise ValueError(f"La vitesse doit être comprise entre 0 et {MAX_TARGET_SPEED_RPM:g} rpm.")
+            if not MIN_TARGET_SPEED_RPM <= target_rpm <= MAX_TARGET_SPEED_RPM:
+                raise ValueError(
+                    f"La vitesse doit être comprise entre {MIN_TARGET_SPEED_RPM:g} "
+                    f"et {MAX_TARGET_SPEED_RPM:g} rpm."
+                )
             if pole_pairs <= 0:
                 raise ValueError("Le nombre de paires de pôles doit être > 0.")
             expected_hz = (target_rpm * pole_pairs) / 60.0
@@ -1657,6 +1662,10 @@ class MotorDatalogGui(tk.Tk):
                 raise ValueError(f"Hard stop doit être compris entre 0 et {MAX_HARD_LIMIT_A:g} A.")
             if accel <= 0:
                 raise ValueError("L'accélération doit être > 0.")
+            if accel > MAX_ACCEL_ELEC_HZ_S:
+                raise ValueError(
+                    f"L'accélération doit être <= {MAX_ACCEL_ELEC_HZ_S:g} Hz électriques/s."
+                )
 
             config.update({
                 "target_rpm": target_rpm,
@@ -1800,6 +1809,7 @@ class MotorDatalogGui(tk.Tk):
         pole_pairs = None
         iq_limit = None
         hard_limit = None
+        accel = None
 
         if not idle_mode:
             target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Vitesse rpm", 0)
@@ -1807,7 +1817,7 @@ class MotorDatalogGui(tk.Tk):
             pole_pairs = parse_int("pole_pairs", self.pole_pairs_var, "Paires de pôles", 0)
             iq_limit = parse_float("iq_limit", self.iq_limit_var, "Iq limite", 0)
             hard_limit = parse_float("hard_limit", self.hard_limit_var, "Hard stop", 0)
-            parse_float("accel", self.accel_var, "Accélération", 0)
+            accel = parse_float("accel", self.accel_var, "Accélération", 0)
 
         datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "Période DATA", 0)
         ds18b20_ms = parse_int("ds18b20_ms", self.ds18b20_ms_var, "Période DS18B20", 0)
@@ -1825,7 +1835,11 @@ class MotorDatalogGui(tk.Tk):
                 errors.append("La vitesse Hz ne correspond pas au rpm/paires de pôles.")
                 warnings.append("La vitesse Hz ne correspond pas exactement au rpm. Elle sera recalculée automatiquement à la prochaine édition.")
 
-        if target_rpm is not None and target_rpm > MAX_TARGET_SPEED_RPM:
+        if target_rpm is not None and target_rpm < MIN_TARGET_SPEED_RPM:
+            self.set_field_invalid("speed_rpm", True)
+            self.set_field_invalid("speed_hz", True)
+            errors.append(f"La vitesse minimale autorisée est {MIN_TARGET_SPEED_RPM:g} rpm.")
+        elif target_rpm is not None and target_rpm > MAX_TARGET_SPEED_RPM:
             self.set_field_invalid("speed_rpm", True)
             self.set_field_invalid("speed_hz", True)
             errors.append(f"La vitesse maximale autorisée est {MAX_TARGET_SPEED_RPM:g} rpm.")
@@ -1837,6 +1851,12 @@ class MotorDatalogGui(tk.Tk):
         if hard_limit is not None and hard_limit > MAX_HARD_LIMIT_A:
             self.set_field_invalid("hard_limit", True)
             errors.append(f"Le hard stop maximal autorisé est {MAX_HARD_LIMIT_A:g} A.")
+
+        if accel is not None and accel > MAX_ACCEL_ELEC_HZ_S:
+            self.set_field_invalid("accel", True)
+            errors.append(
+                f"L'accélération maximale autorisée est {MAX_ACCEL_ELEC_HZ_S:g} Hz électriques/s."
+            )
 
         if datalog_ms is not None and datalog_ms > MAX_DATALOG_MS:
             self.set_field_invalid("datalog_ms", True)

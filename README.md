@@ -170,10 +170,26 @@ ACQ_START,<datalog_ms>,<ds18b20_ms>
 STOP
 ```
 
-Les limites applicatives sont de 2500 rpm, 12 A sur `Iq` et 14 A sur le
-courant total. L'accélération réellement appliquée est plafonnée à 50 Hz
-électriques/s. Le bouton B2 commande un profil autonome fixé à 2000 rpm, 10 A
-sur `Iq` et 12 A de courant total maximal.
+Les limites applicatives sont de 4500 rpm, 30 A sur `Iq` et 30 A sur le
+courant total. La vitesse minimale est de 100 rpm et l'accélération est
+plafonnée à 50 Hz électriques/s dans le dashboard comme dans le firmware.
+
+Le bouton B2 lance un profil autonome variable : départ à 2000 rpm, puis
+nouvelle cible aléatoire toutes les 10 à 30 secondes dans la plage
+2000–4000 rpm. Chaque variation est limitée à un pas choisi entre 200 et
+500 rpm et suit la rampe MCSDK de 10 Hz électriques/s, soit 300 rpm/s avec les
+deux paires de pôles configurées. La limite `Iq` et le hard stop valent 30 A.
+Un second appui arrête le profil.
+
+La consigne est réappliquée lorsque MCSDK atteint réellement l'état `RUN`. Un
+redémarrage demandé pendant l'arrêt attend le retour à `IDLE`, et la protection
+de survitesse ne peut jamais dépasser le plafond absolu de 4500 rpm.
+
+> **Qualification obligatoire :** ces valeurs sont des plafonds logiciels, pas
+> une certification du banc. Avant un essai à 4500 rpm ou 30 A, vérifier les
+> caractéristiques du moteur, de la STDES-LVHP01, de l'alimentation, du câblage,
+> du refroidissement et des protections. La polarisation de démarrage reste
+> volontairement limitée à 14 A.
 
 ## Firmware de validation NanoEdge AI
 
@@ -205,11 +221,12 @@ Vérifications sans matériel :
 
 ```powershell
 python .\firmware_validation\tests\validate_neai_export.py
+python .\firmware_validation\tests\validate_motor_limits.py
 python .\validation\test\test_temperature_validation_gui.py
 python .\firmware_validation\tests\validate_preprocess_parity.py
 ```
 
-Les deux premiers contrôles réussissent avec l'état actuel. Le test global de
+Les trois premiers contrôles réussissent avec l'état actuel. Le test global de
 parité échoue sur `daq_log_20260827_080523.csv` : `0.000512959` sur
 `speed_power_ewma_6600`, pour une tolérance de `0.0005`. Voir la section
 validation de `firmware_validation/README.md` avant de modifier le seuil.
@@ -251,6 +268,8 @@ le plan d'action sont conservés dans `docs/source/etat_projet.rst`.
 - les firmwares se construisent depuis STM32CubeIDE, sans commande de build
 	autonome versionnée ;
 - le test série nécessite une carte programmée et un port COM disponible ;
+- les builds Debug et Release des deux firmwares réussissent, mais les limites élevées et
+	le profil B2 aléatoire n'ont pas été validés sur le banc physique ;
 - la parité float32/pandas dépasse légèrement sa tolérance sur le dernier log ;
 - les métriques indépendantes de validation doivent rester accompagnées de
 	leur CSV source pour être reproductibles.

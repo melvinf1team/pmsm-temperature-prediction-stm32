@@ -114,7 +114,7 @@ void MC_POLPULSE_run(MC_PolPulse_Handle_t *pHandle, const fixp30_t angle_pu)
       // Overrule starts
 
       // Set the soft overcurrent trip threshold to 80% of the board's maximum current rating
-      pHandle->pPWM->softOvercurrentTripLevel_pu = FIXP30((0.8f*M1_MAX_READABLE_CURRENT) / CURRENT_SCALE);
+      pHandle->pPWM->softOvercurrentTripLevel_pu = FIXP30(BOARD_SOFT_OVERCURRENT_TRIP / CURRENT_SCALE);
 
       // remember previous pwm output state
       polpulse_pwm_output_prev = LL_TIM_IsEnabledAllOutputs(TIMx); // Read PWM Output state
