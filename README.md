@@ -75,8 +75,8 @@ python .\datalogging\motor_datalog_gui_dashboard.py
 
 Two modes are available:
 
-- **Motor + acquisition**: `SYNC`, `CFG`, then `START`;
-- **Acquisition only (motor stopped)**: `SYNC`, then `ACQ_START`, useful for
+- **Motor + logging**: `SYNC`, `CFG`, then `START`;
+- **Logging only (motor stopped)**: `SYNC`, then `ACQ_START`, useful for
   recording a cooling phase.
 
 In both cases, `STOP` ends the session cleanly. Motor profiles are loaded from

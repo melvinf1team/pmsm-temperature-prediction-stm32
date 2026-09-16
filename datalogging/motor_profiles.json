@@ -1,6 +1,6 @@
 [
   {
-    "name": "Classique",
+    "name": "Classic",
     "speed_value": 1500.0,
     "speed_unit": "rpm",
     "iq_limit_a": 5.0,

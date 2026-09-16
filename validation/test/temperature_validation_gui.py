@@ -20,7 +20,7 @@ import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 import serial
 from serial.tools import list_ports
 
@@ -83,11 +83,11 @@ class ValidationSample:
 
 ERROR_BANDS = (
     (0.5, ErrorBand("Excellent", COLORS["green"])),
-    (1.0, ErrorBand("Bon", COLORS["blue"])),
-    (1.5, ErrorBand("A surveiller", COLORS["orange"])),
+    (1.0, ErrorBand("Good", COLORS["blue"])),
+    (1.5, ErrorBand("Needs attention", COLORS["orange"])),
 )
-RED_ERROR_BAND = ErrorBand("Ecart eleve", COLORS["red"])
-NEUTRAL_ERROR_BAND = ErrorBand("En attente", COLORS["neutral"])
+RED_ERROR_BAND = ErrorBand("High error", COLORS["red"])
+NEUTRAL_ERROR_BAND = ErrorBand("Waiting", COLORS["neutral"])
 
 
 def parse_validation_line(raw_line: bytes | str) -> tuple[float, float]:
@@ -96,21 +96,21 @@ def parse_validation_line(raw_line: bytes | str) -> tuple[float, float]:
         try:
             line = raw_line.decode("ascii")
         except UnicodeDecodeError as exc:
-            raise ValueError("La trame contient des octets non ASCII.") from exc
+            raise ValueError("The frame contains non-ASCII bytes.") from exc
     else:
         line = str(raw_line)
 
     fields = [field.strip() for field in line.strip().split(";")]
     if len(fields) != 2:
-        raise ValueError(f"Deux valeurs attendues, {len(fields)} recues.")
+        raise ValueError(f"Expected two values; received {len(fields)}.")
 
     try:
         actual_c, predicted_c = (float(field) for field in fields)
     except ValueError as exc:
-        raise ValueError("La trame contient une valeur non numerique.") from exc
+        raise ValueError("The frame contains a nonnumeric value.") from exc
 
     if not math.isfinite(actual_c) or not math.isfinite(predicted_c):
-        raise ValueError("La trame contient NaN ou une valeur infinie.")
+        raise ValueError("The frame contains NaN or an infinite value.")
 
     return actual_c, predicted_c
 
@@ -129,13 +129,13 @@ def classify_error(absolute_error_c: float) -> ErrorBand:
 
 
 def format_one_decimal(value: float) -> str:
-    """Format a number with exactly one decimal place and a French decimal comma."""
+    """Format a number with exactly one decimal place."""
     if not math.isfinite(value):
-        return "--,-"
+        return "--.-"
     rounded = round(value, 1)
     if rounded == 0.0:
         rounded = 0.0
-    return f"{rounded:.1f}".replace(".", ",")
+    return f"{rounded:.1f}"
 
 
 def is_current_connection_event(event_generation: int, current_generation: int) -> bool:
@@ -214,7 +214,7 @@ class TemperatureValidationApp(tk.Tk):
     def __init__(self, *, demo: bool = False, initial_port: str | None = None) -> None:
         super().__init__()
 
-        self.title("Validation thermique NanoEdge AI")
+        self.title("NanoEdge AI Temperature Validation")
         self.geometry("1320x860")
         self.minsize(1040, 780)
         self.configure(bg=COLORS["background"])
@@ -239,9 +239,9 @@ class TemperatureValidationApp(tk.Tk):
 
         self.port_var = tk.StringVar()
         self.port_display_to_device: dict[str, str] = {}
-        self.status_var = tk.StringVar(value="Deconnecte")
+        self.status_var = tk.StringVar(value="Disconnected")
         self.sample_count_var = tk.StringVar(value="0")
-        self.rate_var = tk.StringVar(value="0,0 Hz")
+        self.rate_var = tk.StringVar(value="0.0 Hz")
         self.invalid_var = tk.StringVar(value="0")
 
         self.actual_value_label: tk.Label
@@ -321,29 +321,29 @@ class TemperatureValidationApp(tk.Tk):
         self.build_toolbar()
 
         content = tk.Frame(self, bg=COLORS["background"])
-        content.grid(row=2, column=0, sticky="nsew", padx=22, pady=(18, 20))
+        content.grid(row=2, column=0, sticky="nsew", padx=22, pady=(12, 12))
         content.grid_columnconfigure(0, weight=1, uniform="temperature")
         content.grid_columnconfigure(1, weight=1, uniform="temperature")
         content.grid_rowconfigure(2, weight=1)
 
         actual_panel, self.actual_value_label = self.build_temperature_panel(
             content,
-            title="TEMPERATURE REELLE",
-            subtitle="Capteur infrarouge D6T",
+            title="MEASURED TEMPERATURE",
+            subtitle="D6T infrared sensor",
             accent=COLORS["actual"],
         )
         actual_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
 
         predicted_panel, self.predicted_value_label = self.build_temperature_panel(
             content,
-            title="TEMPERATURE ESTIMEE",
-            subtitle="Regression NanoEdge AI embarquee",
+            title="PREDICTED TEMPERATURE",
+            subtitle="On-device NanoEdge AI estimate",
             accent=COLORS["predicted"],
         )
         predicted_panel.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
 
         error_row = tk.Frame(content, bg=COLORS["background"])
-        error_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(16, 16))
+        error_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 12))
         error_row.grid_columnconfigure(0, weight=1, uniform="errors")
         error_row.grid_columnconfigure(1, weight=1, uniform="errors")
 
@@ -353,8 +353,8 @@ class TemperatureValidationApp(tk.Tk):
             self.instant_error_labels,
         ) = self.build_error_panel(
             error_row,
-            title="ERREUR INSTANTANEE",
-            subtitle="Ecart absolu sur la derniere mesure",
+            title="INSTANT ERROR",
+            subtitle="Latest absolute error",
         )
         self.instant_error_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
 
@@ -364,8 +364,8 @@ class TemperatureValidationApp(tk.Tk):
             self.cumulative_error_labels,
         ) = self.build_error_panel(
             error_row,
-            title="ERREUR CUMULEE (MAE)",
-            subtitle="Moyenne absolue depuis le debut",
+            title="CUMULATIVE MAE",
+            subtitle="Mean absolute error so far",
         )
         self.cumulative_error_frame.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
 
@@ -380,7 +380,7 @@ class TemperatureValidationApp(tk.Tk):
         self.build_chart(content).grid(row=2, column=0, columnspan=2, sticky="nsew")
 
     def build_header(self) -> None:
-        header = tk.Frame(self, bg=COLORS["header"], height=86)
+        header = tk.Frame(self, bg=COLORS["header"], height=80)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)
         header.grid_columnconfigure(0, weight=1)
@@ -389,14 +389,14 @@ class TemperatureValidationApp(tk.Tk):
         title_block.grid(row=0, column=0, sticky="w", padx=24, pady=14)
         tk.Label(
             title_block,
-            text="Validation thermique",
+            text="Temperature validation",
             bg=COLORS["header"],
             fg="#FFFFFF",
             font=("Georgia", 22, "bold"),
         ).pack(anchor="w")
         tk.Label(
             title_block,
-            text="Mesure D6T face a l'estimation NanoEdge AI",
+            text="D6T measurement vs. NanoEdge AI estimate",
             bg=COLORS["header"],
             fg=COLORS["header_muted"],
             font=("Aptos", 10),
@@ -422,14 +422,14 @@ class TemperatureValidationApp(tk.Tk):
         ).pack(side="left")
 
     def build_toolbar(self) -> None:
-        toolbar = tk.Frame(self, bg=COLORS["surface"], height=72, highlightthickness=1, highlightbackground=COLORS["border"])
+        toolbar = tk.Frame(self, bg=COLORS["surface"], height=68, highlightthickness=1, highlightbackground=COLORS["border"])
         toolbar.grid(row=1, column=0, sticky="ew")
         toolbar.grid_propagate(False)
         toolbar.grid_columnconfigure(1, weight=1)
 
         tk.Label(
             toolbar,
-            text="PORT SERIE",
+            text="SERIAL PORT",
             bg=COLORS["surface"],
             fg=COLORS["muted"],
             font=("Aptos", 9, "bold"),
@@ -446,7 +446,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.refresh_button = ttk.Button(
             toolbar,
-            text="Actualiser",
+            text="Refresh",
             command=self.refresh_ports,
             style="Secondary.TButton",
         )
@@ -454,7 +454,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.connect_button = ttk.Button(
             toolbar,
-            text="Connecter",
+            text="Connect",
             command=self.toggle_connection,
             style="Primary.TButton",
         )
@@ -462,7 +462,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.reset_button = ttk.Button(
             toolbar,
-            text="Reinitialiser",
+            text="Reset",
             command=self.reset_session,
             style="Secondary.TButton",
         )
@@ -470,7 +470,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.export_button = ttk.Button(
             toolbar,
-            text="Exporter CSV",
+            text="Export CSV",
             command=self.export_csv,
             style="Secondary.TButton",
             state=tk.DISABLED,
@@ -488,7 +488,7 @@ class TemperatureValidationApp(tk.Tk):
         panel = tk.Frame(
             parent,
             bg=COLORS["surface"],
-            height=185,
+            height=165,
             highlightthickness=1,
             highlightbackground=COLORS["border"],
         )
@@ -509,7 +509,7 @@ class TemperatureValidationApp(tk.Tk):
         value_row.grid(row=1, column=1, sticky="w", padx=22)
         value_label = tk.Label(
             value_row,
-            text="--,-",
+            text="--.-",
             bg=COLORS["surface"],
             fg=COLORS["ink"],
             font=("Georgia", 48, "bold"),
@@ -555,7 +555,7 @@ class TemperatureValidationApp(tk.Tk):
 
         value_label = tk.Label(
             panel,
-            text="--,- °C",
+            text="--.- °C",
             bg=background,
             fg="#FFFFFF",
             font=("Georgia", 23, "bold"),
@@ -575,10 +575,10 @@ class TemperatureValidationApp(tk.Tk):
     def build_threshold_legend(self, parent: tk.Widget) -> tk.Frame:
         legend = tk.Frame(parent, bg=COLORS["background"])
         entries = (
-            (COLORS["green"], "< 0,5 °C"),
-            (COLORS["blue"], "0,5 à < 1,0 °C"),
-            (COLORS["orange"], "1,0 à 1,5 °C"),
-            (COLORS["red"], "> 1,5 °C"),
+            (COLORS["green"], "< 0.5 °C"),
+            (COLORS["blue"], "0.5 to < 1.0 °C"),
+            (COLORS["orange"], "1.0 to 1.5 °C"),
+            (COLORS["red"], "> 1.5 °C"),
         )
         for index, (color, text) in enumerate(entries):
             item = tk.Frame(legend, bg=COLORS["background"])
@@ -603,7 +603,7 @@ class TemperatureValidationApp(tk.Tk):
         chart_header.grid_columnconfigure(0, weight=1)
         tk.Label(
             chart_header,
-            text="Historique temps reel",
+            text="Live history",
             bg=COLORS["surface"],
             fg=COLORS["ink"],
             font=("Georgia", 14, "bold"),
@@ -611,18 +611,18 @@ class TemperatureValidationApp(tk.Tk):
 
         stats = tk.Frame(chart_header, bg=COLORS["surface"])
         stats.grid(row=0, column=1, sticky="e")
-        self.build_stat(stats, "Echantillons", self.sample_count_var).pack(side="left", padx=10)
-        self.build_stat(stats, "Cadence", self.rate_var).pack(side="left", padx=10)
-        self.build_stat(stats, "Trames ignorees", self.invalid_var).pack(side="left", padx=(10, 0))
+        self.build_stat(stats, "Samples", self.sample_count_var).pack(side="left", padx=10)
+        self.build_stat(stats, "Rate", self.rate_var).pack(side="left", padx=10)
+        self.build_stat(stats, "Invalid frames", self.invalid_var).pack(side="left", padx=(10, 0))
 
         self.figure = Figure(figsize=(10, 5), dpi=100, facecolor=COLORS["surface"])
         grid = self.figure.add_gridspec(4, 1, hspace=0.10)
         self.temperature_axis = self.figure.add_subplot(grid[:3, 0])
         self.error_axis = self.figure.add_subplot(grid[3, 0], sharex=self.temperature_axis)
-        self.figure.subplots_adjust(left=0.070, right=0.985, top=0.965, bottom=0.125)
+        self.figure.subplots_adjust(left=0.070, right=0.985, top=0.965, bottom=0.18)
 
-        self.actual_line, = self.temperature_axis.plot([], [], color=COLORS["actual"], linewidth=2.5, label="D6T reelle")
-        self.predicted_line, = self.temperature_axis.plot([], [], color=COLORS["predicted"], linewidth=2.3, label="IA estimee")
+        self.actual_line, = self.temperature_axis.plot([], [], color=COLORS["actual"], linewidth=2.5, label="Measured D6T")
+        self.predicted_line, = self.temperature_axis.plot([], [], color=COLORS["predicted"], linewidth=2.3, label="AI prediction")
         self.error_line, = self.error_axis.plot([], [], color=COLORS["ink"], linewidth=1.2, alpha=0.55)
         self.error_scatter = None
         self.error_fill = None
@@ -640,20 +640,21 @@ class TemperatureValidationApp(tk.Tk):
         return frame
 
     def configure_axes(self) -> None:
-        comma_formatter = FuncFormatter(lambda value, _position: f"{value:.1f}".replace(".", ","))
+        decimal_formatter = FuncFormatter(lambda value, _position: f"{value:.1f}")
 
         for axis in (self.temperature_axis, self.error_axis):
             axis.set_facecolor(COLORS["surface"])
             axis.grid(True, color=COLORS["grid"], linewidth=0.8, alpha=0.8)
             axis.tick_params(colors=COLORS["muted"], labelsize=8)
-            axis.yaxis.set_major_formatter(comma_formatter)
+            axis.yaxis.set_major_formatter(decimal_formatter)
             for spine in axis.spines.values():
                 spine.set_color(COLORS["border"])
 
         self.temperature_axis.tick_params(labelbottom=False)
-        self.temperature_axis.set_ylabel("Temperature (°C)", color=COLORS["muted"], fontsize=9)
-        self.error_axis.set_ylabel("|e| °C", color=COLORS["muted"], fontsize=8)
-        self.error_axis.set_xlabel("Temps ecoule (s)", color=COLORS["muted"], fontsize=9)
+        self.temperature_axis.set_ylabel("Temp (°C)", color=COLORS["muted"], fontsize=9)
+        self.error_axis.set_ylabel("|e|", color=COLORS["muted"], fontsize=8)
+        self.error_axis.set_xlabel("Elapsed time (s)", color=COLORS["muted"], fontsize=9)
+        self.error_axis.yaxis.set_major_locator(MaxNLocator(nbins=3, prune="upper"))
         self.error_axis.xaxis.set_major_formatter(FuncFormatter(lambda value, _position: f"{value:.0f}"))
 
         legend = self.temperature_axis.legend(loc="upper left", frameon=False, ncol=2, fontsize=9)
@@ -674,7 +675,7 @@ class TemperatureValidationApp(tk.Tk):
         self.port_display_to_device.clear()
 
         for port in ports:
-            description = str(port.description or "Peripherique serie")
+            description = str(port.description or "Serial device")
             display = f"{port.device} - {description}"
             values.append(display)
             self.port_display_to_device[display] = port.device
@@ -731,10 +732,10 @@ class TemperatureValidationApp(tk.Tk):
 
         device = self.selected_port_device()
         if not device:
-            messagebox.showerror("Port serie", "Aucun port COM n'est selectionne.")
+            messagebox.showerror("Serial port", "No COM port selected.")
             return
 
-        self.set_status("Connexion...", COLORS["blue"])
+        self.set_status("Connecting...", COLORS["blue"])
         self.update_idletasks()
 
         try:
@@ -746,8 +747,8 @@ class TemperatureValidationApp(tk.Tk):
             )
             connection.reset_input_buffer()
         except Exception as exc:
-            self.set_status("Echec connexion", COLORS["red"])
-            messagebox.showerror("Connexion impossible", f"Impossible d'ouvrir {device} :\n{exc}")
+            self.set_status("Connection failed", COLORS["red"])
+            messagebox.showerror("Connection failed", f"Could not open {device}:\n{exc}")
             return
 
         self.reset_session()
@@ -755,10 +756,10 @@ class TemperatureValidationApp(tk.Tk):
             self.start_automatic_export()
         except OSError as exc:
             connection.close()
-            self.set_status("Echec export automatique", COLORS["red"])
+            self.set_status("Auto-save failed", COLORS["red"])
             messagebox.showerror(
-                "Export automatique impossible",
-                f"Impossible de creer le fichier CSV :\n{exc}",
+                "Automatic CSV save failed",
+                f"Could not create the CSV file:\n{exc}",
             )
             return
 
@@ -772,10 +773,10 @@ class TemperatureValidationApp(tk.Tk):
             daemon=True,
         )
         self.reader_thread.start()
-        self.connect_button.configure(text="Deconnecter")
+        self.connect_button.configure(text="Disconnect")
         self.port_combo.configure(state=tk.DISABLED)
         self.refresh_button.configure(state=tk.DISABLED)
-        self.set_status("Connecte - attente du flux", COLORS["orange"])
+        self.set_status("Connected · waiting for data", COLORS["orange"])
 
     def disconnect_serial(self) -> None:
         connection = self.serial_connection
@@ -790,10 +791,10 @@ class TemperatureValidationApp(tk.Tk):
             except Exception:
                 pass
 
-        self.connect_button.configure(text="Connecter")
+        self.connect_button.configure(text="Connect")
         self.port_combo.configure(state="readonly")
         self.refresh_button.configure(state=tk.NORMAL)
-        self.set_status("Deconnecte", COLORS["neutral"])
+        self.set_status("Disconnected", COLORS["neutral"])
 
     def serial_reader_loop(
         self,
@@ -853,13 +854,13 @@ class TemperatureValidationApp(tk.Tk):
                 elif event == "serial_warning":
                     generation, _message = payload  # type: ignore[misc]
                     if is_current_connection_event(generation, self.connection_generation):
-                        self.set_status("Perturbation serie - nouvelle tentative", COLORS["orange"])
+                        self.set_status("Serial retrying", COLORS["orange"])
                 elif event == "serial_error":
                     generation, message = payload  # type: ignore[misc]
                     if is_current_connection_event(generation, self.connection_generation):
                         self.disconnect_serial()
-                        self.set_status("Erreur serie", COLORS["red"])
-                        messagebox.showerror("Erreur serie", str(message))
+                        self.set_status("Serial error", COLORS["red"])
+                        messagebox.showerror("Serial error", str(message))
         except queue.Empty:
             pass
         self.after(QUEUE_REFRESH_MS, self.process_events)
@@ -888,7 +889,7 @@ class TemperatureValidationApp(tk.Tk):
         )
 
         self.sample_count_var.set(str(self.accumulator.count))
-        self.rate_var.set(f"{self.current_rate_hz():.1f} Hz".replace(".", ","))
+        self.rate_var.set(f"{self.current_rate_hz():.1f} Hz")
         self.export_button.configure(state=tk.NORMAL)
         self.set_status("Acquisition active", COLORS["green"])
         self.record_automatic_sample(sample)
@@ -912,10 +913,10 @@ class TemperatureValidationApp(tk.Tk):
         except OSError as exc:
             failed_path = self.automatic_export.path
             self.stop_automatic_export()
-            self.set_status("Erreur export automatique", COLORS["red"])
+            self.set_status("Auto-save error", COLORS["red"])
             messagebox.showerror(
-                "Export automatique interrompu",
-                f"Impossible d'ecrire dans {failed_path.name} :\n{exc}",
+                "Automatic CSV save interrupted",
+                f"Could not write to {failed_path.name}:\n{exc}",
             )
 
     def update_error_panel(
@@ -949,8 +950,8 @@ class TemperatureValidationApp(tk.Tk):
         self.plot_dirty = True
 
         if hasattr(self, "actual_value_label"):
-            self.actual_value_label.configure(text="--,-")
-            self.predicted_value_label.configure(text="--,-")
+            self.actual_value_label.configure(text="--.-")
+            self.predicted_value_label.configure(text="--.-")
             self.update_error_panel(
                 self.instant_error_frame,
                 self.instant_error_labels,
@@ -964,7 +965,7 @@ class TemperatureValidationApp(tk.Tk):
                 math.nan,
             )
             self.sample_count_var.set("0")
-            self.rate_var.set("0,0 Hz")
+            self.rate_var.set("0.0 Hz")
             self.invalid_var.set("0")
             self.export_button.configure(state=tk.DISABLED)
 
@@ -1040,12 +1041,12 @@ class TemperatureValidationApp(tk.Tk):
 
     def refresh_connection_status(self) -> None:
         if self.demo_mode:
-            self.set_status("Mode demonstration", COLORS["blue"])
+            self.set_status("Demo mode", COLORS["blue"])
         elif self.serial_connection is not None:
             if self.last_sample_monotonic is None:
-                self.set_status("Connecte - attente du flux", COLORS["orange"])
+                self.set_status("Connected · waiting for data", COLORS["orange"])
             elif (time.monotonic() - self.last_sample_monotonic) > STALE_DATA_SECONDS:
-                self.set_status("Flux interrompu", COLORS["orange"])
+                self.set_status("Data stream paused", COLORS["orange"])
         self.after(STATUS_REFRESH_MS, self.refresh_connection_status)
 
     def set_status(self, text: str, color: str) -> None:
@@ -1058,10 +1059,10 @@ class TemperatureValidationApp(tk.Tk):
 
         default_name = f"validation_ia_{datetime.now():%Y%m%d_%H%M%S}.csv"
         path = filedialog.asksaveasfilename(
-            title="Exporter la session",
+            title="Export session",
             defaultextension=".csv",
             initialfile=default_name,
-            filetypes=[("Fichier CSV", "*.csv")],
+            filetypes=[("CSV files", "*.csv")],
         )
         if not path:
             return
@@ -1074,18 +1075,18 @@ class TemperatureValidationApp(tk.Tk):
                 for sample in self.session_samples:
                     writer.writerow(csv_sample_row(sample))
         except OSError as exc:
-            messagebox.showerror("Export impossible", str(exc))
+            messagebox.showerror("Export failed", str(exc))
             return
 
-        self.set_status(f"Export termine - {output_path.name}", COLORS["blue"])
+        self.set_status("Export complete", COLORS["blue"])
 
     def start_demo_mode(self) -> None:
         self.port_combo.configure(state=tk.DISABLED)
         self.refresh_button.configure(state=tk.DISABLED)
-        self.connect_button.configure(state=tk.DISABLED, text="Demonstration")
+        self.connect_button.configure(state=tk.DISABLED, text="Demo")
         self.reset_session()
         self.demo_started_at = time.monotonic()
-        self.set_status("Mode demonstration", COLORS["blue"])
+        self.set_status("Demo mode", COLORS["blue"])
         self.after(100, self.demo_tick)
 
     def demo_tick(self) -> None:

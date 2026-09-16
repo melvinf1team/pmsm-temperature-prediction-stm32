@@ -50,7 +50,7 @@ except Exception:
     MATPLOTLIB_AVAILABLE = False
 
 
-# Paramètres moteur et communication par défaut.
+# Default motor and communication settings.
 POLE_PAIRS_DEFAULT = 2
 BAUD_DEFAULT = 115200
 DS18B20_MIN_MS = 750
@@ -69,13 +69,15 @@ MAX_ACCEL_ELEC_HZ_S = 50.0
 MAX_DATALOG_MS = 10000
 MAX_DS18B20_MS = 10000
 
-ACQUISITION_MODE_MOTOR = "Moteur + collecte"
-ACQUISITION_MODE_IDLE = "Collecte seule (moteur arrêté)"
+ACQUISITION_MODE_MOTOR = "Motor + logging"
+ACQUISITION_MODE_IDLE = "Logging only (motor stopped)"
 ACQUISITION_MODES = (ACQUISITION_MODE_MOTOR, ACQUISITION_MODE_IDLE)
+CUSTOM_PROFILE_NAME = "Custom"
+# Keep the former built-in name reserved in existing profile files.
+LEGACY_CUSTOM_PROFILE_NAME = "Personnalisé"
 
-# Colonnes effectivement écrites dans le CSV final.
-# La carte peut recevoir davantage de colonnes pour l'affichage live, mais seules
-# celles-ci sont conservées dans le fichier de datalogging.
+# Columns written to the final CSV. Additional board columns may be displayed
+# live, but only these columns are retained in the data log.
 D6T_TEMPERATURE_COLUMN = "d6t_temp_c"
 D6T_TEMPERATURE_COLUMNS = {D6T_TEMPERATURE_COLUMN}
 
@@ -93,7 +95,7 @@ CSV_OUTPUT_COLUMNS = [
 NON_PLOT_FIELDS = {"stm32_time_ms", "motor_speed_elec_hz", "motor_vbus_v"}
 
 
-# Palette centrale utilisée par toute l'interface graphique.
+# Shared interface color palette.
 COLORS = {
     "bg": "#070A0F",
     "panel": "#10151E",
@@ -136,7 +138,7 @@ class MotorProfile:
     """
     name: str
     speed_value: float
-    speed_unit: str  # "rpm" ou "elec_hz"
+    speed_unit: str  # "rpm" or "elec_hz"
     iq_limit_a: float
     hard_limit_a: float
     accel_elec_hz_s: float
@@ -144,10 +146,10 @@ class MotorProfile:
     ds18b20_ms: int
 
 
-# Profil minimal embarqué ; les profils utilisateur sont chargés depuis motor_profiles.json.
+# Built-in base profile; user profiles are loaded from motor_profiles.json.
 PROFILES = {
-    "Personnalisé": MotorProfile(
-        name="Personnalisé",
+    CUSTOM_PROFILE_NAME: MotorProfile(
+        name=CUSTOM_PROFILE_NAME,
         speed_value=600.0,
         speed_unit="rpm",
         iq_limit_a=2.0,
@@ -165,7 +167,7 @@ PROJECT_ROOT = DASHBOARD_DIR.parent
 DEFAULT_LOG_DIR = DASHBOARD_DIR / "logs"
 DEFAULT_PROFILE_STORE_PATH = DASHBOARD_DIR / "motor_profiles.json"
 
-# Fichiers YAML optionnels lus automatiquement par ConfigArgParse s'ils existent.
+# Optional YAML files loaded by ConfigArgParse when present.
 DEFAULT_CONFIG_FILES = [
     PROJECT_ROOT / "dashboard_config.yaml",
     DASHBOARD_DIR / "dashboard_config.yaml",
@@ -232,24 +234,24 @@ def parse_dashboard_args(argv=None):
     )
 
     if paths.log_dir.exists() and not paths.log_dir.is_dir():
-        raise NotADirectoryError(f"Le chemin des logs n'est pas un dossier : {paths.log_dir}")
+        raise NotADirectoryError(f"The log path is not a directory: {paths.log_dir}")
     if paths.profile_store_path.exists() and not paths.profile_store_path.is_file():
-        raise IsADirectoryError(f"Le chemin des profils n'est pas un fichier : {paths.profile_store_path}")
+        raise IsADirectoryError(f"The profile path is not a file: {paths.profile_store_path}")
     if paths.csv_path is not None and paths.csv_path.exists() and paths.csv_path.is_dir():
-        raise IsADirectoryError(f"Le chemin CSV initial pointe vers un dossier : {paths.csv_path}")
+        raise IsADirectoryError(f"The initial CSV path points to a directory: {paths.csv_path}")
 
     return paths
 
 
-# Métadonnées des colonnes CSV reconnues par les cartes live et le graphe.
+# Metadata for CSV columns shown by the live cards and chart.
 KNOWN_FIELDS = {
     "stm32_time_ms": ("STM32", "ms"),
-    "ds18b20_temp_c": ("Temp ext", "°C"),
-    "d6t_temp_c": ("Temp int", "°C"),
+    "ds18b20_temp_c": ("External temp", "°C"),
+    "d6t_temp_c": ("IR temp", "°C"),
     "motor_ud_v": ("Ud", "V"),
     "motor_uq_v": ("Uq", "V"),
-    "motor_speed_elec_hz": ("Vitesse elec", "Hz"),
-    "motor_speed_mech_rpm": ("Vitesse mech", "rpm"),
+    "motor_speed_elec_hz": ("Elec. speed", "Hz"),
+    "motor_speed_mech_rpm": ("Mech. speed", "rpm"),
     "motor_id_a": ("Id", "A"),
     "motor_iq_a": ("Iq", "A"),
 }
@@ -266,11 +268,11 @@ DEFAULT_LIVE_FIELDS = [
 ]
 
 DEFAULT_PLOT_FIELDS = {
-    "ds18b20_temp_c": "Temp ext (°C)",
-    "d6t_temp_c": "Temp int IR (°C)",
+    "ds18b20_temp_c": "External temp (°C)",
+    "d6t_temp_c": "IR temp (°C)",
     "motor_ud_v": "Ud (V)",
     "motor_uq_v": "Uq (V)",
-    "motor_speed_mech_rpm": "Vitesse mech (rpm)",
+    "motor_speed_mech_rpm": "Mech. speed (rpm)",
     "motor_id_a": "Id (A)",
     "motor_iq_a": "Iq (A)",
 }
@@ -377,8 +379,8 @@ class MotorDatalogGui(tk.Tk):
         self.datalog_ms_var = tk.StringVar()
         self.ds18b20_ms_var = tk.StringVar()
         self.csv_path_var = tk.StringVar(value=str(self.paths.csv_path or self.default_csv_path()))
-        self.status_var = tk.StringVar(value="Prêt")
-        self.status_detail_var = tk.StringVar(value="Sélectionne un port COM et une configuration.")
+        self.status_var = tk.StringVar(value="Ready")
+        self.status_detail_var = tk.StringVar(value="Select a COM port and settings.")
         self.warning_var = tk.StringVar(value="")
         self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
 
@@ -439,10 +441,10 @@ class MotorDatalogGui(tk.Tk):
         """Convert and validate a CSV path entered in the interface."""
         raw = str(value).strip()
         if not raw:
-            raise ValueError("Aucun fichier CSV sélectionné.")
+            raise ValueError("No CSV file selected.")
         path = path_from_arg(raw)
         if path.exists() and path.is_dir():
-            raise ValueError(f"Le chemin CSV pointe vers un dossier : {path}")
+            raise ValueError(f"The CSV path points to a directory: {path}")
         return path
 
     def setup_style(self):
@@ -644,7 +646,7 @@ class MotorDatalogGui(tk.Tk):
         title_block = tk.Frame(header, bg=COLORS["panel_soft"])
         title_block.grid(row=0, column=0, sticky="w", padx=(24, 16), pady=18)
         ttk.Label(title_block, text="STM32 PMSM Bench", style="Hero.TLabel").pack(anchor="w")
-        ttk.Label(title_block, text="Pilotage moteur, acquisition CSV et supervision temps reel", style="HeroSub.TLabel").pack(anchor="w", pady=(3, 0))
+        ttk.Label(title_block, text="Motor control, CSV logging and live monitoring", style="HeroSub.TLabel").pack(anchor="w", pady=(3, 0))
 
         status_card = tk.Frame(header, bg=COLORS["panel_lift"], highlightbackground=COLORS["border"], highlightthickness=1)
         status_card.grid(row=0, column=1, sticky="e", padx=(8, 14), pady=14)
@@ -654,17 +656,17 @@ class MotorDatalogGui(tk.Tk):
         self.status_dot.grid(row=0, column=0, rowspan=2, padx=(14, 9), pady=12)
         self.status_dot_id = self.status_dot.create_oval(4, 4, 16, 16, fill=COLORS["warning"], outline="")
         ttk.Label(status_card, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 18), pady=(10, 0))
-        ttk.Label(status_card, textvariable=self.status_detail_var, style="CardMuted.TLabel").grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
+        ttk.Label(status_card, textvariable=self.status_detail_var, style="CardMuted.TLabel", wraplength=260).grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
 
         control_card = tk.Frame(header, bg=COLORS["panel_soft"])
         control_card.grid(row=0, column=2, sticky="e", padx=(0, 16), pady=14)
         control_card.grid_columnconfigure(0, weight=1)
         control_card.grid_columnconfigure(1, weight=1)
 
-        self.start_button = self.action_button(control_card, "LANCER", self.start_run, COLORS["lime"], "#062712")
+        self.start_button = self.action_button(control_card, "START", self.start_run, COLORS["lime"], "#062712")
         self.start_button.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
-        self.stop_button = self.action_button(control_card, "ARRETER", self.stop_run, COLORS["danger"], "#3A1018")
+        self.stop_button = self.action_button(control_card, "STOP", self.stop_run, COLORS["danger"], "#3A1018")
         self.stop_button.configure(state=tk.DISABLED)
         self.stop_button.grid(row=0, column=1, sticky="nsew")
 
@@ -758,7 +760,7 @@ class MotorDatalogGui(tk.Tk):
         for row in range(4):
             parent.grid_rowconfigure(row, weight=0)
 
-        conn_card, conn = self.card(parent, "Connexion carte", padx=14, pady=12, accent=COLORS["cyan"])
+        conn_card, conn = self.card(parent, "Board connection", padx=14, pady=12, accent=COLORS["cyan"])
         conn_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         conn.grid_columnconfigure(0, weight=1)
         conn.grid_columnconfigure(1, weight=0)
@@ -769,15 +771,15 @@ class MotorDatalogGui(tk.Tk):
         self.port_combo.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 10))
         self.port_combo.bind("<<ComboboxSelected>>", self.on_port_selected)
 
-        self.refresh_button = self.small_button(conn, "Scanner", self.refresh_ports, COLORS["cyan"])
+        self.refresh_button = self.small_button(conn, "Scan", self.refresh_ports, COLORS["cyan"])
         self.refresh_button.grid(row=1, column=1, sticky="ew", pady=(0, 10))
 
-        self.form_label(conn, "Baudrate", 2, 0)
+        self.form_label(conn, "Baud rate", 2, 0)
         self.baud_entry = ttk.Entry(conn, textvariable=self.baud_var)
         self.entry_widgets["baud"] = self.baud_entry
         self.baud_entry.grid(row=3, column=0, columnspan=2, sticky="ew")
 
-        profile_card, profile = self.card(parent, "Profil moteur", padx=14, pady=12, accent=COLORS["lime"])
+        profile_card, profile = self.card(parent, "Motor profile", padx=14, pady=12, accent=COLORS["lime"])
         profile_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         profile.grid_columnconfigure(0, weight=0)
         profile.grid_columnconfigure(1, weight=1, minsize=76)
@@ -793,21 +795,21 @@ class MotorDatalogGui(tk.Tk):
         self.entry_widgets["speed_rpm"] = self.speed_rpm_entry
         self.speed_hz_entry = ttk.Entry(profile, textvariable=self.speed_hz_var, width=8)
         self.entry_widgets["speed_hz"] = self.speed_hz_entry
-        self.compact_form_row(profile, "rpm", self.speed_rpm_entry, "Hz elec", self.speed_hz_entry, 1)
+        self.compact_form_row(profile, "rpm", self.speed_rpm_entry, "Elec. Hz", self.speed_hz_entry, 1)
 
         self.pole_entry = ttk.Entry(profile, textvariable=self.pole_pairs_var, width=8)
         self.entry_widgets["pole_pairs"] = self.pole_entry
         self.accel_entry = ttk.Entry(profile, textvariable=self.accel_var, width=8)
         self.entry_widgets["accel"] = self.accel_entry
-        self.compact_form_row(profile, "Paires", self.pole_entry, "Accel", self.accel_entry, 2)
+        self.compact_form_row(profile, "Pole pairs", self.pole_entry, "Accel.", self.accel_entry, 2)
 
         self.iq_entry = ttk.Entry(profile, textvariable=self.iq_limit_var, width=8)
         self.entry_widgets["iq_limit"] = self.iq_entry
         self.hard_entry = ttk.Entry(profile, textvariable=self.hard_limit_var, width=8)
         self.entry_widgets["hard_limit"] = self.hard_entry
-        self.compact_form_row(profile, "Iq lim.", self.iq_entry, "Hard", self.hard_entry, 3)
+        self.compact_form_row(profile, "Iq limit", self.iq_entry, "Hard stop", self.hard_entry, 3)
 
-        self.save_profile_button = self.small_button(profile, "Enregistrer le profil", self.save_current_profile, COLORS["lime"])
+        self.save_profile_button = self.small_button(profile, "Save profile", self.save_current_profile, COLORS["lime"])
         self.save_profile_button.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         self.save_profile_button.grid_remove()
 
@@ -821,23 +823,23 @@ class MotorDatalogGui(tk.Tk):
             self.hard_entry,
         ]
 
-        csv_card, csv_box = self.card(parent, "Sortie CSV", padx=14, pady=12, accent=COLORS["amber"])
+        csv_card, csv_box = self.card(parent, "CSV output", padx=14, pady=12, accent=COLORS["amber"])
         csv_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         csv_box.grid_columnconfigure(0, weight=1)
         csv_box.grid_columnconfigure(1, weight=0)
 
-        self.form_label(csv_box, "Fichier de sortie", 0, 0)
+        self.form_label(csv_box, "Output file", 0, 0)
         self.csv_entry = ttk.Entry(csv_box, textvariable=self.csv_path_var)
         self.entry_widgets["csv_path"] = self.csv_entry
         self.csv_entry.grid(row=1, column=0, sticky="ew", padx=(0, 10))
-        self.small_button(csv_box, "Choisir", self.choose_csv_file, COLORS["amber"]).grid(row=1, column=1, sticky="ew")
+        self.small_button(csv_box, "Browse", self.choose_csv_file, COLORS["amber"]).grid(row=1, column=1, sticky="ew")
 
         acq_card, acq = self.card(parent, "Acquisition", padx=14, pady=12, accent=COLORS["violet"])
         acq_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
         for i in range(2):
             acq.grid_columnconfigure(i, weight=1)
 
-        self.form_label(acq, "Mode de session", 0, 0)
+        self.form_label(acq, "Session mode", 0, 0)
         self.acquisition_mode_combo = ttk.Combobox(
             acq,
             textvariable=self.acquisition_mode_var,
@@ -849,11 +851,11 @@ class MotorDatalogGui(tk.Tk):
 
         self.datalog_entry = ttk.Entry(acq, textvariable=self.datalog_ms_var)
         self.entry_widgets["datalog_ms"] = self.datalog_entry
-        self.form_row(acq, "Periode DATA (ms)", self.datalog_entry, 2, 0)
+        self.form_row(acq, "DATA period (ms)", self.datalog_entry, 2, 0)
 
         self.ds18b20_entry = ttk.Entry(acq, textvariable=self.ds18b20_ms_var)
         self.entry_widgets["ds18b20_ms"] = self.ds18b20_entry
-        self.form_row(acq, "Periode DS18B20 (ms)", self.ds18b20_entry, 2, 1)
+        self.form_row(acq, "DS18B20 period (ms)", self.ds18b20_entry, 2, 1)
 
         self.warning_label = ttk.Label(acq, textvariable=self.warning_var, style="Warn.TLabel", wraplength=340)
         self.warning_label.configure(wraplength=380)
@@ -904,7 +906,7 @@ class MotorDatalogGui(tk.Tk):
 
     def build_plot_panel(self, parent):
         """Build the live-chart panel."""
-        plot_card, plot_content = self.card(parent, "Graphique dynamique", padx=14, pady=12, accent=COLORS["accent"])
+        plot_card, plot_content = self.card(parent, "Live chart", padx=14, pady=12, accent=COLORS["accent"])
         plot_card.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
         plot_card.grid_rowconfigure(0, weight=1)
         plot_card.grid_columnconfigure(0, weight=1)
@@ -921,10 +923,10 @@ class MotorDatalogGui(tk.Tk):
         for key in self.plot_fields:
             self.add_plot_checkbox(key)
 
-        self.small_button(selector, "Effacer", self.clear_plot, COLORS["accent"]).pack(fill=tk.X, pady=(16, 0))
+        self.small_button(selector, "Clear", self.clear_plot, COLORS["accent"]).pack(fill=tk.X, pady=(16, 0))
         ttk.Label(
             selector,
-            text="Plusieurs unites : affichage relatif 0-100, min/max dans la legende.",
+            text="Multiple units: relative 0–100 scale; min/max in the legend.",
             style="CardMuted.TLabel",
             wraplength=220,
         ).pack(anchor="w", pady=(14, 0))
@@ -944,7 +946,7 @@ class MotorDatalogGui(tk.Tk):
         else:
             tk.Label(
                 chart_area,
-                text="Matplotlib n'est pas installe.\nInstalle-le avec : pip install matplotlib",
+                text="Matplotlib is not installed.\nInstall it with: pip install matplotlib",
                 bg=COLORS["panel"],
                 fg=COLORS["warning"],
                 font=("Segoe UI Semibold", 12),
@@ -992,11 +994,11 @@ class MotorDatalogGui(tk.Tk):
             self.add_plot_checkbox(key)
             added.append(key)
         if added:
-            self.log("Variables CSV ajoutées au graphe : " + ", ".join(added))
+            self.log("CSV variables added to the chart: " + ", ".join(added))
 
     def build_log_panel(self, parent):
         """Build the TX/RX text log."""
-        log_card, log_content = self.card(parent, "Journal UART", padx=14, pady=12, accent=COLORS["rose"])
+        log_card, log_content = self.card(parent, "UART log", padx=14, pady=12, accent=COLORS["rose"])
         log_card.grid(row=2, column=0, sticky="nsew")
         log_card.grid_rowconfigure(0, weight=1)
         log_card.grid_columnconfigure(0, weight=1)
@@ -1059,25 +1061,25 @@ class MotorDatalogGui(tk.Tk):
         if profile_store_path.exists():
             try:
                 if not profile_store_path.is_file():
-                    raise ValueError("Le chemin des profils pointe vers un dossier.")
+                    raise ValueError("The profile path points to a directory.")
 
                 raw = json.loads(profile_store_path.read_text(encoding="utf-8"))
                 if not isinstance(raw, list):
-                    raise ValueError("Le fichier doit contenir une liste de profils.")
+                    raise ValueError("The file must contain a list of profiles.")
 
                 for index, item in enumerate(raw, start=1):
                     if not isinstance(item, dict):
-                        self.profile_load_errors.append(f"Profil #{index} ignoré : entrée JSON invalide.")
+                        self.profile_load_errors.append(f"Profile #{index} skipped: invalid JSON entry.")
                         continue
 
                     name = str(item.get("name", "")).strip()
-                    if not name or name == "Personnalisé":
-                        self.profile_load_errors.append(f"Profil #{index} ignoré : nom vide ou réservé.")
+                    if not name or name in {CUSTOM_PROFILE_NAME, LEGACY_CUSTOM_PROFILE_NAME}:
+                        self.profile_load_errors.append(f"Profile #{index} skipped: empty or reserved name.")
                         continue
 
                     speed_unit = str(item.get("speed_unit", "rpm")).strip() or "rpm"
                     if speed_unit not in {"rpm", "elec_hz"}:
-                        self.profile_load_errors.append(f"Profil '{name}' ignoré : speed_unit invalide.")
+                        self.profile_load_errors.append(f"Profile '{name}' skipped: invalid speed_unit.")
                         continue
 
                     profiles[name] = MotorProfile(
@@ -1091,10 +1093,10 @@ class MotorDatalogGui(tk.Tk):
                         ds18b20_ms=int(item.get("ds18b20_ms", 1000)),
                     )
             except Exception as exc:
-                self.profile_load_errors.append(f"Impossible de charger {profile_store_path.name} : {exc}")
+                self.profile_load_errors.append(f"Could not load {profile_store_path.name}: {exc}")
 
-        if "Personnalisé" not in profiles:
-            profiles["Personnalisé"] = PROFILES["Personnalisé"]
+        if CUSTOM_PROFILE_NAME not in profiles:
+            profiles[CUSTOM_PROFILE_NAME] = PROFILES[CUSTOM_PROFILE_NAME]
 
         return profiles
 
@@ -1102,13 +1104,12 @@ class MotorDatalogGui(tk.Tk):
         """Select the profile shown at startup.
 
         Returns:
-        str: First available custom profile, or ``"Personnalisé"`` ("Custom")
-        if none was loaded.
+            str: First available saved profile, or ``"Custom"`` if none was loaded.
         """
         for name in self.profiles:
-            if name != "Personnalisé":
+            if name != CUSTOM_PROFILE_NAME:
                 return name
-        return "Personnalisé"
+        return CUSTOM_PROFILE_NAME
 
     def save_profiles_to_disk(self):
         """Save custom profiles to the configured JSON file.
@@ -1118,7 +1119,7 @@ class MotorDatalogGui(tk.Tk):
         """
         custom_profiles = []
         for name, profile in self.profiles.items():
-            if name in BUILTIN_PROFILE_NAMES or name == "Personnalisé":
+            if name in BUILTIN_PROFILE_NAMES:
                 continue
             custom_profiles.append(asdict(profile))
 
@@ -1219,11 +1220,11 @@ class MotorDatalogGui(tk.Tk):
     def update_save_profile_button(self):
         """Show or hide the profile-save button.
 
-        The button is visible only for the ``"Personnalisé"`` ("Custom") profile.
+        The button is visible only for the ``"Custom"`` profile.
         """
         if not hasattr(self, "save_profile_button"):
             return
-        if (self.profile_var.get() == "Personnalisé" and
+        if (self.profile_var.get() == CUSTOM_PROFILE_NAME and
                 not self.is_idle_acquisition_mode()):
             self.save_profile_button.grid()
         else:
@@ -1251,10 +1252,10 @@ class MotorDatalogGui(tk.Tk):
 
         if idle_mode:
             self.save_profile_button.grid_remove()
-            self.start_button.configure(text="LANCER COLLECTE")
+            self.start_button.configure(text="START LOGGING")
         else:
             self.update_save_profile_button()
-            self.start_button.configure(text="LANCER")
+            self.start_button.configure(text="START")
 
     def on_acquisition_mode_changed(self, *_args):
         """Handle switching between motor control and stopped-motor acquisition."""
@@ -1262,15 +1263,15 @@ class MotorDatalogGui(tk.Tk):
         self.validate_form()
 
     def switch_to_custom_due_to_edit(self):
-        """Switch to the ``"Personnalisé"`` ("Custom") profile after editing.
+        """Switch to the ``"Custom"`` profile after editing.
 
         Skip this switch while applying a profile or automatically updating rpm/Hz,
         to avoid accidental profile changes.
         """
         if not self._user_edit_ready or self._applying_profile or self._updating_speed_link:
             return
-        if self.profile_var.get() != "Personnalisé":
-            self.profile_var.set("Personnalisé")
+        if self.profile_var.get() != CUSTOM_PROFILE_NAME:
+            self.profile_var.set(CUSTOM_PROFILE_NAME)
             self.update_save_profile_button()
 
     def on_user_config_changed(self, *_args):
@@ -1356,12 +1357,12 @@ class MotorDatalogGui(tk.Tk):
         profile to ``motor_profiles.json``.
         """
         if not self.validate_form():
-            messagebox.showerror("Profil invalide", self.status_detail_var.get())
+            messagebox.showerror("Invalid profile", self.status_detail_var.get())
             return
 
         name = simpledialog.askstring(
-            "Enregistrer le profil",
-            "Nom du nouveau profil :",
+            "Save profile",
+            "New profile name:",
             parent=self,
         )
         if name is None:
@@ -1369,25 +1370,25 @@ class MotorDatalogGui(tk.Tk):
 
         name = name.strip()
         if not name:
-            messagebox.showerror("Nom invalide", "Le nom du profil ne peut pas être vide.")
+            messagebox.showerror("Invalid name", "The profile name cannot be empty.")
             return
-        if name == "Personnalisé":
-            messagebox.showerror("Nom invalide", "Le nom 'Personnalisé' est réservé.")
+        if name in {CUSTOM_PROFILE_NAME, LEGACY_CUSTOM_PROFILE_NAME}:
+            messagebox.showerror("Invalid name", f"The name '{name}' is reserved.")
             return
         if name in BUILTIN_PROFILE_NAMES:
-            messagebox.showerror("Nom invalide", "Ce nom correspond à un profil prédéfini.")
+            messagebox.showerror("Invalid name", "This name belongs to a built-in profile.")
             return
         if name in self.profiles:
             overwrite = messagebox.askyesno(
-                "Profil existant",
-                f"Le profil '{name}' existe déjà. Le remplacer ?",
+                "Existing profile",
+                f"Profile '{name}' already exists. Replace it?",
             )
             if not overwrite:
                 return
 
         if not messagebox.askyesno(
-            "Confirmer l'enregistrement",
-            f"Enregistrer le profil personnalisé sous le nom :\n\n{name}\n\nConfirmer ?",
+            "Confirm save",
+            f"Save the custom profile as:\n\n{name}\n\nContinue?",
         ):
             return
 
@@ -1410,10 +1411,10 @@ class MotorDatalogGui(tk.Tk):
 
         try:
             self.save_profiles_to_disk()
-            self.log(f"Profil enregistré : {name}")
-            messagebox.showinfo("Profil enregistré", f"Le profil '{name}' a été enregistré.")
+            self.log(f"Profile saved: {name}")
+            messagebox.showinfo("Profile saved", f"Profile '{name}' has been saved.")
         except Exception as exc:
-            messagebox.showerror("Erreur sauvegarde", f"Impossible d'enregistrer le profil :\n{exc}")
+            messagebox.showerror("Save error", f"Could not save the profile:\n{exc}")
 
     def set_status(self, state, detail=""):
         """Update status text and indicator color.
@@ -1425,18 +1426,16 @@ class MotorDatalogGui(tk.Tk):
         self.status_var.set(state)
         self.status_detail_var.set(detail)
         color = COLORS["warning"]
-        if state.lower().startswith("prêt") or state.lower().startswith("configuration"):
-            color = COLORS["accent_2"]
-        elif state.lower().startswith("lancement"):
-            color = COLORS["warning"]
-        elif (state.lower().startswith("datalogging") or
-              state.lower().startswith("moteur") or
-              state.lower().startswith("collecte")):
-            color = COLORS["accent_2"]
-        elif state.lower().startswith("arrêt"):
-            color = COLORS["muted"]
-        elif state.lower().startswith("erreur") or state.lower().startswith("échec"):
+        if state.lower().startswith(("error", "failed")) or " error" in state.lower() or state.lower().endswith("failed"):
             color = COLORS["danger"]
+        elif state.lower().startswith(("ready", "configuration")):
+            color = COLORS["accent_2"]
+        elif state.lower().startswith("starting"):
+            color = COLORS["warning"]
+        elif state.lower().startswith(("logging", "motor", "acquisition")):
+            color = COLORS["accent_2"]
+        elif state.lower().startswith(("stopping", "stopped")):
+            color = COLORS["muted"]
         self.status_dot.itemconfig(self.status_dot_id, fill=color)
 
     def log(self, msg):
@@ -1464,7 +1463,7 @@ class MotorDatalogGui(tk.Tk):
         Returns:
             str: Text such as ``COMx — description``.
         """
-        description = str(port_info.description or "Périphérique série")
+        description = str(port_info.description or "Serial device")
         return f"{port_info.device} — {description}"
 
     def get_selected_port_device(self):
@@ -1517,7 +1516,7 @@ class MotorDatalogGui(tk.Tk):
         current = self.port_var.get().strip()
         if st_displays:
             self.port_var.set(st_displays[0])
-            self.log(f"Port STMicroelectronics détecté : {st_displays[0]}")
+            self.log(f"STMicroelectronics port detected: {st_displays[0]}")
         elif values and current not in values:
             self.port_var.set(values[0])
         elif not values:
@@ -1537,11 +1536,11 @@ class MotorDatalogGui(tk.Tk):
             initialdir_path = Path.cwd()
 
         filename = filedialog.asksaveasfilename(
-            title="Choisir le fichier CSV",
+            title="Choose CSV file",
             initialdir=str(initialdir_path),
             initialfile=initial.name,
             defaultextension=".csv",
-            filetypes=[("CSV", "*.csv"), ("Tous les fichiers", "*.*")],
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
         if filename:
             self.csv_path_var.set(filename)
@@ -1593,7 +1592,7 @@ class MotorDatalogGui(tk.Tk):
         """
         acquisition_mode = self.acquisition_mode_var.get()
         if acquisition_mode not in ACQUISITION_MODES:
-            raise ValueError("Mode d'acquisition invalide.")
+            raise ValueError("Invalid acquisition mode.")
 
         port = self.get_selected_port_device()
         baud = int(self.baud_var.get().strip())
@@ -1602,14 +1601,14 @@ class MotorDatalogGui(tk.Tk):
         csv_path = self.csv_path_from_text(self.csv_path_var.get())
 
         if not port:
-            raise ValueError("Aucun port COM sélectionné.")
+            raise ValueError("No COM port selected.")
         if baud <= 0:
-            raise ValueError("Le baudrate doit être > 0.")
+            raise ValueError("The baud rate must be greater than 0.")
         if not 1 <= datalog_ms <= MAX_DATALOG_MS:
-            raise ValueError(f"La période DATA doit être comprise entre 1 et {MAX_DATALOG_MS} ms.")
+            raise ValueError(f"The DATA period must be between 1 and {MAX_DATALOG_MS} ms.")
         if not DS18B20_MIN_MS <= ds18b20_ms <= MAX_DS18B20_MS:
             raise ValueError(
-                f"La période DS18B20 doit être comprise entre {DS18B20_MIN_MS} et {MAX_DS18B20_MS} ms."
+                f"The DS18B20 period must be between {DS18B20_MIN_MS} and {MAX_DS18B20_MS} ms."
             )
 
         config = {
@@ -1631,26 +1630,26 @@ class MotorDatalogGui(tk.Tk):
 
             if not all(math.isfinite(value) for value in (
                     target_rpm, speed_hz, iq_limit, hard_limit, accel)):
-                raise ValueError("Les paramètres moteur doivent être des nombres finis.")
+                raise ValueError("Motor settings must be finite numbers.")
             if not MIN_TARGET_SPEED_RPM <= target_rpm <= MAX_TARGET_SPEED_RPM:
                 raise ValueError(
-                    f"La vitesse doit être comprise entre {MIN_TARGET_SPEED_RPM:g} "
-                    f"et {MAX_TARGET_SPEED_RPM:g} rpm."
+                    f"Speed must be between {MIN_TARGET_SPEED_RPM:g} "
+                    f"and {MAX_TARGET_SPEED_RPM:g} rpm."
                 )
             if pole_pairs <= 0:
-                raise ValueError("Le nombre de paires de pôles doit être > 0.")
+                raise ValueError("The pole-pair count must be greater than 0.")
             expected_hz = (target_rpm * pole_pairs) / 60.0
             if abs(expected_hz - speed_hz) > max(0.05, abs(expected_hz) * 0.01):
-                raise ValueError("La vitesse Hz ne correspond pas aux rpm et aux paires de pôles.")
+                raise ValueError("Electrical Hz does not match rpm and the pole-pair count.")
             if not 0 < iq_limit <= MAX_IQ_LIMIT_A:
-                raise ValueError(f"Iq limite doit être compris entre 0 et {MAX_IQ_LIMIT_A:g} A.")
+                raise ValueError(f"The Iq limit must be greater than 0 and at most {MAX_IQ_LIMIT_A:g} A.")
             if not 0 < hard_limit <= MAX_HARD_LIMIT_A:
-                raise ValueError(f"Hard stop doit être compris entre 0 et {MAX_HARD_LIMIT_A:g} A.")
+                raise ValueError(f"The hard-stop limit must be greater than 0 and at most {MAX_HARD_LIMIT_A:g} A.")
             if accel <= 0:
-                raise ValueError("L'accélération doit être > 0.")
+                raise ValueError("Acceleration must be greater than 0.")
             if accel > MAX_ACCEL_ELEC_HZ_S:
                 raise ValueError(
-                    f"L'accélération doit être <= {MAX_ACCEL_ELEC_HZ_S:g} Hz électriques/s."
+                    f"Acceleration must be at most {MAX_ACCEL_ELEC_HZ_S:g} electrical Hz/s."
                 )
 
             config.update({
@@ -1725,7 +1724,7 @@ class MotorDatalogGui(tk.Tk):
             raw = var.get().strip()
             if raw == "":
                 self.set_field_invalid(key, True)
-                errors.append(f"{label} vide.")
+                errors.append(f"{label} is empty.")
                 return None
             try:
                 value = float(raw.replace(",", "."))
@@ -1733,7 +1732,7 @@ class MotorDatalogGui(tk.Tk):
                     raise ValueError
             except Exception:
                 self.set_field_invalid(key, True)
-                errors.append(f"{label} invalide.")
+                errors.append(f"{label} is invalid.")
                 return None
             if min_value is not None:
                 if allow_zero:
@@ -1742,7 +1741,7 @@ class MotorDatalogGui(tk.Tk):
                     bad = value <= min_value
                 if bad:
                     self.set_field_invalid(key, True)
-                    errors.append(f"{label} doit être > {min_value}.")
+                    errors.append(f"{label} must be greater than {min_value}.")
             return value
 
         def parse_int(key, var, label, min_value=None, allow_zero=False):
@@ -1761,13 +1760,13 @@ class MotorDatalogGui(tk.Tk):
             raw = var.get().strip()
             if raw == "":
                 self.set_field_invalid(key, True)
-                errors.append(f"{label} vide.")
+                errors.append(f"{label} is empty.")
                 return None
             try:
                 value = int(raw)
             except Exception:
                 self.set_field_invalid(key, True)
-                errors.append(f"{label} invalide.")
+                errors.append(f"{label} is invalid.")
                 return None
             if min_value is not None:
                 if allow_zero:
@@ -1776,15 +1775,15 @@ class MotorDatalogGui(tk.Tk):
                     bad = value <= min_value
                 if bad:
                     self.set_field_invalid(key, True)
-                    errors.append(f"{label} doit être > {min_value}.")
+                    errors.append(f"{label} must be greater than {min_value}.")
             return value
 
         port = self.get_selected_port_device()
         if not port:
             self.set_combo_invalid("port", True)
-            errors.append("Aucun port COM sélectionné.")
+            errors.append("No COM port selected.")
 
-        baud = parse_int("baud", self.baud_var, "Baudrate", 0)
+        baud = parse_int("baud", self.baud_var, "Baud rate", 0)
         idle_mode = self.is_idle_acquisition_mode()
 
         target_rpm = None
@@ -1795,15 +1794,15 @@ class MotorDatalogGui(tk.Tk):
         accel = None
 
         if not idle_mode:
-            target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Vitesse rpm", 0)
-            speed_hz = parse_float("speed_hz", self.speed_hz_var, "Vitesse Hz", 0)
-            pole_pairs = parse_int("pole_pairs", self.pole_pairs_var, "Paires de pôles", 0)
-            iq_limit = parse_float("iq_limit", self.iq_limit_var, "Iq limite", 0)
+            target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Speed (rpm)", 0)
+            speed_hz = parse_float("speed_hz", self.speed_hz_var, "Electrical speed (Hz)", 0)
+            pole_pairs = parse_int("pole_pairs", self.pole_pairs_var, "Pole pairs", 0)
+            iq_limit = parse_float("iq_limit", self.iq_limit_var, "Iq limit", 0)
             hard_limit = parse_float("hard_limit", self.hard_limit_var, "Hard stop", 0)
-            accel = parse_float("accel", self.accel_var, "Accélération", 0)
+            accel = parse_float("accel", self.accel_var, "Acceleration", 0)
 
-        datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "Période DATA", 0)
-        ds18b20_ms = parse_int("ds18b20_ms", self.ds18b20_ms_var, "Période DS18B20", 0)
+        datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "DATA period", 0)
+        ds18b20_ms = parse_int("ds18b20_ms", self.ds18b20_ms_var, "DS18B20 period", 0)
 
         try:
             self.csv_path_from_text(self.csv_path_var.get())
@@ -1815,50 +1814,50 @@ class MotorDatalogGui(tk.Tk):
             expected_hz = (target_rpm * pole_pairs) / 60.0
             if abs(expected_hz - speed_hz) > max(0.05, abs(expected_hz) * 0.01):
                 self.set_field_invalid("speed_hz", True)
-                errors.append("La vitesse Hz ne correspond pas au rpm/paires de pôles.")
-                warnings.append("La vitesse Hz ne correspond pas exactement au rpm. Elle sera recalculée automatiquement à la prochaine édition.")
+                errors.append("Electrical Hz does not match rpm and pole pairs.")
+                warnings.append("Electrical Hz does not exactly match rpm; it will be recalculated after the next edit.")
 
         if target_rpm is not None and target_rpm < MIN_TARGET_SPEED_RPM:
             self.set_field_invalid("speed_rpm", True)
             self.set_field_invalid("speed_hz", True)
-            errors.append(f"La vitesse minimale autorisée est {MIN_TARGET_SPEED_RPM:g} rpm.")
+            errors.append(f"Minimum allowed speed is {MIN_TARGET_SPEED_RPM:g} rpm.")
         elif target_rpm is not None and target_rpm > MAX_TARGET_SPEED_RPM:
             self.set_field_invalid("speed_rpm", True)
             self.set_field_invalid("speed_hz", True)
-            errors.append(f"La vitesse maximale autorisée est {MAX_TARGET_SPEED_RPM:g} rpm.")
+            errors.append(f"Maximum allowed speed is {MAX_TARGET_SPEED_RPM:g} rpm.")
 
         if iq_limit is not None and iq_limit > MAX_IQ_LIMIT_A:
             self.set_field_invalid("iq_limit", True)
-            errors.append(f"La limite Iq maximale autorisée est {MAX_IQ_LIMIT_A:g} A.")
+            errors.append(f"Maximum allowed Iq limit is {MAX_IQ_LIMIT_A:g} A.")
 
         if hard_limit is not None and hard_limit > MAX_HARD_LIMIT_A:
             self.set_field_invalid("hard_limit", True)
-            errors.append(f"Le hard stop maximal autorisé est {MAX_HARD_LIMIT_A:g} A.")
+            errors.append(f"Maximum allowed hard-stop limit is {MAX_HARD_LIMIT_A:g} A.")
 
         if accel is not None and accel > MAX_ACCEL_ELEC_HZ_S:
             self.set_field_invalid("accel", True)
             errors.append(
-                f"L'accélération maximale autorisée est {MAX_ACCEL_ELEC_HZ_S:g} Hz électriques/s."
+                f"Maximum allowed acceleration is {MAX_ACCEL_ELEC_HZ_S:g} electrical Hz/s."
             )
 
         if datalog_ms is not None and datalog_ms > MAX_DATALOG_MS:
             self.set_field_invalid("datalog_ms", True)
-            errors.append(f"La période DATA doit être <= {MAX_DATALOG_MS} ms.")
+            errors.append(f"The DATA period must be at most {MAX_DATALOG_MS} ms.")
 
         if ds18b20_ms is not None and ds18b20_ms > MAX_DS18B20_MS:
             self.set_field_invalid("ds18b20_ms", True)
-            errors.append(f"La période DS18B20 doit être <= {MAX_DS18B20_MS} ms.")
+            errors.append(f"The DS18B20 period must be at most {MAX_DS18B20_MS} ms.")
 
         if datalog_ms is not None and datalog_ms < DS18B20_MIN_MS:
             warnings.append(
-                "Attention : le DS18B20 ne peut pas fournir une nouvelle mesure sous 750 ms. "
-                "Le CSV utilisera la dernière température valide, tandis que les données moteur suivront la période DATA."
+                "The DS18B20 cannot provide a new reading in under 750 ms. "
+                "The CSV will use its last valid temperature; motor data will follow the DATA period."
             )
 
         if ds18b20_ms is not None and ds18b20_ms < DS18B20_MIN_MS:
             self.set_field_invalid("ds18b20_ms", True)
-            errors.append("La période DS18B20 doit être >= 750 ms.")
-            warnings.append("Période DS18B20 inférieure à 750 ms : impossible pour une vraie nouvelle mesure DS18B20.")
+            errors.append("The DS18B20 period must be at least 750 ms.")
+            warnings.append("A DS18B20 period under 750 ms cannot yield a fresh reading.")
 
         self.warning_var.set("\n".join(warnings))
         is_valid = len(errors) == 0
@@ -1867,12 +1866,12 @@ class MotorDatalogGui(tk.Tk):
             if is_valid:
                 self.start_button.configure(state=tk.NORMAL, bg=COLORS["accent_2"], fg="white")
                 if idle_mode:
-                    self.set_status("Configuration valide", "Prêt à collecter avec le moteur à l'arrêt.")
+                    self.set_status("Configuration valid", "Ready to log with the motor stopped.")
                 else:
-                    self.set_status("Configuration valide", "Prêt à lancer le moteur et la collecte.")
+                    self.set_status("Configuration valid", "Ready to start the motor and logging.")
             else:
                 self.start_button.configure(state=tk.DISABLED, bg=COLORS["panel_3"], fg=COLORS["muted"])
-                self.set_status("Erreur configuration", errors[0])
+                self.set_status("Configuration error", errors[0])
 
         self.update_iq_warning_color()
         return is_valid
@@ -1885,7 +1884,7 @@ class MotorDatalogGui(tk.Tk):
         if self.is_running or self.is_launching:
             return
         if not self.validate_form():
-            messagebox.showerror("Configuration invalide", self.status_detail_var.get())
+            messagebox.showerror("Invalid configuration", self.status_detail_var.get())
             return
 
         cfg = self.parse_config()
@@ -1893,7 +1892,7 @@ class MotorDatalogGui(tk.Tk):
         csv_path.parent.mkdir(parents=True, exist_ok=True)
 
         if csv_path.exists():
-            overwrite = messagebox.askyesno("Fichier existant", f"Le fichier existe déjà :\n{csv_path}\n\nL'écraser ?")
+            overwrite = messagebox.askyesno("File already exists", f"This file already exists:\n{csv_path}\n\nOverwrite it?")
             if not overwrite:
                 return
 
@@ -1906,7 +1905,7 @@ class MotorDatalogGui(tk.Tk):
             except Exception:
                 pass
         except Exception as exc:
-            messagebox.showerror("Erreur série", f"Impossible d'ouvrir {cfg['port']} :\n{exc}")
+            messagebox.showerror("Serial error", f"Could not open {cfg['port']}:\n{exc}")
             return
 
         self.csv_path = str(csv_path)
@@ -1934,10 +1933,10 @@ class MotorDatalogGui(tk.Tk):
         self.stop_button.configure(state=tk.NORMAL)
         self.update_acquisition_mode_ui()
         if cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE:
-            self.set_status("Lancement", "Préparation de la collecte moteur arrêté...")
+            self.set_status("Starting", "Preparing logging with the motor stopped...")
         else:
-            self.set_status("Lancement", "Synchronisation et démarrage moteur...")
-        self.log("Port série ouvert.")
+            self.set_status("Starting", "Synchronizing and starting the motor...")
+        self.log("Serial port opened.")
 
         self.launch_thread = threading.Thread(target=self.launch_sequence_thread, args=(cfg,), daemon=True)
         self.launch_thread.start()
@@ -1961,10 +1960,10 @@ class MotorDatalogGui(tk.Tk):
                 )
                 if not sync_ok:
                     next_command = "ACQ_START" if idle_mode else "CFG"
-                    self.gui_queue.put(("log", f"SYNC non supporté/ignoré par la carte, poursuite avec {next_command}."))
+                    self.gui_queue.put(("log", f"Board did not support or accept SYNC; continuing with {next_command}."))
             except TimeoutError:
                 next_command = "ACQ_START" if idle_mode else "CFG"
-                self.gui_queue.put(("log", f"Pas de réponse SYNC, poursuite avec {next_command}."))
+                self.gui_queue.put(("log", f"No SYNC response; continuing with {next_command}."))
 
             time.sleep(0.1)
 
@@ -2003,8 +2002,8 @@ class MotorDatalogGui(tk.Tk):
 
         self.is_stopping = True
         self.stop_button.configure(state=tk.DISABLED)
-        self.set_status("Arrêt", "Commande STOP en cours...")
-        self.log("Arrêt demandé.")
+        self.set_status("Stopping", "Sending STOP...")
+        self.log("Stop requested.")
         self.stop_thread = threading.Thread(target=self.stop_sequence_thread, daemon=True)
         self.stop_thread.start()
 
@@ -2016,9 +2015,9 @@ class MotorDatalogGui(tk.Tk):
             try:
                 self.wait_for_ack("STOP", timeout=3.0)
             except Exception as exc:
-                self.gui_queue.put(("log", f"ACK,STOP non reçu, fermeture quand même : {exc}"))
+                self.gui_queue.put(("log", f"No ACK,STOP received; closing anyway: {exc}"))
         except Exception as exc:
-            self.gui_queue.put(("log", f"Erreur envoi STOP : {exc}"))
+            self.gui_queue.put(("log", f"Could not send STOP: {exc}"))
         self.gui_queue.put(("close_resources", None))
 
     def close_resources(self):
@@ -2029,9 +2028,9 @@ class MotorDatalogGui(tk.Tk):
             try:
                 self.flush_csv(force=True)
                 self.csv_file.close()
-                self.log(f"CSV fermé : {self.csv_path}")
+                self.log(f"CSV closed: {self.csv_path}")
             except Exception as exc:
-                self.log(f"Erreur fermeture CSV : {exc}")
+                self.log(f"Could not close CSV: {exc}")
 
         self.csv_file = None
         self.csv_writer = None
@@ -2043,9 +2042,9 @@ class MotorDatalogGui(tk.Tk):
             try:
                 if self.serial_obj.is_open:
                     self.serial_obj.close()
-                self.log("Port série fermé.")
+                self.log("Serial port closed.")
             except Exception as exc:
-                self.log(f"Erreur fermeture série : {exc}")
+                self.log(f"Could not close serial port: {exc}")
 
         self.serial_obj = None
         self.is_running = False
@@ -2054,7 +2053,7 @@ class MotorDatalogGui(tk.Tk):
         self.stop_button.configure(state=tk.DISABLED)
         self.update_acquisition_mode_ui()
         self.validate_form()
-        self.set_status("Arrêté", "Session terminée.")
+        self.set_status("Stopped", "Session complete.")
 
         if self.close_requested:
             self.destroy()
@@ -2071,7 +2070,7 @@ class MotorDatalogGui(tk.Tk):
             RuntimeError: If no open serial port is available.
         """
         if self.serial_obj is None or not self.serial_obj.is_open:
-            raise RuntimeError("Port série non ouvert.")
+            raise RuntimeError("Serial port is not open.")
 
         display = command.replace("\r", "\\r").replace("\n", "\\n")
         self.gui_queue.put(("log", f"TX → {display}"))
@@ -2116,11 +2115,11 @@ class MotorDatalogGui(tk.Tk):
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"Timeout en attente de {expected}")
+                raise TimeoutError(f"Timed out waiting for {expected}")
             try:
                 line = self.ack_queue.get(timeout=remaining)
             except queue.Empty:
-                raise TimeoutError(f"Timeout en attente de {expected}")
+                raise TimeoutError(f"Timed out waiting for {expected}")
             if line == expected:
                 return True
             if line.startswith("ERR,"):
@@ -2142,7 +2141,7 @@ class MotorDatalogGui(tk.Tk):
                 data = self.serial_obj.read(512)
             except Exception as exc:
                 if not self.stop_event.is_set():
-                    self.gui_queue.put(("log", f"Erreur lecture série : {exc}"))
+                    self.gui_queue.put(("log", f"Serial read error: {exc}"))
                 break
             if not data:
                 continue
@@ -2175,15 +2174,15 @@ class MotorDatalogGui(tk.Tk):
                     self.is_stopping = False
                     self.update_acquisition_mode_ui()
                     if payload == ACQUISITION_MODE_IDLE:
-                        self.set_status("Collecte active", "Moteur arrêté, réception des températures et mesures nulles.")
+                        self.set_status("Logging active", "Motor stopped; receiving temperatures and zero motor values.")
                     else:
-                        self.set_status("Moteur lancé", "Datalogging en attente/actif.")
+                        self.set_status("Motor running", "Waiting for or receiving log data.")
                     self.start_button.configure(state=tk.DISABLED, bg="#14532D", fg="white")
                     self.stop_button.configure(state=tk.NORMAL)
                 elif kind == "launch_failed":
-                    self.log(f"Échec lancement : {payload}")
-                    self.set_status("Échec lancement", payload)
-                    messagebox.showerror("Échec lancement", payload)
+                    self.log(f"Startup failed: {payload}")
+                    self.set_status("Startup failed", payload)
+                    messagebox.showerror("Startup failed", payload)
                     try:
                         if self.serial_obj and self.serial_obj.is_open:
                             self.send_command("STOP\n", char_delay=0.001)
@@ -2242,12 +2241,12 @@ class MotorDatalogGui(tk.Tk):
         missing_columns = [col for col in CSV_OUTPUT_COLUMNS if col not in columns]
         extra_columns = [col for col in columns if col not in CSV_OUTPUT_COLUMNS]
         if missing_columns:
-            self.log("Colonnes CSV attendues absentes du firmware : " + ", ".join(missing_columns))
+            self.log("Expected CSV columns missing from firmware: " + ", ".join(missing_columns))
             for key in D6T_TEMPERATURE_COLUMNS:
                 if key in missing_columns and key in self.live_vars:
                     self.live_vars[key].set("NaN")
         if extra_columns:
-            self.log("Colonnes reçues non écrites dans le CSV final : " + ", ".join(extra_columns))
+            self.log("Received columns omitted from the final CSV: " + ", ".join(extra_columns))
 
         self.csv_writer.writerow(self.csv_output_columns)
         self.csv_pending_rows = 0
@@ -2255,7 +2254,7 @@ class MotorDatalogGui(tk.Tk):
         self.flush_csv(force=True)
         self.register_csv_fields_for_live(columns)
         self.register_csv_fields_for_plot(columns)
-        self.log(f"CSV créé : {self.csv_path}")
+        self.log(f"CSV created: {self.csv_path}")
 
     def flush_csv(self, force=False):
         """Flush the CSV now or on its schedule.
@@ -2291,28 +2290,28 @@ class MotorDatalogGui(tk.Tk):
         if line.startswith("#CSV_HEADER,"):
             columns = self.clean_fields(line.split(",")[1:])
             if not columns:
-                self.log("Header CSV vide ignoré.")
+                self.log("Empty CSV header ignored.")
                 return
             if self.csv_writer is None:
                 self.open_csv_with_header(columns)
-                self.set_status("Datalogging actif", "Réception DATA en cours.")
+                self.set_status("Logging active", "Receiving DATA rows.")
             elif columns != self.csv_columns:
-                self.log("Header différent reçu, ignoré.")
+                self.log("Different header received and ignored.")
             return
 
         if line.startswith("DATA,"):
             if self.csv_writer is None:
                 self.data_before_header_count += 1
                 if self.data_before_header_count <= 3:
-                    self.log(f"DATA reçue avant header, ignorée : {line}")
+                    self.log(f"DATA received before header and ignored: {line}")
                 elif self.data_before_header_count == 4:
-                    self.log("Autres DATA avant header ignorées sans affichage.")
+                    self.log("Further DATA rows before the header are ignored without display.")
                 return
 
             parts = self.clean_fields(line.split(","))
             values = parts[1:]
             if len(values) != len(self.csv_columns):
-                self.log(f"DATA invalide ({len(values)} valeurs pour {len(self.csv_columns)} colonnes) : {line}")
+                self.log(f"Invalid DATA ({len(values)} values for {len(self.csv_columns)} columns): {line}")
                 return
 
             row = dict(zip(self.csv_columns, values))
@@ -2441,9 +2440,9 @@ class MotorDatalogGui(tk.Tk):
         for spine in ax.spines.values():
             spine.set_color(COLORS["border"])
         ax.grid(True, color=COLORS["line_grid"], alpha=0.42, linewidth=0.8)
-        ax.set_xlabel("Temps (s)", color=COLORS["muted"])
+        ax.set_xlabel("Time (s)", color=COLORS["muted"])
         if title:
-            ax.set_title("Donnees temps reel", color=COLORS["text"], fontsize=12, pad=12)
+            ax.set_title("Live data", color=COLORS["text"], fontsize=12, pad=12)
 
     def redraw_plot_periodic(self):
         """Periodic callback to refresh the chart."""
@@ -2493,7 +2492,7 @@ class MotorDatalogGui(tk.Tk):
                         y_plot = [50.0 for _ in y_clean]
                     else:
                         y_plot = [((y - y_min) / (y_max - y_min)) * 100.0 for y in y_clean]
-                    label = f"{self.plot_fields[key]} | {y_min:.3g}→{y_max:.3g} | act. {latest:.3g}"
+                    label = f"{self.plot_fields[key]} | {y_min:.3g}→{y_max:.3g} | now {latest:.3g}"
                 else:
                     y_plot = y_clean
                     label = self.plot_fields[key]
@@ -2504,7 +2503,7 @@ class MotorDatalogGui(tk.Tk):
 
             if lines:
                 if multi_scale:
-                    ax.set_ylabel("Échelle relative par variable (%)", color=COLORS["muted"])
+                    ax.set_ylabel("Relative scale per variable (%)", color=COLORS["muted"])
                     ax.set_ylim(-5, 105)
                 else:
                     ax.set_ylabel(labels[0], color=COLORS["muted"])
@@ -2519,7 +2518,7 @@ class MotorDatalogGui(tk.Tk):
             ax.text(
                 0.5,
                 0.5,
-                "En attente de données...",
+                "Waiting for data...",
                 transform=ax.transAxes,
                 ha="center",
                 va="center",
@@ -2537,7 +2536,7 @@ class MotorDatalogGui(tk.Tk):
         sequence before destroying the window.
         """
         if self.is_running or self.is_launching:
-            if not messagebox.askyesno("Quitter", "Une session est en cours. L'arrêter et quitter ?"):
+            if not messagebox.askyesno("Quit", "A session is running. Stop it and quit?"):
                 return
             self.close_requested = True
             self.stop_run()

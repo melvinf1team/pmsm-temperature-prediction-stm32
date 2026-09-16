@@ -54,8 +54,8 @@ speed unit, `Iq` limit, hard-stop threshold, acceleration, DATA period, and
 DS18B20 period. Built-in and user-saved profiles are loaded when the dashboard
 starts.
 
-The built-in `Personnalisé` ("Custom") profile starts with 600 rpm, a 2 A
-`Iq` limit, an 8 A hard stop, 5 electrical Hz/s, a 100 ms `DATA` period,
+The built-in `Custom` profile starts with 600 rpm, a 2 A
+`Iq` limit, a 6 A hard stop, 5 electrical Hz/s, a 100 ms `DATA` period,
 and a 1000 ms DS18B20 period. Profiles added in the interface are serialized
 as JSON. A missing file simply recreates the built-in profile; invalid
 content is reported in the interface log.
@@ -89,7 +89,7 @@ port, and starts the reader thread. `launch_sequence_thread` then sends:
 Each command waits for an `ACK` or `ERR`. On failure, the dashboard reports
 the error and closes resources cleanly.
 
-In `Collecte seule (moteur arrêté)` ("Acquisition only, motor stopped") mode,
+In `Logging only (motor stopped)` mode,
 the sequence is:
 
 .. code-block:: text

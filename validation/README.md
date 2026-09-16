@@ -107,8 +107,8 @@ elapsed_s;d6t_temp_c;predicted_temp_c;signed_error_c;absolute_error_c;cumulative
 ```
 
 Numbers are saved at their calculation precision, with six decimal places.
-The **Exporter CSV** (Export CSV) button creates a copy elsewhere.
-**Réinitialiser** (Reset) clears the displayed data and resets MAE to zero
+The **Export CSV** button creates a copy elsewhere.
+**Reset** clears the displayed data and resets MAE to zero
 without interrupting automatic recording for the current connection.
 
 ## Verification
