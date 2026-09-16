@@ -1,21 +1,22 @@
 Installation
 ============
 
-Prérequis logiciels
+Software prerequisites
+----------------------
+
+The project uses Python on the PC and STM32CubeIDE for embedded development.
+You need:
+
+* Python 3.10 or newer (recommended), with `venv` and `tkinter`;
+* STM32CubeIDE and the GNU Arm toolchain for Cortex-M4 hard-float;
+* STM32CubeProgrammer and the ST-LINK driver;
+* NanoEdge AI Studio to train or replace the model;
+* read/write access to the board's COM port.
+
+Python installation
 -------------------
 
-Le projet utilise Python côté PC et STM32CubeIDE côté embarqué. Prévoir :
-
-* Python 3.10 ou plus récent recommandé, avec ``venv`` et ``tkinter`` ;
-* STM32CubeIDE et la chaîne GNU Arm pour Cortex-M4 hard-float ;
-* STM32CubeProgrammer et le pilote ST-LINK ;
-* NanoEdge AI Studio pour entraîner ou remplacer le modèle ;
-* un accès en lecture/écriture au port COM de la carte.
-
-Installation Python
--------------------
-
-Depuis la racine du projet :
+From the repository root:
 
 .. code-block:: powershell
 
@@ -24,48 +25,47 @@ Depuis la racine du projet :
    python -m pip install --upgrade pip
    python -m pip install -r requirements.txt
 
-Si la politique PowerShell interdit l'activation, appeler directement
-``.\.venv\Scripts\python.exe`` pour les commandes suivantes.
+If PowerShell policy prevents activation, call
+`.\.venv\Scripts\python.exe` directly for subsequent commands.
 
-Configuration des chemins
---------------------------
+Path configuration
+------------------
 
-Le dashboard charge automatiquement ``dashboard_config.yaml``. Les valeurs
-peuvent être remplacées avec ``--config`` ou les variables :
+The dashboard loads `dashboard_config.yaml` automatically. Override its values
+with `--config` or these environment variables:
 
-* ``PMSM_DATALOG_LOG_DIR`` ;
-* ``PMSM_DATALOG_PROFILE_STORE`` ;
-* ``PMSM_DATALOG_CSV_PATH``.
+* `PMSM_DATALOG_LOG_DIR`;
+* `PMSM_DATALOG_PROFILE_STORE`;
+* `PMSM_DATALOG_CSV_PATH`.
 
-Le prétraitement charge ``preprocess_ewma.yaml``. Il accepte également
-``--config`` ainsi que :
+Preprocessing loads `preprocess_ewma.yaml`. It also accepts `--config` and:
 
-* ``PMSM_PREPROCESS_INPUT_DIR`` ;
-* ``PMSM_PREPROCESS_OUTPUT_DIR`` ;
-* ``PMSM_PREPROCESS_PATTERN``.
+* `PMSM_PREPROCESS_INPUT_DIR`;
+* `PMSM_PREPROCESS_OUTPUT_DIR`;
+* `PMSM_PREPROCESS_PATTERN`.
 
-Les chemins relatifs sont résolus depuis la racine du dépôt, indépendamment du
-dossier courant utilisé pour lancer le script.
+Relative paths are resolved from the repository root, regardless of the
+working directory used to launch the script.
 
-Lancer le dashboard
+Start the dashboard
 -------------------
 
 .. code-block:: powershell
 
    python .\datalogging\motor_datalog_gui_dashboard.py
 
-Le fichier CSV proposé par défaut est créé dans ``datalogging/logs``. Ce chemin
-reste valide même si le script est lancé depuis la racine du projet, depuis le
-dossier ``datalogging`` ou depuis VS Code.
+The default CSV file is created in `datalogging/logs`. This path works whether
+the script is launched from the repository root, the `datalogging` directory,
+or VS Code.
 
-Lancer le prétraitement
------------------------
+Run preprocessing
+-----------------
 
 .. code-block:: powershell
 
    python .\pretraitement\preprocess_logs_ewma.py
 
-Options utiles :
+Useful options:
 
 .. code-block:: powershell
 
@@ -74,26 +74,26 @@ Options utiles :
    python .\pretraitement\preprocess_logs_ewma.py --frequency-hz 10
    python .\pretraitement\preprocess_logs_ewma.py --include-time
 
-Importer et compiler les firmwares
-----------------------------------
+Import and build the firmware projects
+--------------------------------------
 
-Dans STM32CubeIDE, utiliser **File > Import > Existing Projects into
-Workspace**, puis sélectionner l'un des dossiers suivants :
+In STM32CubeIDE, use **File > Import > Existing Projects into Workspace** and
+select one of these directories:
 
-* ``firmware_acquisition/tets_motor_dewalt/STM32CubeIDE`` ;
-* ``firmware_validation/STM32CubeIDE``.
+* `firmware_acquisition/tets_motor_dewalt/STM32CubeIDE`;
+* `firmware_validation/STM32CubeIDE`.
 
-Sélectionner la configuration ``Debug`` ou ``Release``, puis exécuter **Clean
-Project** et **Build Project**. Programmer la cible avec ST-LINK. Le projet de
-validation référence ``AI_Model/libneai.a`` dans les deux configurations.
+Select the `Debug` or `Release` configuration, then run **Clean Project** and
+**Build Project**. Program the board with ST-LINK. Both configurations of the
+validation project reference `AI_Model/libneai.a`.
 
-Après une modification de ``APP_NEAI_MODEL_ENABLED`` ou le remplacement d'un
-export NanoEdge, effectuer systématiquement un clean build.
+Always perform a clean build after changing `APP_NEAI_MODEL_ENABLED` or
+replacing a NanoEdge export.
 
-Vérifications sans matériel
----------------------------
+Checks without hardware
+-----------------------
 
-Depuis la racine du dépôt :
+From the repository root:
 
 .. code-block:: powershell
 
@@ -102,28 +102,28 @@ Depuis la racine du dépôt :
    python .\firmware_validation\tests\validate_motor_limits.py
    python .\validation\test\test_temperature_validation_gui.py
 
-Les trois dernières commandes réussissent avec l'état documenté. Le test de
-parité dépasse actuellement sa tolérance sur le log du 27 août 2026 ; consulter
-:doc:`validation_ia` pour le résultat exact avant de l'utiliser comme critère de
-recette.
+The last three commands pass for the documented state. The parity test
+currently exceeds its tolerance on the August 27, 2026 log; see
+:doc:`validation_ia` for the exact result before using it as an acceptance
+criterion.
 
-Le contrôle UART suivant nécessite une carte programmée et adapte le contrat au
-mode compilé :
+The following UART checks require a programmed board and must match the
+compiled mode:
 
 .. code-block:: powershell
 
    python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
    python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
 
-Générer la documentation locale
--------------------------------
+Build the local documentation
+-----------------------------
 
 .. code-block:: powershell
 
    python -m sphinx -b html .\docs\source .\docs\build\html
 
-Le HTML généré se trouve dans ``docs/build/html/index.html``. Pour traiter les
-avertissements Sphinx comme des erreurs lors d'une revue documentaire :
+The generated HTML is at `docs/build/html/index.html`. To treat Sphinx warnings
+as errors during a documentation review:
 
 .. code-block:: powershell
 

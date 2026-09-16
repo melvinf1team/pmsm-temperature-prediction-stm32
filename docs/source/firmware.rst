@@ -1,39 +1,39 @@
-Firmware STM32
+STM32 Firmware
 ==============
 
-Organisation
+Organization
 ------------
 
-Le firmware d'acquisition se trouve dans
-``firmware_acquisition/tets_motor_dewalt``. Il combine un projet
-STM32CubeIDE/MCSDK généré et plusieurs modules utilisateur situés dans
-``STM32CubeIDE/Application/User`` et déclarés dans ``Inc``. Le projet à importer
-dans STM32CubeIDE est le sous-dossier ``STM32CubeIDE``.
+The acquisition firmware is in
+`firmware_acquisition/tets_motor_dewalt`. It combines a generated
+STM32CubeIDE/MCSDK project with user modules in
+`STM32CubeIDE/Application/User` and declarations in `Inc`. Import the
+`STM32CubeIDE` subdirectory as the project.
 
-Les modules applicatifs principaux sont :
+The main application modules are:
 
-``app_serial_control.c``
-   Réception UART, parsing des commandes PC, validation des paramètres et envoi
-   des ``ACK`` / ``ERR``.
+`app_serial_control.c`
+   UART reception, PC command parsing, parameter validation, and `ACK` /
+   `ERR` responses.
 
-``app_motor_control.c``
-   Démarrage, arrêt, configuration runtime du moteur et sécurités courant /
-   survitesse.
+`app_motor_control.c`
+   Motor startup, shutdown, runtime configuration, and current and
+   overspeed protections.
 
-``app_datalog.c``
-   Prise en main de l'USART, file TX non bloquante, envoi du header CSV et des
-   lignes ``DATA``.
+`app_datalog.c`
+   USART ownership, nonblocking TX queue, CSV header, and `DATA` rows.
 
-``d6t_ir.c``
-   Lecture I2C logiciel du capteur IR D6T et formatage de ``d6t_temp_c``.
+`d6t_ir.c`
+   Software I2C reads from the D6T infrared sensor and formatting of
+   `d6t_temp_c`.
 
-``ds18b20.c``
-   Driver 1-Wire du DS18B20 avec cache de dernière valeur valide.
+`ds18b20.c`
+   DS18B20 1-Wire driver with a cache of the last valid value.
 
-Initialisation
+Initialization
 --------------
 
-Dans ``Src/main.c``, l'ordre applicatif est :
+In `Src/main.c`, application initialization occurs in this order:
 
 .. code-block:: c
 
@@ -41,7 +41,7 @@ Dans ``Src/main.c``, l'ordre applicatif est :
    AppMotorControl_Init();
    AppSerialControl_Init();
 
-Puis la boucle principale appelle :
+The main loop then calls:
 
 .. code-block:: c
 
@@ -49,165 +49,170 @@ Puis la boucle principale appelle :
    AppMotorControl_Task();
    AppDatalog_Task();
 
-``AppDatalog_Init`` désactive l'usage ASPEP/DMA de ``USART1`` pour laisser la
-place au protocole ASCII du projet. Les messages de boot indiquent l'état du
-logger et du capteur D6T.
+`AppDatalog_Init` disables ASPEP/DMA use of `USART1` so the project's ASCII
+protocol can use it. Boot messages report logger and D6T sensor status.
 
-Contrôle série
+Serial control
 --------------
 
-``AppSerialControl_OnUsart1Irq`` lit les octets reçus dans une file circulaire.
-``AppSerialControl_Task`` reconstruit les lignes ASCII et cherche une commande
-connue même si des octets parasites précèdent la commande.
+`AppSerialControl_OnUsart1Irq` reads received bytes into a circular queue.
+`AppSerialControl_Task` rebuilds ASCII lines and finds known commands even
+when stray bytes precede them.
 
-``CFG`` est validé par bornes : vitesse cible, limite ``Iq``, hard stop,
-accélération, période DATA et période DS18B20. Une configuration valide appelle
-``AppMotorControl_SetRuntimeConfig`` et ``AppDatalog_SetRuntimePeriods``.
-``ACQ_START`` valide uniquement les deux périodes, force le moteur à l'arrêt et
-arme le logger sans exiger de configuration moteur.
+`CFG` validates target speed, `Iq` limit, hard stop, acceleration, DATA
+period, and DS18B20 period against their limits. A valid configuration calls
+`AppMotorControl_SetRuntimeConfig` and `AppDatalog_SetRuntimePeriods`.
+`ACQ_START` validates only the two periods, forces the motor to stop, and
+arms the logger without requiring a motor configuration.
 
-Les bornes du protocole sont 100 à 4500 rpm, 30 A maximum sur ``Iq`` et le hard
-stop, 50 Hz électriques/s maximum pour l'accélération, 1 à 10 000 ms pour
-``DATA`` et 10 000 ms maximum pour le DS18B20. Une période DS18B20 inférieure à
-750 ms est acceptée puis ramenée à 750 ms.
+Protocol limits are 100 to 4500 rpm, at most 30 A for `Iq` and the hard
+stop, at most 50 electrical Hz/s for acceleration, 1 to 10,000 ms for
+`DATA`, and at most 10,000 ms for the DS18B20. A requested DS18B20 period
+below 750 ms is accepted and raised to 750 ms.
 
-Contrôle moteur
----------------
+Motor control
+-------------
 
-``AppMotorControl_Start`` applique la configuration runtime, ajuste le PI vitesse
-et démarre le moteur via MCSDK avec polarisation. La limite ``Iq`` est rampée en
-RUN pour éviter une demande de couple brutale. ``AppMotorControl_Task`` surveille
-les faults MCSDK, le dépassement de courant et la survitesse.
+`AppMotorControl_Start` applies the runtime configuration, adjusts the speed
+PI controller, and starts the motor through MCSDK with polarization. The
+`Iq` limit is ramped during RUN to avoid a sudden torque request.
+`AppMotorControl_Task` monitors MCSDK faults, overcurrent, and overspeed.
 
-Le bouton B2 sur ``PC13`` dépose une requête dans l'interruption, puis la boucle
-principale démarre à 2000 rpm avec 30 A maximum sur ``Iq`` et le courant total.
-Toutes les 10 à 30 secondes, elle choisit un pas de 200 à 500 rpm et une
-nouvelle cible dans la plage 2000–4000 rpm. La rampe MCSDK de 10 Hz
-électriques/s lisse chaque transition ; avec deux paires de pôles, la pente
-mécanique vaut 300 rpm/s. Un second appui arrête le moteur. Le traitement
-différé et un anti-rebond de 250 ms évitent d'appeler le MCSDK depuis
-l'interruption.
+B2 on `PC13` places a request in the interrupt, then the main loop draws the
+first target directly from the full 2000–4000 rpm range. It caps the PI
+`Iq` output at 25 A and the `Id/Iq` command magnitude at 28 A, and
+triggers application shutdown if the measured magnitude exceeds 28 A.
+Every 2 to 5 seconds, a new pseudorandom target different from the previous
+one is drawn from the full range without step limits. Startup and every
+transition use the fast MCSDK ramp of 500 electrical Hz/s; with two pole
+pairs, this is 15,000 mechanical rpm/s. A second press stops the motor.
+Deferred processing and 250 ms debounce avoid calling MCSDK from the
+interrupt.
 
-La consigne initiale est réappliquée lorsque MCSDK signale réellement ``RUN``.
-Si un nouvel appui demande un démarrage pendant la phase d'arrêt asynchrone, la
-requête attend ``IDLE`` et est retentée toutes les 100 ms. Les comparaisons de
-deadline utilisent une soustraction signée et restent valides lors du
-rebouclage du tick 32 bits.
+The B2 profile is an internal path: it does not raise the 50 electrical
+Hz/s ceiling for configurations received over UART. A new UART
+configuration disables the standalone profile and takes control. During a
+downward transition, overspeed protection follows the setpoint actually
+being ramped by MCSDK while remaining capped at 4500 rpm. It therefore does
+not mistake normal ramp inertia for runaway speed.
 
-Datalogging embarqué
---------------------
+Preventive DC bus protection is currently disabled
+(`M1_BUS_PROTECTION=false`). Rapid deceleration can regenerate energy into
+the bus without dedicated software clamping. Qualify the bus voltage and
+the test bench's absorption or braking capacity before use.
 
-``AppDatalog_StartLogging`` arme le logger après réception de ``START``. Le
-header envoyé est :
+The initial setpoint is reapplied when MCSDK actually reports `RUN`. If a new
+press requests startup during asynchronous shutdown, the request waits for
+`IDLE` and is retried every 100 ms. Deadline comparisons use signed
+subtraction and remain valid across 32-bit tick wraparound.
+
+On-device data logging
+----------------------
+
+`AppDatalog_StartLogging` arms the logger after `START` is received. The
+header is:
 
 .. code-block:: text
 
    #CSV_HEADER,stm32_time_ms,d6t_temp_c,ds18b20_temp_c,motor_ud_v,motor_uq_v,motor_speed_mech_rpm,motor_id_a,motor_iq_a
 
-Chaque ligne ``DATA`` contient le tick STM32, les températures, les tensions d/q
-reconstruites, la vitesse mécanique et les courants d/q. Les tensions d/q sont
-calculées depuis ``CurrCtrl_M1.Ddq_out_pu`` et la tension bus DC. Hors état RUN,
-les grandeurs moteur sont forcées à zéro pour éviter d'enregistrer les dernières
-valeurs mémorisées par le MCSDK.
+Each `DATA` row contains the STM32 tick, temperatures, reconstructed d/q
+voltages, mechanical speed, and d/q currents. The d/q voltages come from
+`CurrCtrl_M1.Ddq_out_pu` and the DC bus voltage. Outside RUN, motor values
+are set to zero to avoid logging stale MCSDK values.
 
-Capteur D6T
------------
+D6T sensor
+----------
 
-``d6t_ir.c`` utilise un I2C logiciel sur ``PB6``/``PB9``, exposés respectivement
-sur ``CN10-27`` et ``CN10-24``. Le module lit un frame de 35 octets, vérifie le
-PEC et extrait le pixel ``D6TIR_SELECTED_PIXEL_INDEX``. La valeur est formatée
-en degrés Celsius avec une décimale. Tant qu'aucune lecture valide n'existe,
-``D6TIR_GetCsvValue`` renvoie ``NaN``.
+`d6t_ir.c` uses software I2C on `PB6`/`PB9`, available at `CN10-27` and
+`CN10-24` respectively. The module reads a 35-byte frame, checks its PEC,
+and extracts pixel `D6TIR_SELECTED_PIXEL_INDEX`. It formats the value in
+degrees Celsius to one decimal place. Until a valid reading exists,
+`D6TIR_GetCsvValue` returns `NaN`.
 
-Capteur DS18B20
+DS18B20 sensor
+--------------
+
+`ds18b20.c` drives the 1-Wire bus with very short critical sections to avoid
+disrupting motor control. A 12-bit conversion takes 750 ms. If a fresh read
+fails but an older valid value exists, the driver returns the last known
+value to keep the CSV usable.
+
+Safety controls
 ---------------
 
-``ds18b20.c`` pilote le bus 1-Wire avec des fenêtres critiques très courtes pour
-ne pas perturber le contrôle moteur. La conversion 12 bits dure 750 ms. Si une
-lecture fraîche échoue mais qu'une ancienne valeur valide existe, le driver
-renvoie la dernière valeur connue afin de garder un CSV exploitable.
+Safety checks are split between the PC and firmware. The dashboard validates
+operator input. The firmware enforces final limits of 4500 rpm and 30 A and
+stops the motor on MCSDK fault, excessive total current, or overspeed.
+Workbench sources, `.ioc`, `.wbdef`, and generated C files use the same
+ceilings so regeneration does not reintroduce old values.
 
-Sécurités
----------
+The overspeed threshold follows the setpoint with a margin but remains
+bounded by the absolute 4500 rpm ceiling. Direct configuration calls also
+normalize `NaN` or infinite values to defaults before passing them to MCSDK.
 
-Les sécurités sont réparties entre PC et firmware. Le dashboard valide les
-entrées utilisateur pour guider l'opérateur. Le firmware garde les bornes
-finales de 4500 rpm et 30 A, puis coupe le moteur en cas de fault MCSDK, courant
-total trop élevé ou survitesse. Les sources Workbench, ``.ioc``, ``.wbdef`` et
-les fichiers C générés utilisent les mêmes plafonds afin qu'une régénération ne
-réintroduise pas les anciennes valeurs.
+Nonfinite MCSDK current or speed telemetry triggers fail-safe behavior:
+immediate shutdown, B2 profile deactivation, and a fault in the application
+state machine. Such values cannot bypass overcurrent or overspeed checks.
 
-Le seuil de survitesse suit la consigne avec une marge, mais il est toujours
-borné par le plafond absolu de 4500 rpm. Les appels directs à la configuration
-normalisent également les valeurs ``NaN`` ou infinies vers les valeurs par
-défaut avant de les transmettre à MCSDK.
+The calculated full scale of the current sensor is about 110 A with a 1 mΩ
+shunt and gain of 15. This representation range does not validate the board
+thermally. The PolPulse setpoint stays at 14 A so raising the ceiling does
+not create a 30 A startup pulse. The software threshold active during
+PolPulse and the DC profiler's maximum current remain capped at 30 A.
 
-Une télémétrie MCSDK de courant ou de vitesse non finie est traitée en mode
-fail-safe : arrêt immédiat, désactivation du profil B2 et passage de la machine
-d'états applicative en défaut. Elle ne peut donc pas contourner les comparaisons
-de surintensité ou de survitesse.
+Build and programming
+---------------------
 
-La pleine échelle calculée du capteur de courant vaut environ 110 A avec un
-shunt de 1 mΩ et un gain de 15. Cette marge de représentation ne constitue pas
-une validation thermique de la carte. La consigne PolPulse reste à 14 A pour ne
-pas transformer l'augmentation du plafond en impulsion de démarrage à 30 A. Le
-seuil logiciel actif pendant PolPulse et le courant maximal du profileur DC
-restent eux aussi bornés à 30 A.
+Import `firmware_acquisition/tets_motor_dewalt/STM32CubeIDE` as an existing
+project. Choose `Debug` or `Release`, run a clean build, then program the
+B-G473E-ZEST1S with ST-LINK. Sources under `Drivers`,
+`MCSDK_v6.4.2-Full`, and some of `Src`/`Inc` are generated or third-party
+code; keep project-specific functional changes in
+`STM32CubeIDE/Application/User` and associated application interfaces.
 
-Compilation et programmation
------------------------------
+Review any regeneration from STM32CubeMX or Motor Control Workbench before
+building: it may change generated files, pin assignments, and current
+constants.
 
-Importer ``firmware_acquisition/tets_motor_dewalt/STM32CubeIDE`` comme projet
-existant. Choisir ``Debug`` ou ``Release``, exécuter un clean build, puis
-programmer la B-G473E-ZEST1S avec ST-LINK. Les sources sous ``Drivers``,
-``MCSDK_v6.4.2-Full`` et une partie de ``Src``/``Inc`` sont générées ou tierces ;
-les modifications fonctionnelles propres au dépôt doivent rester concentrées
-dans ``STM32CubeIDE/Application/User`` et les interfaces applicatives associées.
+The acquisition project's CMSIS/DSP path in `.cproject` is relative to the
+repository; it no longer depends on a former user's Workbench directory.
 
-Une régénération depuis STM32CubeMX ou Motor Control Workbench doit être revue
-avant compilation : elle peut modifier les fichiers générés, les affectations
-de broches et les constantes de courant.
+AI validation firmware
+----------------------
 
-Le chemin CMSIS/DSP du projet d'acquisition est relatif au dépôt dans
-``.cproject`` ; le projet n'est plus dépendant d'un ancien dossier Workbench
-utilisateur.
+`firmware_validation` is a second standalone project, simplified for
+NanoEdge validation. It no longer includes the dashboard command protocol or
+ASCII debug module. The UART stream starts automatically, and its format
+depends only on `APP_NEAI_MODEL_ENABLED`: two temperatures with the model
+enabled, or 55 features with the model disabled.
 
-Firmware de validation IA
--------------------------
+The library is stored in `firmware_validation/AI_Model` and linked by both
+Debug and Release configurations. At compile time, `app_ai_model.c` checks
+that the header declares a signal length of 1 and 55 axes, then checks the
+dimensions returned by the library again before initialization.
 
-``firmware_validation`` est un second projet autonome, simplifié pour la
-validation NanoEdge. Il ne contient plus le protocole de commandes du dashboard
-ni le module de debug ASCII. Le flux UART démarre automatiquement et son format
-dépend uniquement de ``APP_NEAI_MODEL_ENABLED`` : deux températures lorsque le
-modèle est actif, ou les 55 features lorsque le modèle est inactif.
+B2 places a persistent startup intent in the application state machine. If
+MCSDK is still in `STOP` or `FAULT_OVER`, this intent waits for a real return
+to `IDLE` instead of being lost. Completed faults are acknowledged and
+startup is retried at a limited rate, without blocking. `MC_StopMotor1` is
+issued only once when entering a fault so MCSDK can reach an acknowledgeable
+state.
 
-La bibliothèque est stockée dans ``firmware_validation/AI_Model`` et liée par
-les configurations Debug et Release. ``app_ai_model.c`` vérifie à la compilation
-que le header annonce un signal de longueur 1 et 55 axes, puis contrôle encore
-les dimensions retournées par la bibliothèque avant son initialisation.
+The state of the 44 EWMAs is saved after each sample in two alternating
+snapshots in SRAM section `.noinit`. A signature, version, sequence number,
+and CRC32 allow restoration of the latest complete snapshot after a CPU/NRST
+reset while the board remains powered. Power loss or an inconsistent snapshot
+causes a clean state reset. This strategy does not write to Flash.
 
-Le bouton B2 dépose une intention de démarrage persistante dans la machine
-d'états applicative. Si MCSDK est encore dans ``STOP`` ou ``FAULT_OVER``, cette
-intention attend le retour réel à ``IDLE`` au lieu d'être perdue. Les faults
-terminés sont acquittés et le démarrage est retenté à cadence limitée, sans
-attente bloquante. L'ordre ``MC_StopMotor1`` n'est émis qu'une fois à l'entrée
-d'un défaut afin de laisser MCSDK atteindre son état acquittable.
+The USART1 pump also re-enables the peripheral when necessary and clears
+`ORE`, `FE`, and `NE` flags before continuing the nonblocking TX queue.
 
-Le contexte des 44 EWMA est sauvegardé après chaque échantillon dans deux
-snapshots alternés de la section SRAM ``.noinit``. Une signature, une version,
-une séquence et un CRC32 permettent de restaurer le dernier snapshot complet
-après un reset CPU/NRST tant que la carte reste alimentée. Une coupure
-d'alimentation ou un snapshot incohérent provoque une réinitialisation propre du
-contexte. Cette stratégie n'écrit pas dans la Flash.
+Import the validation firmware separately from
+`firmware_validation/STM32CubeIDE`. Its UART mode is chosen at compile time,
+so a clean build and reflash are required after changing
+`APP_NEAI_MODEL_ENABLED`.
 
-Enfin, la pompe USART1 réactive le périphérique si nécessaire et purge les
-drapeaux ``ORE``, ``FE`` et ``NE`` avant de continuer la file TX non bloquante.
-
-Le firmware de validation s'importe séparément depuis
-``firmware_validation/STM32CubeIDE``. Son mode UART est choisi à la compilation ;
-il faut donc effectuer un clean build et reflasher après toute modification de
-``APP_NEAI_MODEL_ENABLED``.
-
-Le contrôle moteur et le profil B2 aléatoire utilisent les mêmes limites et les
-mêmes paramètres que le firmware d'acquisition. Le changement de vitesse
-n'ajoute aucun texte sur l'UART afin de préserver le contrat NanoEdge.
+Motor control and the random B2 profile use the same limits and settings as
+the acquisition firmware. Speed changes add no text to UART, preserving the
+NanoEdge data contract.

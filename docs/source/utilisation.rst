@@ -1,96 +1,101 @@
-Utilisation
-===========
+Operation
+=========
 
-Séquence recommandée
+Recommended sequence
 --------------------
 
-1. Couper la puissance et contrôler le montage décrit dans :doc:`cablage`.
-2. Compiler et flasher le firmware d'acquisition depuis STM32CubeIDE.
-3. Alimenter la logique, brancher les capteurs et identifier le port COM.
-4. Lancer ``datalogging/motor_datalog_gui_dashboard.py``.
-5. Sélectionner le port, 115200 bauds et le mode de session.
-6. En mode moteur, choisir ou créer un profil ; en collecte seule, renseigner
-    uniquement les périodes.
-7. Vérifier le chemin du CSV, puis lancer la session.
-8. Arrêter avec le bouton du dashboard, qui envoie ``STOP`` avant de fermer les
-    ressources.
-9. Contrôler le CSV brut avant d'exécuter le prétraitement.
+1. Switch off power and inspect the setup described in :doc:`cablage`.
+2. Build and flash the acquisition firmware from STM32CubeIDE.
+3. Power the logic, connect the sensors, and identify the COM port.
+4. Start `datalogging/motor_datalog_gui_dashboard.py`.
+5. Select the port, 115200 baud, and session mode.
+6. In motor mode, choose or create a profile; in acquisition-only mode, enter
+   only the periods.
+7. Check the CSV path, then start the session.
+8. Stop with the dashboard button, which sends `STOP` before closing resources.
+9. Inspect the raw CSV file before running preprocessing.
 
-Plages opératoires
-------------------
+Operating ranges
+----------------
 
-Le dashboard applique les plages suivantes. Le firmware reste l'autorité
-finale pour les commandes reçues directement sur l'UART :
+The dashboard enforces the following ranges. The firmware remains the final
+authority for commands sent directly over UART:
 
-.. csv-table:: Paramètres d'acquisition
-    :header: "Paramètre", "Plage", "Remarque"
-    :widths: 25, 25, 50
+.. csv-table:: Acquisition parameters
+   :header: "Parameter", "Range", "Note"
+   :widths: 25, 25, 50
 
-    "Vitesse cible", "100 à 4500 rpm", "Une valeur inférieure à 100 rpm est refusée"
-    "Limite Iq", "strictement positive à 30 A", "La montée démarre au plus à 4,5 A puis suit une rampe"
-    "Arrêt sur courant total", "strictement positif à 30 A", "Protection applicative en plus des défauts MCSDK"
-    "Accélération", "strictement positive à 50 Hz électriques/s", "Même limite dans le dashboard et le firmware"
-    "Période DATA", "1 à 10 000 ms", "Détermine la cadence du CSV brut"
-    "Période DS18B20", "750 à 10 000 ms", "Le firmware ramène une commande UART inférieure à 750 ms"
+   "Target speed", "100 to 4500 rpm", "Values below 100 rpm are rejected"
+   "Iq limit", "greater than 0 to 30 A", "Startup begins at no more than 4.5 A, then follows a ramp"
+   "Total-current shutdown", "greater than 0 to 30 A", "Application protection in addition to MCSDK faults"
+   "Acceleration", "greater than 0 to 50 electrical Hz/s", "Same limit in dashboard and firmware"
+   "DATA period", "1 to 10,000 ms", "Sets the raw CSV sampling rate"
+   "DS18B20 period", "750 to 10,000 ms", "Firmware raises shorter UART requests to 750 ms"
 
 .. danger::
 
-   Ne pas interpréter ces maxima comme des valeurs recommandées. Un essai à
-   4500 rpm ou 30 A nécessite la validation préalable du moteur, de l'étage de
-   puissance, de l'alimentation, du câblage, du refroidissement et des
-   protections mécaniques.
+   Do not treat these maxima as recommended operating values. A run at
+   4500 rpm or 30 A requires prior validation of the motor, power stage,
+   supply, wiring, cooling, and mechanical protection. Preventive DC bus
+   protection is disabled (`M1_BUS_PROTECTION=false`); also monitor
+   regenerative overvoltage during rapid downward transitions and validate
+   the test bench's braking or energy absorption capability.
 
-Profil autonome B2
-------------------
+Standalone B2 profile
+---------------------
 
-Dans les deux firmwares, un premier appui sur B2 lance le profil suivant :
+In both firmware projects, the first press of B2 starts this profile:
 
-* vitesse initiale de 2000 rpm ;
-* cible maintenue entre 2000 et 4000 rpm ;
-* nouvelle cible après un délai pseudo-aléatoire de 10 à 30 secondes ;
-* pas pseudo-aléatoire de 200 à 500 rpm, tronqué aux bornes de la plage ;
-* rampe de 10 Hz électriques/s, soit 300 rpm/s avec deux paires de pôles ;
-* limite ``Iq`` et hard stop de 30 A.
+* the first target is drawn directly between 2000 and 4000 rpm;
+* a new target different from the previous one is drawn after a
+  pseudorandom delay of 2 to 5 seconds;
+* targets cover the entire 2000–4000 rpm range without step limits;
+* startup and transitions use a ramp of 500 electrical Hz/s, or
+  15,000 rpm/s with two pole pairs;
+* the PI `Iq` output is limited to 25 A, while the `Id/Iq` command
+  magnitude and shutdown threshold on measured magnitude are limited to 28 A.
 
-Le générateur pseudo-aléatoire est amorcé par l'instant de l'appui sur B2. La
-nouvelle consigne est traitée dans la boucle principale et non dans
-l'interruption. Un second appui arrête le moteur et désactive le profil.
-La polarisation utilisée au démarrage reste fixée à 14 A.
+The pseudorandom generator is seeded with the time of the B2 press. The new
+setpoint is processed in the main loop, not in the interrupt. A second press
+stops the motor and disables the profile. Startup polarization stays at 14 A.
+The 500 electrical Hz/s B2 ramp is internal; UART profiles and the dashboard
+remain capped at 50 electrical Hz/s. A new UART configuration disables the B2
+profile and takes control immediately.
 
-Colonnes brutes du dashboard
-----------------------------
+Raw dashboard columns
+---------------------
 
-Le firmware annonce les colonnes avec ``#CSV_HEADER``. Le dashboard conserve les
-colonnes suivantes dans cet ordre :
+The firmware announces columns with `#CSV_HEADER`. The dashboard retains
+these columns in this order:
 
 .. code-block:: text
 
    stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
 
-``stm32_time_ms``
-   Timestamp carte en millisecondes. Il sert au prétraitement pour déduire la
-   fréquence réelle d'acquisition.
+`stm32_time_ms`
+   Board timestamp in milliseconds. Preprocessing uses it to derive the
+   actual acquisition rate.
 
-``d6t_temp_c``
-   Température IR cible. Elle devient la première colonne du fichier traité et
-   n'est pas lissée. Une mesure indisponible est publiée sous la forme ``NaN``.
+`d6t_temp_c`
+   Target infrared temperature. It becomes the first column of the processed
+   file and is not smoothed. An unavailable reading is emitted as `NaN`.
 
-``ds18b20_temp_c``
-   Température externe de référence, conservée comme feature.
+`ds18b20_temp_c`
+   External reference temperature, retained as a feature.
 
-``motor_ud_v`` et ``motor_uq_v``
-   Tensions d/q reconstruites depuis la sortie de modulation et le bus DC.
+`motor_ud_v` and `motor_uq_v`
+   d/q voltages reconstructed from modulation output and the DC bus.
 
-``motor_speed_mech_rpm``
-   Vitesse mécanique en rpm.
+`motor_speed_mech_rpm`
+   Mechanical speed in rpm.
 
-``motor_id_a`` et ``motor_iq_a``
-   Courants d/q moteur en ampères.
+`motor_id_a` and `motor_iq_a`
+   Motor d/q currents in amperes.
 
-Protocole série
+Serial protocol
 ---------------
 
-Commandes envoyées par le dashboard :
+Commands sent by the dashboard:
 
 .. code-block:: text
 
@@ -100,7 +105,7 @@ Commandes envoyées par le dashboard :
    ACQ_START,<datalog_ms>,<ds18b20_ms>
    STOP
 
-Réponses et messages attendus :
+Expected responses and messages:
 
 .. code-block:: text
 
@@ -109,56 +114,54 @@ Réponses et messages attendus :
    ACK,START
    ACK,ACQ_START
    ACK,STOP
-   ERR,<raison>
-   #CSV_HEADER,<colonnes>
-   DATA,<valeurs>
+   ERR,<reason>
+   #CSV_HEADER,<columns>
+   DATA,<values>
 
-Le dashboard ignore les lignes ``DATA`` reçues avant ``#CSV_HEADER`` afin de ne
-pas écrire un CSV incohérent.
+The dashboard ignores `DATA` lines received before `#CSV_HEADER` to avoid
+writing an inconsistent CSV file.
 
-``ACQ_START`` est utilisé seul après ``SYNC`` pour enregistrer un refroidissement
-moteur arrêté. Dans cet état, le firmware publie explicitement zéro pour les
-tensions, courants et vitesse afin de ne pas réutiliser le dernier échantillon
-MCSDK mémorisé avant l'arrêt.
+`ACQ_START` is used by itself after `SYNC` to record cooling while the motor
+is stopped. In this state, the firmware explicitly reports zero for voltages,
+currents, and speed instead of reusing the last MCSDK sample held before stop.
 
-Arrêt et reprise après erreur
------------------------------
+Stop and recovery after errors
+------------------------------
 
-En cas de ``ERR``, de timeout d'acquittement ou de perte série, arrêter la
-session et vérifier le journal du dashboard. Fermer les autres logiciels qui
-utilisent le port, rétablir la liaison, puis relancer une session complète à
-partir de ``SYNC``. Ne pas concaténer manuellement un fichier incomplet avec une
-nouvelle acquisition : conserver des sessions séparées facilite le contrôle des
-timestamps.
+On `ERR`, acknowledgment timeout, or serial connection loss, stop the session
+and inspect the dashboard log. Close other software using the port, restore
+the connection, then start a full new session from `SYNC`. Do not concatenate
+an incomplete file manually with a new acquisition; separate sessions make
+timestamp checks easier.
 
-Avant prétraitement, vérifier au minimum :
+Before preprocessing, check at least:
 
-* la présence des huit colonnes attendues ;
-* une progression majoritairement monotone de ``stm32_time_ms`` ;
-* la cadence et la durée de l'essai ;
-* les lignes ``NaN`` ou vides sur la cible D6T ;
-* la cohérence des unités et l'absence de saturation évidente.
+* that all eight expected columns are present;
+* that `stm32_time_ms` increases mostly monotonically;
+* the test's sampling rate and duration;
+* `NaN` or empty lines in the D6T target;
+* unit consistency and obvious saturation.
 
-Import NanoEdge AI Studio
+NanoEdge AI Studio import
 -------------------------
 
-Après prétraitement, le fichier CSV commence par ``d6t_temp_c``. Cette première
-colonne doit être utilisée comme target d'extrapolation. Les autres colonnes
-représentent les features instantanées, dérivées et lissées par EWMA.
+After preprocessing, the CSV file begins with `d6t_temp_c`. Use this first
+column as the extrapolation target. The other columns are instantaneous,
+derived, and EWMA-smoothed features.
 
-Par défaut, le fichier traité n'a pas d'en-tête. Utiliser ``--header`` pour
-l'inspecter, puis vérifier l'ordre final avec
-``firmware_validation/AI_Model/feature_order.txt`` avant de remplacer le modèle.
+By default, the processed file has no header. Use `--header` to inspect it,
+then compare its final order with
+`firmware_validation/AI_Model/feature_order.txt` before replacing the model.
 
-Validation embarquée
+On-device validation
 --------------------
 
-Le projet ``firmware_validation`` ne se pilote pas avec les commandes du
-dashboard. Son flux commence automatiquement au boot :
+The `firmware_validation` project is not controlled by dashboard commands.
+Its stream starts automatically at boot:
 
-* modèle activé : ``d6t_temp_c;predicted_temp_c`` ;
-* modèle désactivé : 55 valeurs numériques pour le Serial Emulator.
+* model enabled: `d6t_temp_c;predicted_temp_c`;
+* model disabled: 55 numeric values for the Serial Emulator.
 
-Le choix se fait avec ``APP_NEAI_MODEL_ENABLED`` dans ``Inc/app_config.h``.
-Effectuer un clean build et reflasher la carte après chaque changement. La page
-:doc:`validation_ia` décrit la procédure complète et le remplacement du modèle.
+Select the mode with `APP_NEAI_MODEL_ENABLED` in `Inc/app_config.h`. Perform a
+clean build and flash the board after each change. See :doc:`validation_ia`
+for the full procedure and model replacement.

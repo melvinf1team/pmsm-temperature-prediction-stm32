@@ -1,102 +1,113 @@
-Câblage
-=======
+Wiring
+======
 
-Le montage cible une carte STM32 B-G473E-ZEST1S associée à une power board
-STDES-LVHP01. Les capteurs externes partagent la masse de la carte et doivent
-être alimentés à la tension requise par leur fiche technique.
+The setup uses an STM32 B-G473E-ZEST1S board with an STDES-LVHP01 power board.
+External sensors share the board's ground and must be supplied at the voltage
+specified in their datasheets.
 
 .. danger::
 
-  Couper l'alimentation de puissance avant toute modification du câblage.
-  Vérifier la révision des cartes, le brochage des connecteurs et les niveaux
-  électriques dans leurs manuels officiels. Les repères CN ci-dessous décrivent
-  le banc de ce dépôt et ne remplacent pas les schémas constructeur. Les
-  limites de 30 A et 4500 rpm exigent une qualification électrique,
-  thermique et mécanique complète avant utilisation.
+  Disconnect the power supply before changing any wiring. Verify board
+  revisions, connector pinouts, and voltage levels in the official manuals.
+  The CN references below describe this repository's test bench and do not
+  replace manufacturer schematics. The 30 A and 4500 rpm limits require full
+  electrical, thermal, and mechanical qualification before use.
 
-Capteur IR D6T
+D6T infrared sensor
+-------------------
+
+The `d6t_temp_c` column is the NanoEdge AI dataset target. The firmware reads
+one pixel from the D6T-44L-06 infrared module over software I2C on `PB6` and
+`PB9`.
+
+.. list-table:: D6T connections
+   :header-rows: 1
+
+   * - D6T pin
+     - Signal
+     - STM32 pin
+     - Board connector
+     - Note
+   * - 4
+     - SCL
+     - PB6
+     - CN10-27
+     - Open-drain I2C clock line
+   * - 3
+     - SDA
+     - PB9
+     - CN10-24
+     - CN10-26 carries the same PB9 signal
+   * - 2
+     - VCC
+     - -
+     - CN7-18
+     - +5 V supply
+   * - 1
+     - GND
+     - -
+     - CN7-20
+     - CN7-22 is also suitable
+
+Add a 4.7 kΩ pull-up resistor from `SCL` to `3.3V` and another from `SDA`
+to `3.3V`. Pins `PB6` and `PB9` are configured as open-drain outputs without
+internal pull-ups. Do not pull these lines up to 5 V without checking the
+tolerance of the inputs used. The two `PB9` positions visible on the board
+carry the same signal, routed to `CN10-24` and `CN10-26` for compatibility
+with multiple motor expansion boards.
+
+The expected I2C address is `0x0A`. The firmware reads command `0x4C` and
+checks the frame's PEC. The logged pixel is selected by
+`D6TIR_SELECTED_PIXEL_INDEX` in `d6t_ir.c`. If the sensor is absent or no
+valid measurement has yet been received, the CSV value is `NaN`.
+
+DS18B20 sensor
 --------------
 
-La colonne ``d6t_temp_c`` est la target du dataset NanoEdge AI. Le firmware lit
-un pixel du module IR D6T-44L-06 par I2C logiciel sur ``PB6`` et ``PB9``.
+The DS18B20 provides an external temperature used as an explanatory feature.
+It is connected by 1-Wire on `PG6`.
 
-+-------------+--------+-----------+-----------+--------------------------------+
-| Broche D6T  | Signal | Pin STM32 | Carte     | Remarque                       |
-+=============+========+===========+===========+================================+
-| 4           | SCL    | PB6       | CN10-27   | Ligne I2C clock open-drain     |
-+-------------+--------+-----------+-----------+--------------------------------+
-| 3           | SDA    | PB9       | CN10-24   | CN10-26 est le même signal PB9 |
-+-------------+--------+-----------+-----------+--------------------------------+
-| 2           | VCC    | -         | CN7-18    | Alimentation +5 V              |
-+-------------+--------+-----------+-----------+--------------------------------+
-| 1           | GND    | -         | CN7-20    | CN7-22 convient également      |
-+-------------+--------+-----------+-----------+--------------------------------+
-
-Ajouter une résistance de tirage de 4,7 kΩ entre ``SCL`` et ``3.3V``, et une
-seconde entre ``SDA`` et ``3.3V``. Les broches ``PB6`` et ``PB9`` sont utilisées
-en sortie open-drain et sans pull-up interne. Ne pas tirer ces lignes vers 5 V
-sans avoir vérifié la tolérance des entrées utilisées. Les deux positions
-``PB9`` visibles sur la carte correspondent au même signal, routé vers
-``CN10-24`` et ``CN10-26``
-pour la compatibilité avec plusieurs cartes d'extension moteur.
-
-L'adresse I2C attendue est ``0x0A``. Le firmware lit la commande ``0x4C`` et
-vérifie le PEC de la trame. Le pixel journalisé est configuré par
-``D6TIR_SELECTED_PIXEL_INDEX`` dans ``d6t_ir.c``. Si le capteur est absent ou si
-aucune mesure valide n'a encore été reçue, la valeur CSV est ``NaN``.
-
-Capteur DS18B20
----------------
-
-Le DS18B20 fournit une température externe utilisée comme feature explicative.
-Il est connecté en 1-Wire sur ``PG6``.
-
-.. list-table:: Connexion DS18B20
+.. list-table:: DS18B20 connections
    :header-rows: 1
 
    * - Signal
-     - Pin STM32
-     - Remarque
+     - STM32 pin
+     - Note
    * - DQ
      - PG6
-     - Ligne 1-Wire, open-drain
+     - Open-drain 1-Wire line
    * - VCC
      - 3V3
-     - Alimentation capteur
+     - Sensor supply
    * - GND
      - GND
-     - Masse commune
+     - Common ground
 
-Ajouter une résistance de tirage de 4,7 kΩ entre ``DQ`` et ``3V3`` si elle n'est
-pas déjà présente. Le firmware force une période minimale de 750 ms pour rester
-compatible avec la conversion 12 bits du DS18B20.
+Add a 4.7 kΩ pull-up resistor from `DQ` to `3V3` if one is not already
+present. The firmware enforces a minimum period of 750 ms to support the
+DS18B20's 12-bit conversion.
 
-UART PC
+PC UART
 -------
 
-Le dashboard communique avec la carte via ``USART1`` exposé côté PC comme port
-COM. Le baudrate par défaut est ``115200``. Le protocole applicatif est textuel,
-ligne par ligne, afin de faciliter le diagnostic dans un terminal série.
+The dashboard communicates with the board through `USART1`, exposed to the PC
+as a COM port. The default baud rate is `115200`. The application protocol is
+line-oriented text to simplify diagnosis in a serial terminal.
 
-Dans les deux firmwares, l'application reprend l'USART1 au protocole ASPEP. Ne
-pas ouvrir simultanément le même port dans Motor Pilot, un terminal et le
-dashboard : un seul processus PC doit posséder le port COM.
+In both firmware projects, the application takes USART1 over from ASPEP.
+Do not open the same port simultaneously in Motor Pilot, a terminal, and the
+dashboard: only one PC process can own the COM port.
 
-Contrôle avant mise sous tension
---------------------------------
+Checks before applying power
+----------------------------
 
-* Vérifier la masse commune et l'absence de court-circuit entre alimentation
-  capteur, ``3V3``, ``5V`` et masse.
+* Verify common ground and the absence of shorts between sensor supplies,
+  `3V3`, `5V`, and ground.
+* Confirm the pull-up resistors while the board is unpowered.
+* Check that the motor and power board are mechanically secure.
+* Power the logic first and confirm that the COM port appears.
+* Check boot messages and sensor readings before starting a motor sequence.
 
-* Confirmer les résistances de tirage avec la carte hors tension.
-
-* Vérifier que le moteur et la carte de puissance sont mécaniquement sécurisés.
-
-* Alimenter d'abord la logique et confirmer l'apparition du port COM.
-
-* Contrôler les messages de démarrage et la présence de mesures capteur avant
-  d'autoriser une séquence moteur.
-
-Un D6T absent produit ``NaN``. Le DS18B20 peut conserver sa dernière valeur
-valide après un échec ponctuel ; une valeur stable ne prouve donc pas à elle
-seule que chaque conversion 1-Wire réussit.
+An absent D6T produces `NaN`. After a transient failure, the DS18B20 may keep
+its last valid value; a stable reading alone does not prove every 1-Wire
+conversion succeeded.

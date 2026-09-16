@@ -1,4 +1,4 @@
-"""Dashboard temps reel pour comparer la D6T et la prediction NanoEdge AI."""
+"""Real-time dashboard for comparing D6T measurements with NanoEdge AI predictions."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ NEUTRAL_ERROR_BAND = ErrorBand("En attente", COLORS["neutral"])
 
 
 def parse_validation_line(raw_line: bytes | str) -> tuple[float, float]:
-    """Parse une ligne firmware ``temperature_reelle;temperature_predite``."""
+    """Parse a firmware line containing ``actual_temperature;predicted_temperature``."""
     if isinstance(raw_line, bytes):
         try:
             line = raw_line.decode("ascii")
@@ -116,7 +116,7 @@ def parse_validation_line(raw_line: bytes | str) -> tuple[float, float]:
 
 
 def classify_error(absolute_error_c: float) -> ErrorBand:
-    """Retourne la classe couleur correspondant a un ecart absolu en degres."""
+    """Return the color band for an absolute error in degrees Celsius."""
     error = abs(float(absolute_error_c))
     if not math.isfinite(error):
         return NEUTRAL_ERROR_BAND
@@ -129,7 +129,7 @@ def classify_error(absolute_error_c: float) -> ErrorBand:
 
 
 def format_one_decimal(value: float) -> str:
-    """Formate un nombre avec exactement une decimale et une virgule francaise."""
+    """Format a number with exactly one decimal place and a French decimal comma."""
     if not math.isfinite(value):
         return "--,-"
     rounded = round(value, 1)
@@ -139,12 +139,12 @@ def format_one_decimal(value: float) -> str:
 
 
 def is_current_connection_event(event_generation: int, current_generation: int) -> bool:
-    """Indique si un evenement appartient encore a la connexion serie active."""
+    """Return whether an event still belongs to the active serial connection."""
     return event_generation == current_generation
 
 
 def is_transient_serial_error(error: Exception) -> bool:
-    """Identifie l'erreur Windows ClearCommError qui peut etre temporaire."""
+    """Identify the potentially transient Windows ClearCommError."""
     message = str(error).casefold()
     return "clearcommerror" in message or "does not recognize the command" in message
 
@@ -161,7 +161,7 @@ def csv_sample_row(sample: ValidationSample) -> tuple[str, ...]:
 
 
 class CsvSessionRecorder:
-    """Ecrit une session CSV progressivement pour limiter les pertes de donnees."""
+    """Write a CSV session incrementally to limit data loss."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -179,7 +179,7 @@ class CsvSessionRecorder:
 
 
 class SessionAccumulator:
-    """Calcule les erreurs instantanee et moyenne absolue cumulee (MAE)."""
+    """Calculate instantaneous errors and cumulative mean absolute error (MAE)."""
 
     def __init__(self) -> None:
         self.reset()
@@ -209,7 +209,7 @@ class SessionAccumulator:
 
 
 class TemperatureValidationApp(tk.Tk):
-    """Interface principale de validation thermique temps reel."""
+    """Main interface for real-time temperature validation."""
 
     def __init__(self, *, demo: bool = False, initial_port: str | None = None) -> None:
         super().__init__()
@@ -1107,9 +1107,9 @@ class TemperatureValidationApp(tk.Tk):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Dashboard de validation thermique NanoEdge AI.")
-    parser.add_argument("--port", help="Port serie a ouvrir automatiquement, par exemple COM5.")
-    parser.add_argument("--demo", action="store_true", help="Affiche un flux simule sans carte.")
+    parser = argparse.ArgumentParser(description="NanoEdge AI temperature validation dashboard.")
+    parser.add_argument("--port", help="Serial port to open automatically, for example COM5.")
+    parser.add_argument("--demo", action="store_true", help="Show a simulated stream without a board.")
     return parser.parse_args()
 
 

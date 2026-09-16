@@ -1,87 +1,89 @@
-# Firmware de validation NanoEdge AI
+# NanoEdge AI Validation Firmware
 
-Ce projet STM32CubeIDE autonome reprend les acquisitions moteur et capteurs,
-calcule à 10 Hz le même prétraitement EWMA que
-`pretraitement/preprocess_logs_ewma.py`, puis expose soit les 55 features, soit
-la prédiction thermique NanoEdge AI.
+This standalone STM32CubeIDE project reuses motor and sensor acquisition,
+computes the same EWMA preprocessing as
+`pretraitement/preprocess_logs_ewma.py` at 10 Hz, then outputs either the
+55 features or the NanoEdge AI temperature prediction.
 
-Le mode est sélectionné à la compilation dans `Inc/app_config.h` :
+Select the mode at compile time in `Inc/app_config.h`:
 
 ```c
 #define APP_NEAI_MODEL_ENABLED  1U
 ```
 
-- `1U` : modèle embarqué, sortie `température D6T;prédiction` ;
-- `0U` : modèle non appelé, sortie des 55 features pour le Serial Emulator.
+- `1U`: run the embedded model and output `D6T temperature;prediction`;
+- `0U`: skip the model and output 55 features for the Serial Emulator.
 
-Le flux démarre automatiquement au boot. Il ne contient ni en-tête, ni préfixe
-`DATA`, ni texte de diagnostic. USART1 utilise 115200 bauds, 8N1.
+The stream starts automatically at boot. It contains no header, `DATA`
+prefix, or diagnostic text. USART1 uses 115200 baud, 8N1.
 
-## Organisation
+## Organization
 
-Les éléments propres à la validation se trouvent principalement dans :
+Validation-specific components are mainly in:
 
-| Chemin | Rôle |
+| Path | Purpose |
 |---|---|
-| `STM32CubeIDE/Application/User/preprocess_ewma.c` | Calcul float32 des 55 features |
-| `STM32CubeIDE/Application/User/app_ai_model.c` | Vérification et appel de NanoEdge AI |
-| `STM32CubeIDE/Application/User/app_datalog.c` | Acquisition, cadence et émission USART1 |
-| `Inc/app_config.h` | Sélection du mode modèle/émulateur |
-| `Inc/preprocess_ewma.h` | Période et dimensions du prétraitement |
-| `AI_Model/feature_order.txt` | Ordre contractuel des 55 axes |
-| `AI_Model/` | Bibliothèque, en-tête, métadonnées et artefacts du modèle |
-| `tests/` | Contrôles hors cible et test du contrat série |
+| `STM32CubeIDE/Application/User/preprocess_ewma.c` | Float32 computation of 55 features |
+| `STM32CubeIDE/Application/User/app_ai_model.c` | NanoEdge AI checks and calls |
+| `STM32CubeIDE/Application/User/app_datalog.c` | Acquisition, timing, and USART1 output |
+| `Inc/app_config.h` | Model/Emulator mode selection |
+| `Inc/preprocess_ewma.h` | Preprocessing period and dimensions |
+| `AI_Model/feature_order.txt` | Required order of 55 axes |
+| `AI_Model/` | Model library, header, metadata, and artifacts |
+| `tests/` | Off-target checks and serial contract test |
 
-Les dossiers `Drivers`, `MCSDK_v6.4.2-Full`, `Src` et une partie de `Inc` sont
-issus des outils STM32. Une régénération CubeMX/Workbench doit être revue avant
-d'être intégrée.
+`Drivers`, `MCSDK_v6.4.2-Full`, `Src`, and parts of `Inc` come from STM32
+tools. Review any CubeMX/Workbench regeneration before integrating it.
 
-## Limites moteur et profil B2
+## Motor limits and B2 profile
 
-Les plafonds communs au dashboard et aux deux firmwares sont de 4500 rpm,
-30 A sur `Iq` et 30 A sur le courant total. Le capteur de courant reste
-configuré avec une pleine échelle calculée d'environ 110 A ; cela garantit la
-représentation numérique, pas la tenue thermique du banc. La polarisation de
-démarrage reste limitée à 14 A ; son seuil logiciel et le profileur DC ne
-peuvent pas dépasser 30 A.
+Limits shared by the dashboard and both firmware projects are 4500 rpm,
+30 A for `Iq`, and 30 A for total current. The current sensor has a calculated
+full scale of about 110 A; this ensures numeric representation, not the test
+bench's thermal capacity. Startup polarization remains capped at 14 A; its
+software threshold and the DC profiler cannot exceed 30 A.
 
-Un premier appui sur B2 démarre à 2000 rpm avec une limite `Iq` de 30 A. Une
-nouvelle cible est choisie toutes les 10 à 30 secondes dans la plage
-2000–4000 rpm. Chaque pas aléatoire vaut 200 à 500 rpm avant application des
-bornes, puis la rampe MCSDK de 10 Hz électriques/s réalise la transition. Avec
-deux paires de pôles, la pente mécanique est de 300 rpm/s. Un second appui
-arrête et désactive le profil.
+The first press of B2 immediately draws a pseudorandom first target between
+2000 and 4000 rpm. A new target, necessarily different from the previous
+one, is then drawn directly from this entire range every 2 to 5 seconds.
+Startup and transitions use a 500 electrical Hz/s MCSDK ramp, or
+15,000 rpm/s with two pole pairs. The PI `Iq` output is capped at 25 A;
+the `Id/Iq` command magnitude and application shutdown threshold on measured
+magnitude are capped at 28 A. This internal profile does not raise the
+50 electrical Hz/s limit for the acquisition firmware's UART configurations.
+A second press stops and disables the profile.
 
-Une mesure MCSDK de courant ou de vitesse ``NaN``/infinie provoque un arrêt
-immédiat, désactive le profil B2 et place le contrôle moteur en défaut.
+A nonfinite (`NaN` or infinite) MCSDK current or speed reading immediately
+stops the motor, disables B2, and puts motor control into a fault state.
 
-> Ces limites élevées exigent une qualification électrique, thermique et
-> mécanique sur le banc réel avant utilisation.
+> These high limits require electrical, thermal, and mechanical qualification
+> on the actual test bench before use. Preventive DC bus protection is disabled
+> (`M1_BUS_PROTECTION=false`): monitor bus voltage during rapid deceleration
+> and validate energy absorption or braking.
 
-## Modèle embarqué actuel
+## Current embedded model
 
-Le contenu de `AI_Model/metadata.json` et `NanoEdgeAI.h` décrit l'export suivant :
+`AI_Model/metadata.json` and `NanoEdgeAI.h` describe this export:
 
-| Propriété | Valeur |
+| Property | Value |
 |---|---|
-| Algorithme | Régression Ridge |
+| Algorithm | Ridge regression |
 | NanoEdge AI Studio | 5.2.0 |
-| ID de bibliothèque | `6a99400cd097fef61cf265dc` |
-| Cible | STM32G4, Cortex-M4, hard-float |
-| Entrée | 1 échantillon de 55 axes |
-| Score NanoEdge | `0.9827` |
-| KPI principal des métadonnées | `0.9944` |
-| RAM estimée | 464 octets |
-| Flash estimée | 892 octets |
-| Compilation de l'export | 3 septembre 2026 |
+| Library ID | `6a99400cd097fef61cf265dc` |
+| Target | STM32G4, Cortex-M4, hard-float |
+| Input | 1 sample with 55 axes |
+| NanoEdge score | `0.9827` |
+| Main metadata KPI | `0.9944` |
+| Estimated RAM | 464 bytes |
+| Estimated Flash | 892 bytes |
+| Export build date | September 3, 2026 |
 
-Ces chiffres proviennent de l'export NanoEdge. Ils ne constituent pas à eux
-seuls une mesure indépendante sur des données de validation séparées. Les
-anciennes valeurs R² `0.8069` et SMAPE `1.55 %` citées dans ce README n'étaient
-accompagnées d'aucun script de calcul versionné ; elles ne sont donc plus
-présentées comme critères de recette.
+These figures come from the NanoEdge export. Alone, they are not an independent
+measurement on separate validation data. Previous R² `0.8069` and SMAPE
+`1.55 %` values cited in this README had no versioned calculation script, so
+they are no longer presented as acceptance criteria.
 
-Le dossier modèle contient :
+The model directory contains:
 
 ```text
 AI_Model/
@@ -95,68 +97,69 @@ AI_Model/
     `-- ridge_preprocessing_params.json
 ```
 
-## Mode modèle activé
+## Model-enabled mode
 
-Avec `APP_NEAI_MODEL_ENABLED == 1U`, `app_ai_model.c` vérifie l'identité et les
-dimensions de la bibliothèque, initialise l'extrapolation, copie le vecteur de
-55 `float`, puis appelle `neai_extrapolation()`.
+With `APP_NEAI_MODEL_ENABLED == 1U`, `app_ai_model.c` checks library identity
+and dimensions, initializes extrapolation, copies the 55-`float` vector,
+then calls `neai_extrapolation()`.
 
-Chaque ligne UART valide contient deux températures en degrés Celsius :
+Each valid UART line contains two temperatures in degrees Celsius:
 
 ```text
 <d6t_temp_c>;<predicted_temp_c>
 ```
 
-Exemple :
+Example:
 
 ```text
 31.400000;30.872314
 ```
 
-Aucune ligne n'est émise tant que le D6T n'a pas fourni de mesure valide, ni si
-l'initialisation ou l'inférence NanoEdge échoue. Les changements de vitesse du
-profil B2 n'ajoutent aucun texte au flux de données.
+No line is emitted until the D6T provides a valid reading, or if NanoEdge
+initialization or inference fails. B2 speed changes add no text to the data
+stream.
 
-Contrôler le contrat avec une carte connectée :
+Check the contract with a connected board:
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
 ```
 
-L'interface graphique correspondante est décrite dans `../validation/README.md`.
+The corresponding graphical interface is described in
+`../validation/README.md`.
 
-## Mode Serial Emulator
+## Serial Emulator mode
 
-Définir :
+Set:
 
 ```c
 #define APP_NEAI_MODEL_ENABLED  0U
 ```
 
-Effectuer ensuite un clean build, reconstruire et reflasher. La bibliothèque
-n'est pas appelée et chaque ligne contient exactement 55 nombres finis séparés
-par `;`, sans cible D6T, timestamp, en-tête ou préfixe.
+Then perform a clean build, rebuild, and reflash. The library is not called,
+and every line contains exactly 55 finite numbers separated by `;`, with no
+D6T target, timestamp, header, or prefix.
 
 ```text
 27.180000;27.180000;...;31385.884088
 ```
 
-Dans NanoEdge AI Studio, ouvrir **Validation > Serial Emulator**, sélectionner
-le port COM et 115200 bauds. Aucune commande `START` n'est nécessaire.
+In NanoEdge AI Studio, open **Validation > Serial Emulator**, select the COM
+port and 115200 baud. No `START` command is needed.
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
 ```
 
-## Contrat des 55 features
+## Contract for the 55 features
 
-La période est fixée à 100 ms. Les spans adaptés à 10 Hz sont :
+The period is fixed at 100 ms. Spans adjusted for 10 Hz are:
 
 ```text
 6600, 16800, 31800, 47400
 ```
 
-Les onze signaux sont ordonnés ainsi :
+The eleven signals are ordered as follows:
 
 1. `ds18b20_temp_c`
 2. `motor_ud_v`
@@ -170,97 +173,98 @@ Les onze signaux sont ordonnés ainsi :
 10. `speed_current = motor_speed_mech_rpm * i_s`
 11. `speed_power = motor_speed_mech_rpm * S_el`
 
-Pour chaque signal, le vecteur contient la valeur instantanée puis ses quatre
-EWMA, soit `11 x 5 = 55` valeurs. La récurrence reproduit
-`pandas.Series.ewm(span=..., adjust=False)`. Les valeurs non finies des features
-sont remplacées par zéro dans les deux implémentations.
+For each signal, the vector contains the instantaneous value and its four
+EWMAs, or `11 x 5 = 55` values. The recurrence reproduces
+`pandas.Series.ewm(span=..., adjust=False)`. Nonfinite feature values are
+replaced by zero in both implementations.
 
-Le contexte des 44 EWMA est sauvegardé après chaque échantillon dans deux
-snapshots alternés de la section SRAM `.noinit`. Une signature, une version, un
-numéro de séquence et un CRC32 permettent de restaurer le dernier état complet
-après un reset CPU/NRST tant que la carte reste alimentée. Une coupure
-d'alimentation ou un snapshot invalide réinitialise le contexte sans écrire en
-Flash.
+The 44 EWMA states are saved after each sample in two alternating snapshots
+in SRAM section `.noinit`. A signature, version, sequence number, and CRC32
+allow restoration of the latest complete state after a CPU/NRST reset while
+the board remains powered. Power loss or an invalid snapshot resets the
+state without writing to Flash.
 
-## Remplacer le modèle NanoEdge
+## Replacing the NanoEdge model
 
-Exporter une bibliothèque d'extrapolation depuis NanoEdge AI Studio, puis
-remplacer ensemble dans `AI_Model` :
+Export an extrapolation library from NanoEdge AI Studio, then replace these
+items together in `AI_Model`:
 
-1. `libneai.a` ;
-2. `NanoEdgeAI.h` ;
-3. `metadata.json` ;
-4. le contenu de `artifacts/`.
+1. `libneai.a`;
+2. `NanoEdgeAI.h`;
+3. `metadata.json`;
+4. the contents of `artifacts/`.
 
-Vider d'abord `artifacts/` pour ne pas mélanger les paramètres de deux modèles.
-Conserver `feature_order.txt`, qui décrit l'ordre imposé par le firmware.
+Empty `artifacts/` first to avoid mixing parameters from two models. Keep
+`feature_order.txt`, which defines the order imposed by the firmware.
 
-Le nouvel export doit respecter :
+The new export must satisfy:
 
-- une cible Cortex-M4 STM32G4 compatible avec la carte ;
-- l'ABI hard-float et VFPv4-D16 ;
-- `NEAI_INPUT_SIGNAL_LENGTH == 1` ;
-- `NEAI_INPUT_AXIS_NUMBER == 55` ;
-- les symboles `neai_extrapolation_init` et `neai_extrapolation` sans suffixe
-  multi-library.
+- an STM32G4 Cortex-M4 target compatible with the board;
+- hard-float ABI and VFPv4-D16;
+- `NEAI_INPUT_SIGNAL_LENGTH == 1`;
+- `NEAI_INPUT_AXIS_NUMBER == 55`;
+- `neai_extrapolation_init` and `neai_extrapolation` symbols without a
+  multi-library suffix.
 
-Les assertions de `app_ai_model.c` font échouer la compilation si les dimensions
-changent. Un export utilisant des symboles suffixés nécessite une adaptation
-explicite de ce module.
+Assertions in `app_ai_model.c` fail the build if dimensions change. An export
+with suffixed symbols requires an explicit change to this module.
 
-## Construction
+## Build
 
-Importer `firmware_validation/STM32CubeIDE` comme projet existant dans
-STM32CubeIDE. Les configurations Debug et Release référencent toutes deux :
+Import `firmware_validation/STM32CubeIDE` as an existing project in
+STM32CubeIDE. Both Debug and Release configurations reference:
 
-- l'en-tête dans `../../AI_Model` ;
-- la bibliothèque dans `../../AI_Model` ;
-- `:libneai.a` sur la ligne de lien.
+- the header in `../../AI_Model`;
+- the library in `../../AI_Model`;
+- `:libneai.a` on the linker line.
 
-Après un changement de mode ou de modèle :
+After changing the mode or model:
 
-1. exécuter **Project > Clean** ;
-2. reconstruire la configuration voulue ;
-3. vérifier la présence de `libneai.a` sur la ligne de lien en mode modèle ;
-4. programmer `STM32CubeIDE/Debug/firmware_validation.elf` ou
-  `STM32CubeIDE/Release/firmware_validation.elf`, selon la configuration ;
-5. contrôler le contrat UART correspondant.
+1. run **Project > Clean**;
+2. rebuild the desired configuration;
+3. confirm that `libneai.a` appears on the linker line in model mode;
+4. program `STM32CubeIDE/Debug/firmware_validation.elf` or
+   `STM32CubeIDE/Release/firmware_validation.elf`, according to the configuration;
+5. check the corresponding UART contract.
 
-## Vérifications automatisées
+## Automated checks
 
-Vérifier la structure de l'export :
+Check the export structure:
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
 ```
 
-Ce contrôle réussit avec l'export versionné : ID, dimensions, ABI, symboles,
-ordre des features et artefacts Ridge sont cohérents.
+This check passes with the versioned export: ID, dimensions, ABI, symbols,
+feature order, and Ridge artifacts are consistent.
 
-Vérifier les limites dans le dashboard, les deux firmwares et les fichiers
-Workbench/CubeMX :
+Check limits in the dashboard, both firmware projects, and Workbench/CubeMX
+files:
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_motor_limits.py
 ```
 
-Ce contrôle vérifie 4500 rpm, 30 A, la polarisation à 14 A, la plage B2,
-les pas, les temporisations, la rampe et la plage analogique de courant.
+This check covers the global 4500 rpm and 30 A ceilings, 14 A polarization,
+and B2's 25 A `Iq`, 28 A total threshold, 2000–4000 rpm range, direct draws,
+2 to 5 second delays, and 500 electrical Hz/s ramp. It also checks the
+analog current range.
 
-Comparer le prétraitement float32 simulé à pandas :
+Compare simulated float32 preprocessing with pandas:
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_preprocess_parity.py
 ```
 
-État vérifié le 8 septembre 2026 : les sept premiers logs passent, mais
-`daq_log_20260827_080523.csv` atteint `0.000512959` d'erreur relative mise à
-l'échelle sur `speed_power_ewma_6600`, ligne 60913, pour une limite de `0.0005`.
-Le test global échoue donc actuellement. Cette faible dérive float32 doit être
-qualifiée avant d'ajuster la tolérance ou l'implémentation.
+State rechecked on September 15, 2026: the first seven logs pass, but
+`daq_log_20260827_080523.csv` reaches a scaled relative error of `0.000512959`
+on `speed_power_ewma_6600` at row 60913, against a `0.0005` limit. The full
+test currently fails. Assess this small float32 drift before changing the
+tolerance or implementation.
 
-Les builds Debug et Release des deux firmwares produisent leurs ELF sous
-STM32CubeIDE 2.1.1, et les contrôleurs modifiés compilent sans avertissement.
-Le contrôle série et la qualification à 4500 rpm/30 A nécessitent une carte et
-un banc sécurisés. Aucun pipeline d'intégration continue n'est fourni dans le
-dépôt.
+The latest versioned Debug and Release builds produce their ELF files under
+STM32CubeIDE 2.1.1. The current revision of both controllers passes ARM GCC
+14.3 syntax compilation with the project options; a full relink has not been
+run. The serial check and qualification at 4500 rpm/30 A require a board and
+a secured test bench. No continuous integration pipeline is provided in the
+repository.

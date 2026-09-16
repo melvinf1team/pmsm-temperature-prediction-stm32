@@ -1,11 +1,11 @@
-"""Prétraitement des logs PMSM pour extrapolation NanoEdge AI.
+"""Preprocess PMSM logs for NanoEdge AI extrapolation.
 
-Le script lit les CSV produits par ``datalogging/motor_datalog_gui_dashboard.py``,
-conserve ``d6t_temp_c`` en première colonne comme cible non transformée, puis
-construit les variables explicatives et leurs EWMA. Les spans EWMA de référence
-ont été réglés pour 2 Hz et sont remis à l'échelle à partir de la fréquence
-d'acquisition réelle du fichier d'entrée. Les chemins peuvent être fournis par
-ligne de commande, fichier YAML ou variables d'environnement via ConfigArgParse.
+The script reads CSV files produced by
+``datalogging/motor_datalog_gui_dashboard.py``, keeps ``d6t_temp_c`` as the
+unchanged first-column target, then builds explanatory variables and their
+EWMAs. Reference EWMA spans were set for 2 Hz and are rescaled using the
+input file's actual acquisition rate. Paths can be supplied through the
+command line, a YAML file, or environment variables via ConfigArgParse.
 """
 
 import os
@@ -67,7 +67,7 @@ EWM_COLUMNS = FEATURE_INPUT_COLUMNS + DERIVED_COLUMNS
 
 
 def path_from_arg(value):
-    """Normalise un chemin fourni par CLI, config ou variable d'environnement."""
+    """Normalize a path supplied by CLI, configuration, or environment variable."""
     path = Path(os.path.expandvars(str(value))).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -76,7 +76,7 @@ def path_from_arg(value):
 
 def parse_args(argv=None):
     parser = configargparse.ArgParser(
-        description="Pretraite les logs du dashboard PMSM avec des EWMA adaptees a la frequence d'acquisition.",
+        description="Preprocess PMSM dashboard logs with EWMAs scaled to the acquisition rate.",
         default_config_files=[str(path) for path in DEFAULT_CONFIG_FILES],
         config_file_parser_class=configargparse.YAMLConfigFileParser,
     )
@@ -84,59 +84,59 @@ def parse_args(argv=None):
         "-c",
         "--config",
         is_config_file=True,
-        help="Fichier de configuration optionnel au format YAML.",
+        help="Optional YAML configuration file.",
     )
     parser.add_argument(
         "--input-dir",
         type=path_from_arg,
         default=INPUT_DIR,
         env_var="PMSM_PREPROCESS_INPUT_DIR",
-        help="Dossier contenant les CSV bruts du dashboard.",
+        help="Directory containing raw dashboard CSV files.",
     )
     parser.add_argument(
         "--output-dir",
         type=path_from_arg,
         default=OUTPUT_DIR,
         env_var="PMSM_PREPROCESS_OUTPUT_DIR",
-        help="Dossier de sortie des CSV preprocesses.",
+        help="Output directory for preprocessed CSV files.",
     )
     parser.add_argument(
         "--pattern",
         default=INPUT_PATTERN,
         env_var="PMSM_PREPROCESS_PATTERN",
-        help="Motif glob des fichiers CSV a traiter dans input-dir.",
+        help="Glob pattern for CSV files to process in input-dir.",
     )
     parser.add_argument(
         "--frequency-hz",
         type=float,
         default=None,
-        help="Force la frequence d'acquisition si elle ne doit pas etre deduite de stm32_time_ms.",
+        help="Set the acquisition rate instead of deriving it from stm32_time_ms.",
     )
     parser.add_argument(
         "--header",
         dest="write_header",
         action="store_true",
         default=WRITE_HEADER,
-        help="Ecrit les noms de colonnes dans le CSV de sortie.",
+        help="Write column names in the output CSV file.",
     )
     parser.add_argument(
         "--no-header",
         dest="write_header",
         action="store_false",
-        help="N'ecrit pas les noms de colonnes dans le CSV de sortie.",
+        help="Omit column names from the output CSV file.",
     )
     parser.add_argument(
         "--include-time",
         dest="include_time_ms",
         action="store_true",
         default=INCLUDE_TIME_MS,
-        help="Conserve la colonne stm32_time_ms dans le CSV de sortie.",
+        help="Keep the stm32_time_ms column in the output CSV file.",
     )
     parser.add_argument(
         "--no-include-time",
         dest="include_time_ms",
         action="store_false",
-        help="Ne conserve pas la colonne stm32_time_ms dans le CSV de sortie.",
+        help="Omit the stm32_time_ms column from the output CSV file.",
     )
     args = parser.parse_args(argv)
     args.input_dir = path_from_arg(args.input_dir)
@@ -145,7 +145,7 @@ def parse_args(argv=None):
 
 
 def require_input_directory(input_dir):
-    """Valide que le dossier d'entrée existe et pointe bien vers un dossier."""
+    """Validate that the input path exists and is a directory."""
     if not input_dir.exists():
         raise FileNotFoundError(f"Dossier d'entree introuvable: {input_dir}")
     if not input_dir.is_dir():
@@ -154,7 +154,7 @@ def require_input_directory(input_dir):
 
 
 def prepare_output_directory(output_dir):
-    """Crée le dossier de sortie, sauf si le chemin existe déjà comme fichier."""
+    """Create the output directory unless the path already exists as a file."""
     if output_dir.exists() and not output_dir.is_dir():
         raise NotADirectoryError(f"Le chemin de sortie n'est pas un dossier: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)

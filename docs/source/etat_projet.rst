@@ -1,183 +1,185 @@
-Analyse et état du projet
-=========================
+Project Assessment and Status
+=============================
 
-Cette page synthétise l'audit du dépôt réalisé le 8 septembre 2026. Elle
-distingue les constats vérifiés localement des contrôles qui nécessitent le banc
-matériel ou STM32CubeIDE.
+This page summarizes the repository audit updated on September 15, 2026.
+It separates locally verified findings from checks requiring the physical
+test bench or STM32CubeIDE.
 
-Périmètre examiné
------------------
+Scope reviewed
+--------------
 
-L'analyse couvre :
+The assessment covers:
 
-* les applications Python de datalogging, prétraitement et validation ;
-* les fichiers YAML, les profils moteur et les contrats CSV ;
-* les modules applicatifs propres aux firmwares d'acquisition et de validation ;
-* les en-têtes de configuration, l'export NanoEdge et ses métadonnées ;
-* les tests Python, les procédures de build et toute la documentation projet.
+* the Python applications for data logging, preprocessing, and validation;
+* YAML files, motor profiles, and CSV contracts;
+* project-specific application modules in both firmware projects;
+* configuration headers, the NanoEdge export, and its metadata;
+* Python tests, build procedures, and all project documentation.
 
-Les bibliothèques CMSIS, HAL et MCSDK générées ou tierces n'ont pas fait l'objet
-d'une revue ligne par ligne. Leur intégration, leurs points d'appel et les
-constantes projet qui les encadrent ont été examinés.
+Generated or third-party CMSIS, HAL, and MCSDK libraries were not reviewed
+line by line. Their integration, call points, and governing project constants
+were examined.
 
-Synthèse
---------
+Summary
+-------
 
-La chaîne fonctionnelle est complète et compréhensible : la carte acquiert les
-mesures, le dashboard les journalise, le script Python produit les 55 features,
-et un second firmware reproduit ce calcul avant l'inférence. Les contrats
-essentiels sont matérialisés par ``CSV_OUTPUT_COLUMNS``, ``feature_order.txt`` et
-les dimensions du header NanoEdge.
+The workflow is complete and understandable: the board acquires measurements,
+the dashboard logs them, the Python script produces 55 features, and a second
+firmware reproduces this calculation before inference. Essential contracts
+are embodied in `CSV_OUTPUT_COLUMNS`, `feature_order.txt`, and the NanoEdge
+header dimensions.
 
-Les limites du dashboard, des deux firmwares et des fichiers Workbench sont
-désormais alignées à 4500 rpm et 30 A. Le risque principal est donc leur
-qualification sur le banc réel, devant la dérive numérique légèrement
-supérieure au seuil de parité et l'absence de politique stricte pour les cibles
-D6T invalides.
+Limits in the dashboard, both firmware projects, and Workbench files are now
+aligned at 4500 rpm and 30 A. The main risk is qualifying these limits on
+the actual test bench, followed by numeric drift just above the parity
+threshold and the lack of a strict policy for invalid D6T targets.
 
-État des vérifications
-----------------------
+Verification status
+-------------------
 
-.. csv-table:: Résultats au 8 septembre 2026
-    :header: "Vérification", "État", "Résultat"
-    :widths: 25, 20, 55
+.. csv-table:: Results as of September 15, 2026
+   :header: "Check", "Status", "Result"
+   :widths: 25, 20, 55
 
-    "Build Sphinx strict", "Réussi", "Aucun avertissement avec -W --keep-going"
-    "Cohérence export NanoEdge", "Réussie", "ID, ABI, symboles, dimensions et artefacts Ridge valides"
-    "Tests de l'interface thermique", "Réussis", "3 tests exécutés"
-    "Cohérence des limites moteur", "Réussie", "Dashboard, firmwares, IOC, WBDEF et Workbench contrôlés"
-    "Parité Python/float32", "En échec", "0.000512959 pour une limite de 0.0005 sur le dernier log"
-   "Build des firmwares", "Réussi en Debug et Release", "Les quatre ELF sont générés ; les contrôleurs modifiés compilent sans avertissement"
-    "Contrat USART1 sur cible", "Non exécuté", "Carte programmée et port COM requis"
+   "Strict Sphinx build", "Passed", "No warnings with -W --keep-going"
+   "NanoEdge export consistency", "Passed", "Valid ID, ABI, symbols, dimensions, and Ridge artifacts"
+   "Temperature interface tests", "Passed", "3 tests run"
+   "Motor limit consistency", "Passed", "Dashboard, firmware, IOC, WBDEF, and Workbench checked"
+   "Python/float32 parity", "Failed", "0.000512959 against a 0.0005 limit on the latest log"
+   "Motor controllers", "ARM syntax passed", "Both app_motor_control.c files pass ARM GCC 14.3 with -Ofast, -Wall, -Wextra, and -Wpedantic; no full relink"
+   "USART1 contract on target", "Not run", "Requires a programmed board and COM port"
 
-Points forts
-------------
+Strengths
+---------
 
-Séparation des responsabilités
-   Le pilotage interactif et la validation autonome utilisent deux projets
-   distincts. Les modules capteurs, moteur, datalogging et modèle ont des rôles
-   identifiables.
+Separation of responsibilities
+   Interactive control and standalone validation use separate projects.
+   Sensor, motor, data logging, and model modules have clear roles.
 
-Robustesse de l'acquisition
-   Le firmware utilise une réception interrompue et une émission non bloquante.
-   Le dashboard isole les accès Tkinter du thread série et vide régulièrement
-   le CSV.
+Robust acquisition
+   The firmware uses interrupt-driven reception and nonblocking transmission.
+   The dashboard separates Tkinter access from the serial thread and flushes
+   the CSV regularly.
 
-Contrats explicites
-   Les huit colonnes brutes, les 55 axes d'entrée et les deux formats de sortie
-   de validation sont définis et contrôlables.
+Explicit contracts
+   The eight raw columns, 55 input axes, and two validation output formats
+   are defined and can be checked.
 
-Défense en profondeur
-   Les limites sont vérifiées côté PC et côté firmware. Le contrôle moteur
-   surveille les défauts MCSDK, le courant total et la survitesse.
+Defense in depth
+   Limits are checked on the PC and in firmware. Motor control monitors
+   MCSDK faults, total current, and overspeed.
 
-Traçabilité du modèle
-   L'export contient son header, ses métadonnées, ses paramètres Ridge et un
-   test qui vérifie l'identité, les dimensions, l'ABI et les symboles attendus.
+Model traceability
+   The export contains its header, metadata, Ridge parameters, and a test
+   checking the expected identity, dimensions, ABI, and symbols.
 
-Risques prioritaires
---------------------
+Priority risks
+--------------
 
-1. Qualification des nouvelles limites moteur
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Qualification of the new motor limits
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Priorité élevée.** Les plafonds logiciels sont maintenant de 4500 rpm,
-30 A sur ``Iq`` et 30 A sur le courant total. La chaîne de mesure représente
-environ 110 A en pleine échelle et les deux builds Debug réussissent, mais ces
-faits ne prouvent pas la tenue électrique, thermique ou mécanique du banc.
+**High priority.** Software ceilings are now 4500 rpm, 30 A for `Iq`, and
+30 A for total current. The measurement chain represents about 110 A at
+full scale and both Debug builds succeed, but these facts do not establish
+the test bench's electrical, thermal, or mechanical capacity.
 
-Le profil B2 démarre à 2000 rpm puis varie entre 2000 et 4000 rpm, par pas de
-200 à 500 rpm toutes les 10 à 30 secondes. La rampe de 10 Hz électriques/s
-limite la pente à 300 rpm/s avec deux paires de pôles. Avant emploi, vérifier le
-moteur, la carte de puissance, l'alimentation, le câblage, le refroidissement,
-la fixation et l'arrêt d'urgence. Commencer à courant réduit et relever les
-températures ainsi que les défauts. La polarisation reste limitée à 14 A.
+The B2 profile caps the PI `Iq` output at 25 A and both the `Id/Iq`
+command magnitude and measured-magnitude shutdown threshold at 28 A. Its
+first target and subsequent targets every 2 to 5 seconds are drawn directly
+from the full 2000–4000 rpm range. The 500 electrical Hz/s ramp is
+15,000 rpm/s with two pole pairs. Before use, check the motor, power board,
+supply, wiring, cooling, mounting, and emergency stop. Begin at reduced
+current and record temperatures and faults. Polarization remains limited to
+14 A and global ceilings outside B2 are unchanged.
 
-2. Parité numérique au-delà du seuil
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Preventive DC bus protection is disabled in the current Workbench configuration
+(`M1_BUS_PROTECTION=false`). Downward transitions at this ramp rate can feed
+energy back and raise bus voltage. Monitor that voltage and validate supply
+absorption or braking before running the complete profile.
 
-**Priorité élevée.** ``validate_preprocess_parity.py`` fixe la tolérance à
-``5e-4``. Le fichier ``daq_log_20260827_080523.csv`` atteint ``0.000512959`` sur
-``speed_power_ewma_6600`` à la ligne 60913. Le test s'arrête donc avant son
-message de succès.
-
-La proximité du seuil est compatible avec une accumulation d'écarts float32,
-mais cette explication reste une hypothèse. Il faut localiser la première
-divergence significative, mesurer son effet sur la prédiction et justifier soit
-une correction de la récurrence, soit une nouvelle tolérance.
-
-3. Politique de cible invalide
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Priorité élevée.** Le prétraitement convertit les variables explicatives en
-numérique, mais conserve ``d6t_temp_c`` telle que lue. Avec
-``keep_default_na=False``, une chaîne ``NaN`` ou une cellule vide reste dans la
-sortie. Le fichier peut alors respecter sa dimension tout en contenant une cible
-inexploitable.
-
-Définir une politique explicite avant l'entraînement : rejeter le fichier,
-supprimer les lignes concernées ou imputer la cible selon une méthode validée.
-Le remplacement silencieux de la cible par zéro est à éviter.
-
-4. Reproductibilité des performances
+2. Numeric parity above the threshold
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Priorité moyenne.** Les scores ``0.9827`` et ``0.9944`` proviennent des
-métadonnées NanoEdge, mais aucune commande versionnée ne reproduit une
-évaluation indépendante du modèle sur les CSV de ``validation``. Ajouter un
-script qui fixe le jeu testé, les métriques, les filtres et la version du modèle
-permettrait de transformer les performances en critère de recette.
+**High priority.** `validate_preprocess_parity.py` sets tolerance to
+`5e-4`. The file `daq_log_20260827_080523.csv` reaches `0.000512959` on
+`speed_power_ewma_6600` at row 60913. The test therefore stops before its
+success message.
 
-5. Couverture et automatisation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Its closeness to the threshold is consistent with accumulated float32
+differences, but that explanation remains a hypothesis. Locate the first
+significant divergence, measure its effect on predictions, and justify
+either a recurrence correction or a new tolerance.
 
-**Priorité moyenne.** Il n'existe ni CI ni commande de test unique. Le contrôle
-``validate_motor_limits.py`` verrouille les constantes et fichiers générateurs,
-et les trois
-tests de l'interface couvrent la reprise série et l'écriture CSV, mais pas les
-seuils visuels, tous les cas du parseur, les arguments du dashboard ou le
-prétraitement de fichiers invalides. Les builds headless ont été exécutés, mais
-leur commande n'est pas versionnée et les machines d'états n'ont pas de tests
-unitaires hôte.
+3. Invalid target policy
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-6. Dépendances et confidentialité
+**High priority.** Preprocessing converts explanatory variables to numbers
+but retains `d6t_temp_c` as read. With `keep_default_na=False`, a `NaN`
+string or empty cell remains in the output. The file can therefore have the
+right dimensions while containing an unusable target.
+
+Define an explicit policy before training: reject the file, remove affected
+rows, or impute the target with a validated method. Avoid silently replacing
+the target with zero.
+
+4. Reproducibility of performance
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Priorité moyenne.** ``requirements.txt`` ne fixe aucune version ; une mise à
-jour de pandas, NumPy, PySerial ou Sphinx peut donc changer le comportement ou
-le build documentaire. Un fichier de contraintes ou des versions compatibles
-améliorerait la reproductibilité.
+**Medium priority.** Scores `0.9827` and `0.9944` come from NanoEdge
+metadata, but no versioned command reproduces an independent model evaluation
+on CSV files under `validation`. A script fixing the evaluated dataset,
+metrics, filters, and model version would make performance an acceptance
+criterion.
 
-``AI_Model/metadata.json`` contient également le nom et l'adresse électronique
-de l'auteur de l'export. Vérifier cette information avant toute publication du
-dépôt ou automatiser sa suppression dans le processus d'export.
+5. Coverage and automation
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Plan d'action recommandé
-------------------------
+**Medium priority.** There is no CI or single test command.
+`validate_motor_limits.py` fixes the constants and generator files, and
+the three interface tests cover serial recovery and CSV writing, but not
+visual thresholds, all parser cases, dashboard arguments, or preprocessing
+of invalid files. Headless builds were run, but their command is not
+versioned and the state machines have no host unit tests.
 
-1. Qualifier progressivement 4500 rpm et 30 A sur le banc instrumenté, puis
-   valider le profil B2 sur sa plage complète avec les moyens d'arrêt actifs.
-2. Diagnostiquer la divergence de ``speed_power_ewma_6600`` sur le log du
-   27 août avant de modifier la tolérance de parité.
-3. Valider explicitement ``d6t_temp_c`` et produire un rapport des lignes
-   rejetées pendant le prétraitement.
-4. Ajouter un test de performance reproductible lié à l'ID de bibliothèque et
-   à un manifeste de dataset.
-5. Fournir une commande unique pour les tests hôte et le build Sphinx strict,
-   les builds firmware Debug/Release, puis l'exécuter en intégration continue.
-6. Figer les versions Python validées et documenter un build firmware
-   reproductible en dehors de l'état local de STM32CubeIDE.
+6. Dependencies and privacy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Critères de recette proposés
+**Medium priority.** `requirements.txt` pins no versions. Updates to
+pandas, NumPy, PySerial, or Sphinx may therefore change behavior or the
+documentation build. A constraints file or compatible version ranges
+would improve reproducibility.
+
+`AI_Model/metadata.json` also contains the export author's name and email
+address. Review this information before publishing the repository, or
+automate its removal during export.
+
+Recommended action plan
+-----------------------
+
+1. Qualify 4500 rpm and 30 A gradually on an instrumented test bench, then
+   validate the 25 A/28 A B2 profile and its 500 electrical Hz/s ramp
+   across the full range with shutdown measures active.
+2. Diagnose the `speed_power_ewma_6600` divergence in the August 27 log
+   before changing parity tolerance.
+3. Validate `d6t_temp_c` explicitly and report rows rejected during
+   preprocessing.
+4. Add a reproducible performance test tied to the library ID and a
+   dataset manifest.
+5. Provide a single command for host tests and strict Sphinx build, plus
+   Debug/Release firmware builds, then run it in continuous integration.
+6. Pin validated Python versions and document a reproducible firmware build
+   independent of local STM32CubeIDE state.
+
+Proposed acceptance criteria
 ----------------------------
 
-Une version peut être considérée comme validée lorsque :
+A version may be considered validated when:
 
-* le build Sphinx strict ne produit aucun avertissement ;
-* le contrôle de l'export NanoEdge et tous les tests Python réussissent ;
-* la parité respecte une tolérance techniquement justifiée sur tous les logs de
-  référence ;
-* les configurations Debug et Release des deux firmwares compilent proprement ;
-* les modes ``model`` et ``emulator`` passent le contrôle série sur cible ;
-* une session thermique indépendante produit des métriques archivées avec l'ID
-  exact du modèle et le manifeste des données.
+* the strict Sphinx build reports no warnings;
+* NanoEdge export validation and all Python tests pass;
+* parity meets a technically justified tolerance on all reference logs;
+* Debug and Release configurations of both firmware projects build cleanly;
+* `model` and `emulator` modes pass the on-board serial contract test;
+* an independent thermal session yields archived metrics with the exact
+  model ID and dataset manifest.

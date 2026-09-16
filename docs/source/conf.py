@@ -11,7 +11,7 @@ project = "PMSM Temperature Prediction STM32"
 copyright = "2026, STMicroelectronics, Melvin Pellegrino"
 author = "Melvin Pellegrino"
 release = "1.0"
-language = "fr"
+language = "en"
 master_doc = "index"
 
 extensions = [

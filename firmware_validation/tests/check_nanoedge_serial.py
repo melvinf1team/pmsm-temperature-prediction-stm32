@@ -1,4 +1,4 @@
-"""Verifie les deux contrats serie du firmware de validation."""
+"""Check both serial contracts of the validation firmware."""
 
 from __future__ import annotations
 
@@ -47,9 +47,9 @@ def parse_line(raw_line: bytes, expected_count: int = 55) -> list[float]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Controle le contrat UART du Serial Emulator NanoEdge."
+        description="Check the NanoEdge Serial Emulator UART contract."
     )
-    parser.add_argument("--port", help="Port serie de la carte, par exemple COM7.")
+    parser.add_argument("--port", help="Board serial port, for example COM7.")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--lines", type=int, default=20)
     parser.add_argument("--timeout", type=float, default=5.0)
@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         choices=sorted(EXPECTED_COUNTS),
         default="model",
-        help="model: D6T/prediction; emulator: vecteur de 55 features.",
+        help="model: D6T/prediction; emulator: vector of 55 features.",
     )
     return parser.parse_args()
 

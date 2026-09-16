@@ -1,27 +1,24 @@
-"""Interface graphique de datalogging PMSM pour prediction thermique STM32.
+"""PMSM data logging GUI for STM32 thermal prediction.
 
-Ce module fournit une application Tkinter permettant de piloter une carte
-STM32 B-G473E-ZEST1S associée à une power board STDES-LVHP01, de lancer une
-séquence moteur simple, de recevoir les mesures UART, d'enregistrer un CSV et
-d'afficher les grandeurs en temps réel. Le CSV final est écrit dans
-``datalogging/logs`` et conserve uniquement les colonnes STM32 utiles au
-prétraitement NanoEdge AI, sans timestamp PC. Les chemins par défaut peuvent
-être surchargés par ligne de commande, fichier YAML ou variables d'environnement
-via ConfigArgParse.
+This module provides a Tkinter application for controlling an STM32
+B-G473E-ZEST1S with an STDES-LVHP01 power board, running a simple motor
+sequence, receiving UART measurements, recording CSV, and displaying live
+values. The final CSV is written to ``datalogging/logs`` and keeps only the STM32
+columns needed for NanoEdge AI preprocessing, without a PC timestamp. Default
+paths can be overridden by command-line options, YAML, or environment
+variables through ConfigArgParse.
 
-Le protocole série attendu côté firmware est volontairement textuel et basé sur
-une ligne par message::
+The expected firmware serial protocol is line-oriented text::
 
     SYNC
     CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>,<datalog_ms>,<ds18b20_ms>
     START
     ACQ_START,<datalog_ms>,<ds18b20_ms>
     STOP
-    ACK,<commande>
-    ERR,<raison>
-    #CSV_HEADER,<colonne_1>,<colonne_2>,...
-    DATA,<valeur_1>,<valeur_2>,...
-
+    ACK,<command>
+    ERR,<reason>
+    #CSV_HEADER,<column_1>,<column_2>,...
+    DATA,<value_1>,<value_2>,...
 """
 
 import csv
@@ -123,21 +120,19 @@ COLORS = {
 
 @dataclass
 class MotorProfile:
-    """Profil de configuration moteur sauvegardable.
+    """Motor configuration profile that can be saved.
 
     Attributes:
-        name: Nom lisible affiché dans la liste des profils.
-        speed_value: Valeur de consigne de vitesse, exprimée selon ``speed_unit``.
-        speed_unit: Unité de ``speed_value``. Les valeurs supportées sont
-            ``"rpm"`` et ``"elec_hz"``.
-        iq_limit_a: Limite de courant ``Iq`` utilisée comme consigne ou garde-fou
-            logiciel.
-        hard_limit_a: Seuil de courant maximal au-delà duquel le firmware peut
-            déclencher un arrêt de sécurité.
-        accel_elec_hz_s: Rampe d'accélération exprimée en Hz électriques par
-            seconde.
-        datalog_ms: Période d'envoi des lignes ``DATA`` par le firmware.
-        ds18b20_ms: Période de rafraîchissement du capteur DS18B20.
+        name: Readable name displayed in the profile list.
+        speed_value: Speed setpoint expressed in ``speed_unit``.
+        speed_unit: Unit of ``speed_value``; supported values are ``"rpm"`` and
+            ``"elec_hz"``.
+        iq_limit_a: ``Iq`` current limit used as a setpoint or software guard.
+        hard_limit_a: Maximum current threshold above which firmware may
+            trigger a safety shutdown.
+        accel_elec_hz_s: Acceleration ramp in electrical hertz per second.
+        datalog_ms: Firmware ``DATA`` transmission period.
+        ds18b20_ms: DS18B20 sensor refresh period.
     """
     name: str
     speed_value: float
@@ -179,7 +174,7 @@ DEFAULT_CONFIG_FILES = [
 
 @dataclass
 class DashboardPaths:
-    """Chemins configurables utilisés par le dashboard Tkinter."""
+    """Configurable paths used by the Tkinter dashboard."""
 
     log_dir: Path
     profile_store_path: Path
@@ -187,7 +182,7 @@ class DashboardPaths:
 
 
 def path_from_arg(value):
-    """Normalise un chemin fourni par CLI, config ou variable d'environnement."""
+    """Normalize a path supplied by CLI, configuration, or environment variable."""
     path = Path(os.path.expandvars(str(value))).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -195,9 +190,9 @@ def path_from_arg(value):
 
 
 def parse_dashboard_args(argv=None):
-    """Lit les chemins configurables du dashboard avec ConfigArgParse."""
+    """Read configurable dashboard paths with ConfigArgParse."""
     parser = configargparse.ArgParser(
-        description="Dashboard PMSM STM32 avec chemins configurables.",
+        description="STM32 PMSM dashboard with configurable paths.",
         default_config_files=[str(path) for path in DEFAULT_CONFIG_FILES],
         config_file_parser_class=configargparse.YAMLConfigFileParser,
     )
@@ -205,28 +200,28 @@ def parse_dashboard_args(argv=None):
         "-c",
         "--config",
         is_config_file=True,
-        help="Fichier de configuration optionnel au format YAML.",
+        help="Optional YAML configuration file.",
     )
     parser.add_argument(
         "--log-dir",
         type=path_from_arg,
         default=DEFAULT_LOG_DIR,
         env_var="PMSM_DATALOG_LOG_DIR",
-        help="Dossier ou proposer les nouveaux CSV de datalogging.",
+        help="Directory suggested for new data logging CSV files.",
     )
     parser.add_argument(
         "--profile-store",
         type=path_from_arg,
         default=DEFAULT_PROFILE_STORE_PATH,
         env_var="PMSM_DATALOG_PROFILE_STORE",
-        help="Fichier JSON des profils moteur personnalises.",
+        help="JSON file containing custom motor profiles.",
     )
     parser.add_argument(
         "--csv-path",
         type=path_from_arg,
         default=None,
         env_var="PMSM_DATALOG_CSV_PATH",
-        help="Chemin CSV initial propose dans le champ de sortie.",
+        help="Initial CSV path suggested in the output field.",
     )
 
     args, _unknown_args = parser.parse_known_args(argv)
@@ -306,29 +301,26 @@ FIELD_ACCENTS = {
 
 
 class MotorDatalogGui(tk.Tk):
-    """Application Tkinter de contrôle moteur et datalogging.
+    """Tkinter application for motor control and data logging.
 
-    La classe centralise l'interface utilisateur, la connexion série, les threads
-    de communication, la création du fichier CSV et le graphique dynamique. Les
-    accès directs à Tkinter restent dans le thread principal ; les threads série ne
-    communiquent avec l'interface qu'au travers de files ``queue.Queue``.
+    This class manages the interface, serial connection, communication threads,
+    CSV creation, and live chart. Direct Tkinter access stays on the main thread;
+    serial threads communicate with the interface through ``queue.Queue`` objects.
 
     Attributes:
-        serial_obj: Objet série PySerial actuellement ouvert, ou ``None``.
-        gui_queue: File utilisée par les threads pour envoyer des événements au
-            thread Tkinter.
-        ack_queue: File dédiée aux réponses ``ACK`` et ``ERR`` du firmware.
-        profiles: Dictionnaire des profils moteur disponibles.
-        plot_fields: Variables actuellement disponibles pour le graphique.
-        live_vars: Variables Tkinter liées aux cartes de valeurs instantanées.
+        serial_obj: Open PySerial object, or ``None``.
+        gui_queue: Queue used by threads to send events to the Tkinter thread.
+        ack_queue: Queue dedicated to firmware ``ACK`` and ``ERR`` responses.
+        profiles: Dictionary of available motor profiles.
+        plot_fields: Variables currently available for plotting.
+        live_vars: Tkinter variables bound to live-value cards.
     """
     def __init__(self, paths=None):
-        """Initialise l'application, l'état interne et l'interface graphique.
+        """Initialize the application, internal state, and graphical interface.
 
-        L'initialisation prépare les variables Tkinter, charge les profils, construit
-        les panneaux de l'interface, détecte les ports COM disponibles et démarre les
-        boucles périodiques de traitement des files et de rafraîchissement du graphe.
-        Les chemins applicatifs sont lus avec ConfigArgParse avant l'affichage.
+        Prepare Tkinter variables, load profiles, build interface panels, discover
+        available COM ports, and start periodic queue-processing and chart-refresh
+        loops. Application paths are read through ConfigArgParse before display.
         """
         super().__init__()
 
@@ -433,18 +425,18 @@ class MotorDatalogGui(tk.Tk):
         self.after(PLOT_REFRESH_MS, self.redraw_plot_periodic)
 
     def default_csv_path(self):
-        """Construit le chemin CSV par défaut pour une nouvelle acquisition.
+        """Build the default CSV path for a new acquisition.
 
         Returns:
-            str: Chemin vers un fichier ``daq_log_YYYYMMDD_HHMMSS.csv`` dans le dossier
-            configuré pour les logs du dashboard.
+            str: Path to a ``daq_log_YYYYMMDD_HHMMSS.csv`` file in the configured
+            dashboard log directory.
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return str(self.paths.log_dir / f"daq_log_{timestamp}.csv")
 
     @staticmethod
     def csv_path_from_text(value):
-        """Convertit et valide un chemin CSV saisi dans l'interface."""
+        """Convert and validate a CSV path entered in the interface."""
         raw = str(value).strip()
         if not raw:
             raise ValueError("Aucun fichier CSV sélectionné.")
@@ -454,7 +446,7 @@ class MotorDatalogGui(tk.Tk):
         return path
 
     def setup_style(self):
-        """Configure un thème sombre dense et lisible pour le banc moteur."""
+        """Configure a compact, readable dark theme for the motor test bench."""
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
@@ -491,7 +483,7 @@ class MotorDatalogGui(tk.Tk):
         style.map("TCheckbutton", background=[("active", COLORS["panel"])], foreground=[("active", COLORS["accent"])])
 
     def build_ui(self):
-        """Construit la structure principale de l'interface graphique sombre."""
+        """Build the main structure of the dark graphical interface."""
         root = tk.Frame(self, bg=COLORS["bg"])
         root.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
 
@@ -525,18 +517,17 @@ class MotorDatalogGui(tk.Tk):
         self.bind_traces()
 
     def build_left_scroll_area(self, parent):
-        """Crée la colonne gauche adaptative avec défilement discret.
+        """Create an adaptive left column with discreet scrolling.
 
-        La zone garde les cartes à leur taille naturelle pour éviter les widgets
-        coupés. Quand la hauteur disponible est insuffisante, la molette permet de
-        faire défiler uniquement cette colonne sans afficher une barre de défilement
-        visible.
+        Cards keep their natural size to avoid clipped widgets. When available height
+        is insufficient, the mouse wheel scrolls only this column without a visible
+        scrollbar.
 
         Args:
-            parent: Conteneur Tkinter dans lequel créer le canvas de gauche.
+            parent: Tkinter container in which to create the left canvas.
 
         Returns:
-            tk.Frame: Frame interne qui reçoit les cartes de configuration.
+            tk.Frame: Inner frame holding the configuration cards.
         """
         self.left_canvas = tk.Canvas(
             parent,
@@ -559,10 +550,10 @@ class MotorDatalogGui(tk.Tk):
         return left
 
     def on_left_content_configure(self, _event=None):
-        """Met à jour la zone défilable quand le contenu gauche change.
+        """Update the scrollable region when left-column content changes.
 
         Args:
-            _event: Événement Tkinter ``<Configure>`` non utilisé directement.
+            _event: Unused Tkinter ``<Configure>`` event.
         """
         if self.left_canvas is None:
             return
@@ -572,10 +563,10 @@ class MotorDatalogGui(tk.Tk):
         self.update_left_scroll_state()
 
     def on_left_canvas_configure(self, event):
-        """Ajuste la largeur du contenu gauche à celle du canvas.
+        """Match left-content width to the canvas.
 
         Args:
-            event: Événement Tkinter contenant la nouvelle largeur disponible.
+            event: Tkinter event containing the new available width.
         """
         if self.left_canvas is None or self.left_window_id is None:
             return
@@ -583,10 +574,9 @@ class MotorDatalogGui(tk.Tk):
         self.update_left_scroll_state()
 
     def update_left_scroll_state(self):
-        """Active ou désactive le défilement de la colonne gauche.
+        """Enable or disable scrolling in the left column.
 
-        Le défilement est activé uniquement lorsque la hauteur réelle du contenu dépasse
-        la hauteur visible du canvas.
+        Scrolling is enabled only when content height exceeds visible canvas height.
         """
         if self.left_canvas is None:
             return
@@ -601,10 +591,10 @@ class MotorDatalogGui(tk.Tk):
             self.left_canvas.yview_moveto(0)
 
     def pointer_is_over_left_panel(self):
-        """Indique si le pointeur de souris est au-dessus du panneau gauche.
+        """Report whether the pointer is over the left panel.
 
         Returns:
-            bool: ``True`` si le pointeur est dans la zone gauche, sinon ``False``.
+            bool: ``True`` over the left region, otherwise ``False``.
         """
         if self.left_canvas is None:
             return False
@@ -617,14 +607,13 @@ class MotorDatalogGui(tk.Tk):
         return left_x <= pointer_x <= left_x + left_w and left_y <= pointer_y <= left_y + left_h
 
     def on_left_mousewheel(self, event):
-        """Gère la molette souris/touchpad pour le panneau gauche.
+        """Handle mouse-wheel or touchpad scrolling for the left panel.
 
         Args:
-            event: Événement de molette Windows/macOS ou Linux.
+            event: Windows/macOS or Linux wheel event.
 
         Returns:
-            str | None: ``"break"`` quand l'événement est consommé par la colonne
-            gauche, sinon ``None``.
+            str | None: ``"break"`` if consumed by the left column, otherwise ``None``.
         """
         if self.left_canvas is None or not self.left_scroll_enabled:
             return None
@@ -642,7 +631,7 @@ class MotorDatalogGui(tk.Tk):
         return "break"
 
     def build_header(self, parent):
-        """Construit l'en-tête de commande du banc moteur."""
+        """Build the motor test bench command header."""
         header = tk.Frame(parent, bg=COLORS["panel_soft"], highlightbackground=COLORS["border"], highlightthickness=1)
         header.pack(fill=tk.X)
         header.grid_columnconfigure(0, weight=1)
@@ -680,7 +669,7 @@ class MotorDatalogGui(tk.Tk):
         self.stop_button.grid(row=0, column=1, sticky="nsew")
 
     def action_button(self, parent, text, command, accent, base_bg):
-        """Crée un gros bouton de commande moteur."""
+        """Create a large motor-control button."""
         return tk.Button(
             parent,
             text=text,
@@ -700,7 +689,7 @@ class MotorDatalogGui(tk.Tk):
         )
 
     def small_button(self, parent, text, command, accent=None):
-        """Crée un bouton compact pour les cartes de configuration."""
+        """Create a compact button for configuration cards."""
         return tk.Button(
             parent,
             text=text,
@@ -718,7 +707,7 @@ class MotorDatalogGui(tk.Tk):
         )
 
     def card(self, parent, title=None, padx=16, pady=14, accent=None):
-        """Crée une carte sombre sans barre colorée supérieure."""
+        """Create a dark card without a colored top bar."""
         outer = tk.Frame(parent, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
         if title:
             title_row = tk.Frame(outer, bg=COLORS["panel"])
@@ -731,32 +720,32 @@ class MotorDatalogGui(tk.Tk):
         return outer, content
 
     def form_label(self, parent, text, row, col, padx=(0, 8)):
-        """Place un label compact de formulaire."""
+        """Place a compact form label."""
         ttk.Label(parent, text=text, style="CardMuted.TLabel").grid(row=row, column=col, sticky="w", padx=padx, pady=(0, 4))
 
     def form_row(self, parent, label, widget, row, col=0):
-        """Ajoute une ligne de formulaire label + widget en grille.
+        """Add a label-and-widget form row to a grid.
 
         Args:
-            parent: Conteneur cible.
-            label: Texte du label.
-            widget: Widget de saisie à placer sous le label.
-            row: Ligne de départ dans la grille.
-            col: Colonne de départ dans la grille.
+            parent: Target container.
+            label: Label text.
+            widget: Input widget placed below the label.
+            row: Starting grid row.
+            col: Starting grid column.
         """
         ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=col, sticky="w", pady=(0, 2))
         widget.grid(row=row + 1, column=col, sticky="ew", pady=(0, 6), padx=(0, 8))
 
     def compact_form_row(self, parent, left_label, left_widget, right_label, right_widget, row):
-        """Ajoute deux champs de formulaire compacts sur une même ligne.
+        """Add two compact form fields on one row.
 
         Args:
-            parent: Conteneur cible.
-            left_label: Label du champ gauche.
-            left_widget: Widget du champ gauche.
-            right_label: Label du champ droit.
-            right_widget: Widget du champ droit.
-            row: Ligne de placement dans la grille.
+            parent: Target container.
+            left_label: Label for the left field.
+            left_widget: Widget for the left field.
+            right_label: Label for the right field.
+            right_widget: Widget for the right field.
+            row: Grid row.
         """
         ttk.Label(parent, text=left_label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 6), pady=(0, 6))
         left_widget.grid(row=row, column=1, sticky="ew", padx=(0, 12), pady=(0, 6))
@@ -764,7 +753,7 @@ class MotorDatalogGui(tk.Tk):
         right_widget.grid(row=row, column=3, sticky="ew", pady=(0, 6))
 
     def build_left_panel(self, parent):
-        """Construit le rail gauche de configuration."""
+        """Build the left configuration rail."""
         parent.grid_columnconfigure(0, weight=1)
         for row in range(4):
             parent.grid_rowconfigure(row, weight=0)
@@ -872,7 +861,7 @@ class MotorDatalogGui(tk.Tk):
 
 
     def build_live_cards(self, parent):
-        """Construit les cartes de valeurs instantanées."""
+        """Build the live-value cards."""
         self.live_frame = tk.Frame(parent, bg=COLORS["bg"])
         self.live_frame.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         for i in range(4):
@@ -883,7 +872,7 @@ class MotorDatalogGui(tk.Tk):
             self.add_live_card(key)
 
     def add_live_card(self, key):
-        """Ajoute dynamiquement une carte de valeur instantanée."""
+        """Dynamically add a live-value card."""
         if self.live_frame is None or key in self.live_card_frames:
             return
 
@@ -914,7 +903,7 @@ class MotorDatalogGui(tk.Tk):
         ttk.Label(value_line, text=f" {unit}", style="Unit.TLabel").pack(side=tk.LEFT, pady=(9, 0))
 
     def build_plot_panel(self, parent):
-        """Construit le panneau du graphique dynamique."""
+        """Build the live-chart panel."""
         plot_card, plot_content = self.card(parent, "Graphique dynamique", padx=14, pady=12, accent=COLORS["accent"])
         plot_card.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
         plot_card.grid_rowconfigure(0, weight=1)
@@ -963,17 +952,17 @@ class MotorDatalogGui(tk.Tk):
             ).grid(row=0, column=0, sticky="nsew")
 
     def register_csv_fields_for_live(self, columns):
-        """Ajoute aux cartes live les colonnes CSV connues découvertes à l'exécution.
+        """Add known CSV columns discovered at runtime to the live cards.
 
         Args:
-            columns: Liste des colonnes reçues depuis la ligne ``#CSV_HEADER``.
+            columns: Columns received from the ``#CSV_HEADER`` line.
         """
         for key in columns:
             if key in KNOWN_FIELDS and key not in self.live_card_frames:
                 self.add_live_card(key)
 
     def add_plot_checkbox(self, key):
-        """Ajoute une case à cocher pour afficher une variable dans le graphe."""
+        """Add a checkbox to show a variable in the chart."""
         if self.plot_checks_frame is None or key in self.plot_checkbuttons:
             return
         label = self.plot_fields.get(key, key)
@@ -987,10 +976,10 @@ class MotorDatalogGui(tk.Tk):
         self.plot_checkbuttons[key] = cb
 
     def register_csv_fields_for_plot(self, columns):
-        """Enregistre de nouvelles colonnes CSV comme variables traçables.
+        """Register new CSV columns as plottable variables.
 
         Args:
-            columns: Liste des colonnes reçues depuis la ligne ``#CSV_HEADER``.
+            columns: Columns received from the ``#CSV_HEADER`` line.
         """
         added = []
         for key in columns:
@@ -1006,7 +995,7 @@ class MotorDatalogGui(tk.Tk):
             self.log("Variables CSV ajoutées au graphe : " + ", ".join(added))
 
     def build_log_panel(self, parent):
-        """Construit le journal texte TX/RX."""
+        """Build the TX/RX text log."""
         log_card, log_content = self.card(parent, "Journal UART", padx=14, pady=12, accent=COLORS["rose"])
         log_card.grid(row=2, column=0, sticky="nsew")
         log_card.grid_rowconfigure(0, weight=1)
@@ -1033,10 +1022,10 @@ class MotorDatalogGui(tk.Tk):
         self.log_text.configure(yscrollcommand=scroll.set)
 
     def bind_traces(self):
-        """Relie les variables Tkinter aux callbacks de validation.
+        """Connect Tkinter variables to validation callbacks.
 
-        Les traces maintiennent la cohérence rpm/Hz électriques et revalident la
-        configuration dès qu'un champ utilisateur est modifié.
+        Traces keep rpm and electrical Hz consistent and revalidate settings whenever
+        a user field changes.
         """
         self.speed_rpm_var.trace_add("write", self.on_speed_rpm_changed)
         self.speed_hz_var.trace_add("write", self.on_speed_hz_changed)
@@ -1056,14 +1045,13 @@ class MotorDatalogGui(tk.Tk):
             var.trace_add("write", lambda *_args: self.validate_form())
 
     def load_profiles(self):
-        """Charge les profils moteur intégrés et personnalisés.
+        """Load built-in and custom motor profiles.
 
-        Le fichier JSON configuré via ConfigArgParse est lu s'il existe. Les profils
-        invalides sont ignorés et les erreurs sont stockées dans ``profile_load_errors``
-        pour affichage dans le journal.
+        Read the JSON file configured through ConfigArgParse when present. Ignore
+        invalid profiles and save errors in ``profile_load_errors`` for the log.
 
         Returns:
-            dict[str, MotorProfile]: Dictionnaire des profils disponibles.
+            dict[str, MotorProfile]: Available profiles.
         """
         profiles = dict(PROFILES)
         profile_store_path = self.paths.profile_store_path
@@ -1111,11 +1099,11 @@ class MotorDatalogGui(tk.Tk):
         return profiles
 
     def get_initial_profile_name(self):
-        """Sélectionne le profil à afficher au démarrage.
+        """Select the profile shown at startup.
 
         Returns:
-            str: Premier profil personnalisé disponible, ou ``"Personnalisé"`` si aucun
-            profil externe n'a été chargé.
+        str: First available custom profile, or ``"Personnalisé"`` ("Custom")
+        if none was loaded.
         """
         for name in self.profiles:
             if name != "Personnalisé":
@@ -1123,10 +1111,10 @@ class MotorDatalogGui(tk.Tk):
         return "Personnalisé"
 
     def save_profiles_to_disk(self):
-        """Sauvegarde les profils personnalisés dans le fichier JSON configuré.
+        """Save custom profiles to the configured JSON file.
 
-        Les profils intégrés ne sont pas exportés afin de conserver le fichier JSON
-        centré sur les profils créés par l'utilisateur.
+        Do not export built-in profiles so the JSON file contains user-created
+        profiles only.
         """
         custom_profiles = []
         for name, profile in self.profiles.items():
@@ -1143,14 +1131,14 @@ class MotorDatalogGui(tk.Tk):
 
     @staticmethod
     def format_float(value):
-        """Formate un nombre flottant pour affichage dans un champ de saisie.
+        """Format a float for an input field.
 
         Args:
-            value: Valeur convertible en ``float``.
+            value: Value convertible to ``float``.
 
         Returns:
-            str: Nombre avec trois décimales maximum, sans zéros inutiles. Retourne une
-            chaîne vide si la conversion échoue.
+            str: Up to three decimal places without trailing zeroes, or an empty
+            string if conversion fails.
         """
         try:
             value = float(value)
@@ -1161,29 +1149,29 @@ class MotorDatalogGui(tk.Tk):
 
     @staticmethod
     def default_live_value(key):
-        """Retourne la valeur affichée tant qu'aucune mesure n'est reçue."""
+        """Return the placeholder shown until a reading arrives."""
         return "—"
 
     @staticmethod
     def csv_value_for_column(row, column):
-        """Retourne la valeur CSV en remplissant les mesures IR absentes par NaN."""
+        """Return a CSV value, using NaN for missing infrared readings."""
         value = row.get(column, "")
         if column in D6T_TEMPERATURE_COLUMNS and str(value).strip() == "":
             return "NaN"
         return value
 
     def reset_live_values(self):
-        """Réinitialise les cartes live avant une nouvelle acquisition."""
+        """Reset live cards before a new acquisition."""
         for key, var in self.live_vars.items():
             var.set(self.default_live_value(key))
         self.update_iq_warning_color()
 
     def get_pole_pairs_safe(self):
-        """Lit le nombre de paires de pôles avec une valeur de secours.
+        """Read the pole-pair count with a fallback.
 
         Returns:
-            int: Nombre de paires de pôles valide, ou ``POLE_PAIRS_DEFAULT`` en cas de
-            champ vide/invalide.
+            int: Valid pole-pair count, or ``POLE_PAIRS_DEFAULT`` for an empty or
+            invalid field.
         """
         try:
             pole_pairs = int(self.pole_pairs_var.get().strip())
@@ -1194,45 +1182,44 @@ class MotorDatalogGui(tk.Tk):
         return POLE_PAIRS_DEFAULT
 
     def rpm_to_elec_hz(self, rpm):
-        """Convertit une vitesse mécanique en fréquence électrique.
+        """Convert mechanical speed to electrical frequency.
 
         Args:
-            rpm: Vitesse mécanique en tours par minute.
+            rpm: Mechanical speed in revolutions per minute.
 
         Returns:
-            float: Fréquence électrique en hertz.
+            float: Electrical frequency in hertz.
         """
         return (float(rpm) * float(self.get_pole_pairs_safe())) / 60.0
 
     def elec_hz_to_rpm(self, elec_hz):
-        """Convertit une fréquence électrique en vitesse mécanique.
+        """Convert electrical frequency to mechanical speed.
 
         Args:
-            elec_hz: Fréquence électrique en hertz.
+            elec_hz: Electrical frequency in hertz.
 
         Returns:
-            float: Vitesse mécanique en tours par minute.
+            float: Mechanical speed in rpm.
         """
         return (float(elec_hz) * 60.0) / float(self.get_pole_pairs_safe())
 
     def profile_to_rpm(self, profile):
-        """Convertit la vitesse d'un profil en rpm mécaniques.
+        """Convert a profile speed to mechanical rpm.
 
         Args:
-            profile: Profil moteur à interpréter.
+            profile: Motor profile to interpret.
 
         Returns:
-            float: Vitesse mécanique équivalente en rpm.
+            float: Equivalent mechanical speed in rpm.
         """
         if profile.speed_unit == "elec_hz":
             return self.elec_hz_to_rpm(profile.speed_value)
         return float(profile.speed_value)
 
     def update_save_profile_button(self):
-        """Affiche ou masque le bouton d'enregistrement de profil.
+        """Show or hide the profile-save button.
 
-        Le bouton est visible uniquement lorsque le profil courant est
-        ``"Personnalisé"``.
+        The button is visible only for the ``"Personnalisé"`` ("Custom") profile.
         """
         if not hasattr(self, "save_profile_button"):
             return
@@ -1243,11 +1230,11 @@ class MotorDatalogGui(tk.Tk):
             self.save_profile_button.grid_remove()
 
     def is_idle_acquisition_mode(self):
-        """Indique si la session demandée doit uniquement collecter à l'arrêt."""
+        """Return whether the requested session only acquires data with the motor stopped."""
         return self.acquisition_mode_var.get() == ACQUISITION_MODE_IDLE
 
     def update_acquisition_mode_ui(self):
-        """Adapte les champs et actions au mode moteur ou collecte seule."""
+        """Adapt fields and actions to motor or acquisition-only mode."""
         if not hasattr(self, "acquisition_mode_combo"):
             return
 
@@ -1270,15 +1257,15 @@ class MotorDatalogGui(tk.Tk):
             self.start_button.configure(text="LANCER")
 
     def on_acquisition_mode_changed(self, *_args):
-        """Réagit au choix entre pilotage moteur et collecte à l'arrêt."""
+        """Handle switching between motor control and stopped-motor acquisition."""
         self.update_acquisition_mode_ui()
         self.validate_form()
 
     def switch_to_custom_due_to_edit(self):
-        """Bascule automatiquement sur le profil ``Personnalisé`` après édition.
+        """Switch to the ``"Personnalisé"`` ("Custom") profile after editing.
 
-        La bascule est ignorée pendant l'application d'un profil ou la mise à jour
-        automatique rpm/Hz afin d'éviter les changements de profil parasites.
+        Skip this switch while applying a profile or automatically updating rpm/Hz,
+        to avoid accidental profile changes.
         """
         if not self._user_edit_ready or self._applying_profile or self._updating_speed_link:
             return
@@ -1287,20 +1274,20 @@ class MotorDatalogGui(tk.Tk):
             self.update_save_profile_button()
 
     def on_user_config_changed(self, *_args):
-        """Callback déclenché quand un champ de configuration est modifié.
+        """Handle a changed configuration field.
 
         Args:
-            *_args: Arguments fournis par ``trace_add`` et non utilisés.
+            *_args: Unused arguments supplied by ``trace_add``.
         """
         if not self.is_idle_acquisition_mode():
             self.switch_to_custom_due_to_edit()
         self.validate_form()
 
     def on_speed_rpm_changed(self, *_args):
-        """Synchronise le champ Hz électriques après modification des rpm.
+        """Update electrical Hz after an rpm change.
 
         Args:
-            *_args: Arguments fournis par ``trace_add`` et non utilisés.
+            *_args: Unused arguments supplied by ``trace_add``.
         """
         if not self._user_edit_ready or self._applying_profile or self._updating_speed_link:
             self.validate_form()
@@ -1319,10 +1306,10 @@ class MotorDatalogGui(tk.Tk):
         self.validate_form()
 
     def on_speed_hz_changed(self, *_args):
-        """Synchronise le champ rpm après modification des Hz électriques.
+        """Update rpm after an electrical Hz change.
 
         Args:
-            *_args: Arguments fournis par ``trace_add`` et non utilisés.
+            *_args: Unused arguments supplied by ``trace_add``.
         """
         if not self._user_edit_ready or self._applying_profile or self._updating_speed_link:
             self.validate_form()
@@ -1341,10 +1328,10 @@ class MotorDatalogGui(tk.Tk):
         self.validate_form()
 
     def on_pole_pairs_changed(self, *_args):
-        """Recalcule les Hz électriques lorsque les paires de pôles changent.
+        """Recalculate electrical Hz when the pole-pair count changes.
 
         Args:
-            *_args: Arguments fournis par ``trace_add`` et non utilisés.
+            *_args: Unused arguments supplied by ``trace_add``.
         """
         if not self._user_edit_ready or self._applying_profile or self._updating_speed_link:
             self.validate_form()
@@ -1363,10 +1350,10 @@ class MotorDatalogGui(tk.Tk):
         self.validate_form()
 
     def save_current_profile(self):
-        """Crée ou remplace un profil personnalisé depuis les champs actuels.
+        """Create or replace a custom profile from current fields.
 
-        La méthode valide la configuration, demande un nom, vérifie les collisions puis
-        écrit le profil dans ``motor_profiles.json``.
+        Validate settings, request a name, check for collisions, then write the
+        profile to ``motor_profiles.json``.
         """
         if not self.validate_form():
             messagebox.showerror("Profil invalide", self.status_detail_var.get())
@@ -1429,11 +1416,11 @@ class MotorDatalogGui(tk.Tk):
             messagebox.showerror("Erreur sauvegarde", f"Impossible d'enregistrer le profil :\n{exc}")
 
     def set_status(self, state, detail=""):
-        """Met à jour le statut textuel et la couleur du témoin.
+        """Update status text and indicator color.
 
         Args:
-            state: Libellé principal du statut.
-            detail: Message secondaire affiché sous le statut.
+            state: Primary status label.
+            detail: Secondary message shown below the status.
         """
         self.status_var.set(state)
         self.status_detail_var.set(detail)
@@ -1453,10 +1440,10 @@ class MotorDatalogGui(tk.Tk):
         self.status_dot.itemconfig(self.status_dot_id, fill=color)
 
     def log(self, msg):
-        """Ajoute une ligne horodatée dans le journal de l'interface.
+        """Add a timestamped line to the interface log.
 
         Args:
-            msg: Message à afficher.
+            msg: Message to display.
         """
         stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         self.log_text.insert(tk.END, f"[{stamp}] {msg}\n")
@@ -1469,23 +1456,22 @@ class MotorDatalogGui(tk.Tk):
         self.log_text.see(tk.END)
 
     def format_port_display(self, port_info):
-        """Formate un port série pour l'affichage dans la combobox.
+        """Format a serial port for display in the combobox.
 
         Args:
-            port_info: Objet retourné par ``serial.tools.list_ports.comports``.
+            port_info: Object returned by ``serial.tools.list_ports.comports``.
 
         Returns:
-            str: Texte du type ``COMx — description``.
+            str: Text such as ``COMx — description``.
         """
         description = str(port_info.description or "Périphérique série")
         return f"{port_info.device} — {description}"
 
     def get_selected_port_device(self):
-        """Récupère le nom système du port COM sélectionné.
+        """Get the system name of the selected COM port.
 
         Returns:
-            str: Nom du port utilisable par PySerial, par exemple ``COM5`` ou
-            ``/dev/ttyACM0``.
+            str: Port name usable by PySerial, such as ``COM5`` or ``/dev/ttyACM0``.
         """
         display = self.port_var.get().strip()
         if display in self.port_display_to_device:
@@ -1495,18 +1481,18 @@ class MotorDatalogGui(tk.Tk):
         return display
 
     def on_port_selected(self, _event=None):
-        """Callback appelé après sélection d'un port COM.
+        """Handle COM port selection.
 
         Args:
-            _event: Événement Tkinter de sélection non utilisé directement.
+            _event: Unused Tkinter selection event.
         """
         self.validate_form()
 
     def refresh_ports(self):
-        """Rafraîchit la liste des ports série disponibles.
+        """Refresh the list of available serial ports.
 
-        Les ports STMicroelectronics/ST-LINK sont priorisés automatiquement lorsque
-        l'identifiant matériel ou la description le permet.
+        Prioritize STMicroelectronics/ST-LINK ports when their hardware ID or
+        description identifies them.
         """
         ports = list(serial.tools.list_ports.comports())
 
@@ -1540,7 +1526,7 @@ class MotorDatalogGui(tk.Tk):
         self.validate_form()
 
     def choose_csv_file(self):
-        """Ouvre une boîte de dialogue pour choisir le fichier CSV de sortie."""
+        """Open a dialog to choose the output CSV file."""
         try:
             initial = self.csv_path_from_text(self.csv_path_var.get())
         except ValueError:
@@ -1561,10 +1547,10 @@ class MotorDatalogGui(tk.Tk):
             self.csv_path_var.set(filename)
 
     def on_profile_changed(self, _event=None):
-        """Applique le profil sélectionné dans la combobox.
+        """Apply the profile selected in the combobox.
 
         Args:
-            _event: Événement Tkinter de sélection non utilisé directement.
+            _event: Unused Tkinter selection event.
         """
         profile_name = self.profile_var.get()
         profile = self.profiles.get(profile_name)
@@ -1572,10 +1558,10 @@ class MotorDatalogGui(tk.Tk):
             self.apply_profile(profile)
 
     def apply_profile(self, profile):
-        """Copie les paramètres d'un profil dans les champs de l'interface.
+        """Copy profile settings into the interface fields.
 
         Args:
-            profile: Profil moteur à appliquer.
+            profile: Motor profile to apply.
         """
         self._applying_profile = True
         try:
@@ -1596,14 +1582,14 @@ class MotorDatalogGui(tk.Tk):
         self.validate_form()
 
     def parse_config(self):
-        """Lit et valide la configuration courante de l'interface.
+        """Read and validate current interface settings.
 
         Returns:
-            dict[str, object]: Configuration prête à être utilisée pour l'ouverture du
-            port série et l'envoi de ``CFG`` ou ``ACQ_START`` selon le mode.
+            dict[str, object]: Configuration ready to open the serial port and send
+            ``CFG`` or ``ACQ_START`` for the selected mode.
 
         Raises:
-            ValueError: Si une valeur obligatoire est absente ou incohérente.
+            ValueError: If a required value is missing or inconsistent.
         """
         acquisition_mode = self.acquisition_mode_var.get()
         if acquisition_mode not in ACQUISITION_MODES:
@@ -1677,12 +1663,11 @@ class MotorDatalogGui(tk.Tk):
         return config
 
     def set_field_invalid(self, key, invalid=True):
-        """Applique le style invalide à un champ de saisie.
+        """Apply invalid styling to an input field.
 
         Args:
-            key: Identifiant interne du widget dans ``entry_widgets``.
-            invalid: ``True`` pour afficher le champ en erreur, ``False`` pour revenir
-                au style normal.
+            key: Widget identifier in ``entry_widgets``.
+            invalid: ``True`` to show an error, ``False`` to restore normal styling.
         """
         widget = self.entry_widgets.get(key)
         if widget is not None:
@@ -1692,12 +1677,11 @@ class MotorDatalogGui(tk.Tk):
                 pass
 
     def set_combo_invalid(self, key, invalid=True):
-        """Applique le style invalide à une combobox.
+        """Apply invalid styling to a combobox.
 
         Args:
-            key: Identifiant interne du widget dans ``combo_widgets``.
-            invalid: ``True`` pour afficher la combobox en erreur, ``False`` pour
-                revenir au style normal.
+            key: Widget identifier in ``combo_widgets``.
+            invalid: ``True`` to show an error, ``False`` to restore normal styling.
         """
         widget = self.combo_widgets.get(key)
         if widget is not None:
@@ -1707,37 +1691,36 @@ class MotorDatalogGui(tk.Tk):
                 pass
 
     def reset_field_styles(self):
-        """Réinitialise les styles visuels de tous les champs validables."""
+        """Reset visual styling of all validated fields."""
         for key in list(self.entry_widgets.keys()):
             self.set_field_invalid(key, False)
         for key in list(self.combo_widgets.keys()):
             self.set_combo_invalid(key, False)
 
     def validate_form(self):
-        """Valide tous les champs de configuration utilisateur.
+        """Validate all user configuration fields.
 
-        La méthode met à jour les styles visuels des champs, le message de warning, le
-        bouton de lancement et le statut global.
+        Update field styles, warning message, start button, and overall status.
 
         Returns:
-            bool: ``True`` si la configuration est exploitable, sinon ``False``.
+            bool: ``True`` if configuration is usable, otherwise ``False``.
         """
         self.reset_field_styles()
         warnings = []
         errors = []
 
         def parse_float(key, var, label, min_value=None, allow_zero=False):
-            """Convertit et valide un champ flottant.
+            """Convert and validate a float field.
 
             Args:
-                key: Identifiant interne du widget à marquer en cas d'erreur.
-                var: Variable Tkinter contenant la valeur texte.
-                label: Nom lisible utilisé dans les messages d'erreur.
-                min_value: Valeur minimale optionnelle.
-                allow_zero: Autorise une valeur égale à ``min_value`` si ``True``.
+                key: Widget identifier to flag on error.
+                var: Tkinter variable holding the text value.
+                label: Readable name used in error messages.
+                min_value: Optional minimum value.
+                allow_zero: Allow a value equal to ``min_value`` when ``True``.
 
             Returns:
-                float | None: Valeur convertie, ou ``None`` si elle est invalide.
+                float | None: Converted value, or ``None`` if invalid.
             """
             raw = var.get().strip()
             if raw == "":
@@ -1763,17 +1746,17 @@ class MotorDatalogGui(tk.Tk):
             return value
 
         def parse_int(key, var, label, min_value=None, allow_zero=False):
-            """Convertit et valide un champ entier.
+            """Convert and validate an integer field.
 
             Args:
-                key: Identifiant interne du widget à marquer en cas d'erreur.
-                var: Variable Tkinter contenant la valeur texte.
-                label: Nom lisible utilisé dans les messages d'erreur.
-                min_value: Valeur minimale optionnelle.
-                allow_zero: Autorise une valeur égale à ``min_value`` si ``True``.
+                key: Widget identifier to flag on error.
+                var: Tkinter variable holding the text value.
+                label: Readable name used in error messages.
+                min_value: Optional minimum value.
+                allow_zero: Allow a value equal to ``min_value`` when ``True``.
 
             Returns:
-                int | None: Valeur convertie, ou ``None`` si elle est invalide.
+                int | None: Converted value, or ``None`` if invalid.
             """
             raw = var.get().strip()
             if raw == "":
@@ -1895,11 +1878,9 @@ class MotorDatalogGui(tk.Tk):
         return is_valid
 
     def start_run(self):
-        """Démarre une session moteur+collecte ou une collecte à l'arrêt.
+        """Start a motor and acquisition session, or acquire with the motor stopped.
 
-        La méthode valide la configuration, prépare le fichier CSV, ouvre le port série,
-        lance le thread de lecture puis délègue la séquence série adaptée au mode à un
-        thread de lancement.
+        Validate settings, prepare the CSV, open serial, start the reader thread, and run the mode-specific startup sequence in a worker thread.
         """
         if self.is_running or self.is_launching:
             return
@@ -1962,10 +1943,10 @@ class MotorDatalogGui(tk.Tk):
         self.launch_thread.start()
 
     def launch_sequence_thread(self, cfg):
-        """Exécute la séquence UART de démarrage dans un thread secondaire.
+        """Run the UART startup sequence in a worker thread.
 
         Args:
-            cfg: Configuration validée retournée par ``parse_config``.
+            cfg: Validated configuration returned by ``parse_config``.
         """
         try:
             idle_mode = cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE
@@ -2013,7 +1994,7 @@ class MotorDatalogGui(tk.Tk):
             self.gui_queue.put(("launch_failed", str(exc)))
 
     def stop_run(self):
-        """Arrête le moteur si nécessaire, puis termine la collecte avec ``STOP``."""
+        """Stop the motor if needed, then end acquisition with ``STOP``."""
         if self.is_stopping:
             return
         if self.serial_obj is None:
@@ -2028,7 +2009,7 @@ class MotorDatalogGui(tk.Tk):
         self.stop_thread.start()
 
     def stop_sequence_thread(self):
-        """Envoie ``STOP`` et ferme les ressources après réception ou timeout ACK."""
+        """Send ``STOP`` and close resources after an ACK or timeout."""
         try:
             self.clear_ack_queue()
             self.send_command("STOP\n", char_delay=0.002)
@@ -2041,7 +2022,7 @@ class MotorDatalogGui(tk.Tk):
         self.gui_queue.put(("close_resources", None))
 
     def close_resources(self):
-        """Ferme proprement le CSV, le port série et remet l'état GUI au repos."""
+        """Close the CSV and serial port cleanly and return the GUI to idle."""
         self.stop_event.set()
 
         if self.csv_file:
@@ -2079,15 +2060,15 @@ class MotorDatalogGui(tk.Tk):
             self.destroy()
 
     def send_command(self, command, char_delay=0.0):
-        """Envoie une commande ASCII au firmware STM32.
+        """Send an ASCII command to the STM32 firmware.
 
         Args:
-            command: Commande complète à envoyer, généralement terminée par un saut de ligne.
-            char_delay: Délai optionnel entre deux caractères pour les firmwares qui
-                tolèrent mal les rafales UART.
+            command: Full command to send, usually ending with a newline.
+            char_delay: Optional delay between characters for firmware that handles
+                UART bursts poorly.
 
         Raises:
-            RuntimeError: Si aucun port série ouvert n'est disponible.
+            RuntimeError: If no open serial port is available.
         """
         if self.serial_obj is None or not self.serial_obj.is_open:
             raise RuntimeError("Port série non ouvert.")
@@ -2106,7 +2087,7 @@ class MotorDatalogGui(tk.Tk):
                 self.serial_obj.flush()
 
     def clear_ack_queue(self):
-        """Vide toutes les réponses ACK/ERR encore en attente."""
+        """Clear all pending ACK/ERR responses."""
         try:
             while True:
                 self.ack_queue.get_nowait()
@@ -2114,21 +2095,19 @@ class MotorDatalogGui(tk.Tk):
             pass
 
     def wait_for_ack(self, name, timeout=5.0, ignored_errors=None):
-        """Attend une réponse ``ACK,<name>`` ou une erreur firmware.
+        """Wait for an ``ACK,<name>`` response or a firmware error.
 
         Args:
-            name: Nom de commande attendu après ``ACK,``.
-            timeout: Durée maximale d'attente en secondes.
-            ignored_errors: Ensemble optionnel d'erreurs ``ERR,...`` à considérer comme
-                non bloquantes.
+            name: Command name expected after ``ACK,``.
+            timeout: Maximum wait time in seconds.
+            ignored_errors: Optional set of nonblocking ``ERR,...`` responses.
 
         Returns:
-            bool: ``True`` si l'ACK attendu est reçu, ``False`` si une erreur ignorée
-            est reçue.
+            bool: ``True`` for the expected ACK; ``False`` for an ignored error.
 
         Raises:
-            TimeoutError: Si aucune réponse exploitable n'arrive avant le timeout.
-            RuntimeError: Si le firmware renvoie une erreur non ignorée.
+            TimeoutError: If no usable response arrives before the timeout.
+            RuntimeError: If firmware returns an error that is not ignored.
         """
         if ignored_errors is None:
             ignored_errors = set()
@@ -2150,11 +2129,10 @@ class MotorDatalogGui(tk.Tk):
                 raise RuntimeError(line)
 
     def serial_reader_loop(self):
-        """Lit le port série en continu depuis un thread secondaire.
+        """Read the serial port continuously in a worker thread.
 
-        Les lignes complètes sont envoyées au thread GUI via ``gui_queue``. Les réponses
-        ``ACK`` et ``ERR`` sont également copiées dans ``ack_queue`` pour les threads de
-        séquence.
+        Complete lines go to the GUI thread through ``gui_queue``. ``ACK`` and ``ERR``
+        responses are also copied to ``ack_queue`` for sequence threads.
         """
         buffer = b""
         while not self.stop_event.is_set():
@@ -2180,10 +2158,9 @@ class MotorDatalogGui(tk.Tk):
         self.gui_queue.put(("reader_stopped", None))
 
     def process_gui_queue(self):
-        """Traite les événements produits par les threads secondaires.
+        """Handle events produced by worker threads.
 
-        Cette méthode est appelée périodiquement par ``after`` afin que toutes les mises
-        à jour Tkinter restent exécutées dans le thread principal.
+        Called periodically through ``after`` so all Tkinter updates stay on the main thread.
         """
         try:
             while True:
@@ -2223,25 +2200,25 @@ class MotorDatalogGui(tk.Tk):
 
     @staticmethod
     def clean_fields(fields):
-        """Nettoie les espaces autour d'une liste de champs CSV/UART.
+        """Strip whitespace around a list of CSV/UART fields.
 
         Args:
-            fields: Champs texte à nettoyer.
+            fields: Text fields to clean.
 
         Returns:
-            list[str]: Champs sans espaces de début/fin.
+            list[str]: Fields without leading or trailing whitespace.
         """
         return [x.strip() for x in fields]
 
     @staticmethod
     def safe_float(value):
-        """Convertit une valeur en flottant fini ou ``NaN``.
+        """Convert a value to a finite float or ``NaN``.
 
         Args:
-            value: Valeur texte ou numérique à convertir.
+            value: Text or numeric value to convert.
 
         Returns:
-            float: Valeur convertie si elle est finie, sinon ``math.nan``.
+            float: Converted value if finite, otherwise ``math.nan``.
         """
         try:
             v = float(str(value).strip().replace(",", "."))
@@ -2252,10 +2229,10 @@ class MotorDatalogGui(tk.Tk):
         return math.nan
 
     def open_csv_with_header(self, columns):
-        """Ouvre le fichier CSV après réception de l'en-tête firmware.
+        """Open the CSV after receiving the firmware header.
 
         Args:
-            columns: Colonnes annoncées par la ligne ``#CSV_HEADER``.
+            columns: Columns announced by the ``#CSV_HEADER`` line.
         """
         self.csv_file = open(self.csv_path, mode="w", newline="", encoding="utf-8")
         self.csv_writer = csv.writer(self.csv_file, delimiter=";")
@@ -2281,11 +2258,10 @@ class MotorDatalogGui(tk.Tk):
         self.log(f"CSV créé : {self.csv_path}")
 
     def flush_csv(self, force=False):
-        """Force ou planifie l'écriture disque du CSV.
+        """Flush the CSV now or on its schedule.
 
         Args:
-            force: ``True`` pour forcer immédiatement le ``flush`` même si le seuil de
-                lignes ou de temps n'est pas atteint.
+            force: If ``True``, flush immediately even before row or time thresholds.
         """
         if self.csv_file is None:
             return
@@ -2302,14 +2278,13 @@ class MotorDatalogGui(tk.Tk):
             self.csv_last_flush_s = now
 
     def handle_serial_line(self, line):
-        """Analyse une ligne reçue depuis l'UART.
+        """Process a line received over UART.
 
-        La méthode route les headers CSV, les lignes ``DATA``, les ACK/ERR et les
-        messages de debug. Les données valides sont enregistrées en CSV puis propagées
-        vers les cartes live et le graphique.
+        Route CSV headers, ``DATA`` rows, ACK/ERR responses, and debug messages. Record
+        valid data in the CSV, then forward it to live cards and the chart.
 
         Args:
-            line: Ligne UART décodée et nettoyée.
+            line: Decoded and stripped UART line.
         """
         self.log(f"RX ← {line}")
 
@@ -2355,14 +2330,13 @@ class MotorDatalogGui(tk.Tk):
         return
 
     def update_live_values(self, row):
-        """Met à jour les cartes live avec les valeurs d'une ligne DATA.
+        """Update live cards with values from a DATA row.
 
-        La vitesse électrique est volontairement affichée mais pas dataloggée. Elle est
-        donc recalculée côté interface à partir de la vitesse mécanique et du nombre de
-        paires de pôles configuré.
+        Electrical speed is displayed but not logged, so the interface recalculates it
+        from mechanical speed and the configured pole-pair count.
 
         Args:
-            row: Dictionnaire ``colonne -> valeur`` construit depuis la ligne CSV.
+            row: ``column -> value`` dictionary built from the CSV row.
         """
         for key, var in self.live_vars.items():
             if key in row:
@@ -2377,10 +2351,10 @@ class MotorDatalogGui(tk.Tk):
         self.update_iq_warning_color()
 
     def get_iq_limit_safe(self):
-        """Retourne la limite Iq configurée, ou ``NaN`` si elle est invalide.
+        """Return the configured Iq limit, or ``NaN`` if invalid.
 
         Returns:
-            float: Limite Iq positive, sinon ``math.nan``.
+            float: Positive Iq limit, otherwise ``math.nan``.
         """
         try:
             value = float(self.iq_limit_var.get().strip().replace(",", "."))
@@ -2391,7 +2365,7 @@ class MotorDatalogGui(tk.Tk):
         return math.nan
 
     def update_iq_warning_color(self):
-        """Colore la valeur Iq selon son rapprochement avec la limite configurée."""
+        """Color Iq according to its proximity to the configured limit."""
         label = self.live_value_labels.get("motor_iq_a")
         if label is None:
             return
@@ -2420,10 +2394,10 @@ class MotorDatalogGui(tk.Tk):
             pass
 
     def append_plot_row(self, row):
-        """Ajoute une ligne de données aux buffers du graphique.
+        """Add a data row to the chart buffers.
 
         Args:
-            row: Dictionnaire ``colonne -> valeur`` construit depuis la ligne CSV.
+            row: ``column -> value`` dictionary built from the CSV row.
         """
         t_ms = self.safe_float(row.get("stm32_time_ms", math.nan))
         if math.isfinite(t_ms):
@@ -2443,7 +2417,7 @@ class MotorDatalogGui(tk.Tk):
         self.plot_dirty = True
 
     def clear_plot(self):
-        """Réinitialise tous les buffers du graphique dynamique."""
+        """Reset all live-chart buffers."""
         self.plot_x.clear()
         for data in self.plot_data.values():
             data.clear()
@@ -2453,11 +2427,11 @@ class MotorDatalogGui(tk.Tk):
             self.redraw_plot(force=True)
 
     def mark_plot_dirty(self):
-        """Marque le graphique comme devant être redessiné."""
+        """Mark the chart for redrawing."""
         self.plot_dirty = True
 
     def style_axis(self, ax=None, title=False):
-        """Applique le style sombre du tableau de bord à un axe matplotlib."""
+        """Apply the dashboard's dark style to a Matplotlib axis."""
         if ax is None:
             ax = self.ax
         if ax is None:
@@ -2472,17 +2446,16 @@ class MotorDatalogGui(tk.Tk):
             ax.set_title("Donnees temps reel", color=COLORS["text"], fontsize=12, pad=12)
 
     def redraw_plot_periodic(self):
-        """Callback périodique de rafraîchissement du graphique."""
+        """Periodic callback to refresh the chart."""
         if self.plot_dirty:
             self.redraw_plot()
         self.after(PLOT_REFRESH_MS, self.redraw_plot_periodic)
 
     def redraw_plot(self, force=False):
-        """Redessine le graphique dynamique si nécessaire.
+        """Redraw the live chart when needed.
 
         Args:
-            force: ``True`` pour redessiner même si aucune donnée n'est marquée comme
-                modifiée.
+            force: If ``True``, redraw even when no data is marked as changed.
         """
         if not MATPLOTLIB_AVAILABLE or self.figure is None or self.canvas is None:
             return
@@ -2558,10 +2531,10 @@ class MotorDatalogGui(tk.Tk):
         self.plot_dirty = False
 
     def on_close(self):
-        """Gère la fermeture de la fenêtre principale.
+        """Handle closing the main window.
 
-        Si un essai est en cours, la méthode demande confirmation puis passe par la
-        séquence d'arrêt moteur avant de détruire la fenêtre.
+        If a test is running, ask for confirmation and complete the motor shutdown
+        sequence before destroying the window.
         """
         if self.is_running or self.is_launching:
             if not messagebox.askyesno("Quitter", "Une session est en cours. L'arrêter et quitter ?"):

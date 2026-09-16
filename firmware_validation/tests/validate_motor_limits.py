@@ -18,11 +18,12 @@ EXPECTED_MAX_CURRENT_A = 30.0
 EXPECTED_POLPULSE_CURRENT_A = 14.0
 EXPECTED_B2_MIN_SPEED_RPM = 2000.0
 EXPECTED_B2_MAX_SPEED_RPM = 4000.0
-EXPECTED_B2_MIN_STEP_RPM = 200.0
-EXPECTED_B2_MAX_STEP_RPM = 500.0
-EXPECTED_B2_MIN_PERIOD_MS = 10000.0
-EXPECTED_B2_MAX_PERIOD_MS = 30000.0
-EXPECTED_B2_ACCEL_ELEC_HZ_S = 10.0
+EXPECTED_B2_MIN_PERIOD_MS = 2000.0
+EXPECTED_B2_MAX_PERIOD_MS = 5000.0
+EXPECTED_B2_IQ_LIMIT_A = 25.0
+EXPECTED_B2_TOTAL_CURRENT_A = 28.0
+EXPECTED_B2_ACCEL_ELEC_HZ_S = 500.0
+EXPECTED_CFG_MAX_ACCEL_ELEC_HZ_S = 50.0
 
 
 def numeric_define(path: Path, name: str) -> float:
@@ -92,10 +93,12 @@ def validate_firmware_root(root: Path) -> None:
     expected_ioc = {
         "M1_BOARD_MAX_CURRENT": "30",
         "M1_BOARD_SOFT_OVERCURRENT_TRIP": "30",
+        "M1_IQMAX": "30",
         "M1_MAX_APPLICATION_SPEED": "4500",
         "M1_MOTOR_MAX_SPEED_RPM": "4500",
         "M1_NOMINAL_CURRENT": "30",
         "M1_POLPULSES_PULSE_CURRENT_GOAL": "14.0",
+        "WB_UI_MAX_CURRENT": "30",
     }
     for ioc_name in ("tets_motor_dewalt.ioc", "tets_motor_dewalt.ioc.wb"):
         values = ioc_values(root / ioc_name)
@@ -107,20 +110,37 @@ def validate_firmware_root(root: Path) -> None:
     expected_b2_defines = {
         "APP_BUTTON_MIN_TARGET_SPEED_RPM": EXPECTED_B2_MIN_SPEED_RPM,
         "APP_BUTTON_MAX_TARGET_SPEED_RPM": EXPECTED_B2_MAX_SPEED_RPM,
-        "APP_BUTTON_MIN_SPEED_STEP_RPM": EXPECTED_B2_MIN_STEP_RPM,
-        "APP_BUTTON_MAX_SPEED_STEP_RPM": EXPECTED_B2_MAX_STEP_RPM,
         "APP_BUTTON_MIN_CHANGE_PERIOD_MS": EXPECTED_B2_MIN_PERIOD_MS,
         "APP_BUTTON_MAX_CHANGE_PERIOD_MS": EXPECTED_B2_MAX_PERIOD_MS,
-        "APP_BUTTON_IQ_LIMIT_A": EXPECTED_MAX_CURRENT_A,
-        "APP_BUTTON_HARD_STOP_CURRENT_A": EXPECTED_MAX_CURRENT_A,
+        "APP_BUTTON_IQ_LIMIT_A": EXPECTED_B2_IQ_LIMIT_A,
+        "APP_BUTTON_HARD_STOP_CURRENT_A": EXPECTED_B2_TOTAL_CURRENT_A,
         "APP_BUTTON_ACCEL_ELEC_HZ_S": EXPECTED_B2_ACCEL_ELEC_HZ_S,
     }
     for name, expected in expected_b2_defines.items():
         assert numeric_define(app_source, name) == expected
 
     source = app_source.read_text(encoding="utf-8")
+    assert (
+        numeric_define(app_source, "APP_CFG_MAX_ACCEL_ELEC_HZ_S")
+        == EXPECTED_CFG_MAX_ACCEL_ELEC_HZ_S
+    )
+    assert "APP_BUTTON_MIN_SPEED_STEP_RPM" not in source
+    assert "APP_BUTTON_MAX_SPEED_STEP_RPM" not in source
+    assert "initial_speed_rpm = AppMotorControl_SelectNextButtonSpeed();" in source
+    assert "(uint32_t)APP_BUTTON_MIN_TARGET_SPEED_RPM" in source
+    assert "(uint32_t)APP_BUTTON_MAX_TARGET_SPEED_RPM" in source
+    assert "} while ((float)next_speed_rpm == app_target_speed_rpm);" in source
+    assert "? APP_BUTTON_ACCEL_ELEC_HZ_S" in source
+    assert "speed_ref_ramped_pu" in source
+    assert "MCI_SetMaxCurrent(pMCI[M1], FIXP16(total_limit_a));" in source
+    assert "APP_BUTTON_HARD_STOP_CURRENT_A - APP_BUTTON_IQ_LIMIT_A" in source
+    runtime_config = source.split("void AppMotorControl_SetRuntimeConfig", maxsplit=1)[1]
+    assert "AppMotorControl_StopButtonProfile();" in runtime_config.split(
+        "void AppMotorControl_Init", maxsplit=1
+    )[0]
     for function_name in (
         "AppMotorControl_ApplySpeedReference",
+        "AppMotorControl_GetOverspeedReferenceRpm",
         "AppMotorControl_SelectNextButtonSpeed",
         "AppMotorControl_ScheduleNextButtonSpeedChange",
         "AppMotorControl_ServiceButtonProfile",
@@ -129,19 +149,21 @@ def validate_firmware_root(root: Path) -> None:
 
     assert source.count("AppMotorControl_ApplySpeedReference();") >= 3
     assert "if (speed_limit_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM)" in source
-    assert "!isfinite(target_rpm)" in source
-    assert "!isfinite(iq_limit_a)" in source
-    assert "!isfinite(hard_limit_a)" in source
-    assert "!isfinite(accel_elec_hz_s)" in source
-    assert "!isfinite(idq.D)" in source
-    assert "!isfinite(idq.Q)" in source
-    assert "!isfinite(i2)" in source
-    assert "!isfinite(speed_elec_hz)" in source
-    assert "!isfinite(speed_rpm)" in source
+    assert "AppMotorControl_IsFiniteFloat" in source
+    assert "!AppMotorControl_IsFiniteFloat(target_rpm)" in source
+    assert "!AppMotorControl_IsFiniteFloat(iq_limit_a)" in source
+    assert "!AppMotorControl_IsFiniteFloat(hard_limit_a)" in source
+    assert "!AppMotorControl_IsFiniteFloat(accel_elec_hz_s)" in source
+    assert "!AppMotorControl_IsFiniteFloat(idq.D)" in source
+    assert "!AppMotorControl_IsFiniteFloat(idq.Q)" in source
+    assert "!AppMotorControl_IsFiniteFloat(i2)" in source
+    assert "!AppMotorControl_IsFiniteFloat(speed_elec_hz)" in source
+    assert "!AppMotorControl_IsFiniteFloat(speed_rpm)" in source
 
     if root == ACQUISITION_ROOT:
         assert "AppMotorControl_ServiceStartRequest" in source
         assert "if (state != IDLE)" in source
+        assert "iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500" in source
 
     parameters_source = (root / "Src" / "mc_parameters.c").read_text(encoding="utf-8")
     polpulse_source = (root / "Src" / "mc_polpulse.c").read_text(encoding="utf-8")
@@ -176,7 +198,10 @@ def main() -> None:
     assert motor["nominalCurrent"] == EXPECTED_MAX_CURRENT_A
     assert motor["maxRatedSpeed"] == EXPECTED_MAX_SPEED_RPM
 
-    print("Motor limits validation passed: 4500 rpm, 30 A, randomized smooth B2 profile.")
+    print(
+        "Motor limits validation passed: global 4500 rpm/30 A; "
+        "B2 2000-4000 rpm, 2-5 s, Iq 25 A, total 28 A, 500 Hz_e/s."
+    )
 
 
 if __name__ == "__main__":

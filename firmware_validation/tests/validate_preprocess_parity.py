@@ -1,4 +1,4 @@
-"""Compare le pretraitement float32 embarque au pipeline pandas de reference."""
+"""Compare embedded float32 preprocessing with the reference pandas pipeline."""
 
 from __future__ import annotations
 
@@ -160,7 +160,7 @@ def parse_args() -> argparse.Namespace:
         "--logs",
         type=Path,
         default=DEFAULT_LOGS,
-        help="Dossier contenant les daq_log_*.csv de reference.",
+        help="Directory containing reference daq_log_*.csv files.",
     )
     return parser.parse_args()
 

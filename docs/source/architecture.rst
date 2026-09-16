@@ -1,95 +1,93 @@
 Architecture
 ============
 
-Vue d'ensemble
---------------
+Overview
+--------
 
-Le dépôt sépare le flux d'acquisition piloté par le PC du flux de validation
-autonome. Les deux firmwares partagent les mêmes périphériques et mesures, mais
-n'ont ni le même protocole d'exploitation ni la même cadence contractuelle.
+The repository separates the PC-controlled acquisition flow from standalone
+validation. Both firmware projects use the same peripherals and measurements,
+but have different operating protocols and required sampling rates.
 
-Responsabilités :
+Responsibilities:
 
-* le firmware d'acquisition pilote le moteur, lit les capteurs, applique les
-  sécurités et répond aux commandes du dashboard ;
-* le dashboard gère la session série, l'affichage et le CSV brut ;
-* le prétraitement transforme les mesures en dataset d'apprentissage ;
-* le firmware de validation reproduit les 55 features et appelle, selon sa
-  configuration, la bibliothèque NanoEdge AI.
+* the acquisition firmware controls the motor, reads sensors, enforces safety
+  limits, and responds to dashboard commands;
+* the dashboard manages the serial session, display, and raw CSV file;
+* preprocessing turns measurements into a training dataset;
+* the validation firmware reproduces the 55 features and, depending on its
+  configuration, calls the NanoEdge AI library.
 
 .. code-block:: text
 
-   D6T -----------+                         +--> CSV brut
+   D6T -----------+                         +--> raw CSV
                   |                         |
-   DS18B20 -------+--> firmware acquisition +--> dashboard Tkinter
+   DS18B20 -------+--> acquisition firmware +--> Tkinter dashboard
                   |            ^            |
-   MCSDK ---------+            | USART1     +--> affichage temps réel
+   MCSDK ---------+            | USART1     +--> live display
                                |
-                         commandes du PC
+                          PC commands
 
-   CSV brut --> prétraitement Python --> cible + 55 features --> NanoEdge AI
+   raw CSV --> Python preprocessing --> target + 55 features --> NanoEdge AI
                                                                    |
                                                                    v
-   D6T + DS18B20 + MCSDK --> firmware validation --> features ou prédiction
+   D6T + DS18B20 + MCSDK --> validation firmware --> features or prediction
 
-Firmware d'acquisition
-----------------------
+Acquisition firmware
+--------------------
 
-Le point d'entrée ``firmware_acquisition/tets_motor_dewalt/Src/main.c``
-initialise HAL, les périphériques CubeMX, MCSDK, le datalogging, le contrôle
-moteur et le protocole série. La boucle principale appelle ensuite leurs tâches
-coopératives.
+The entry point `firmware_acquisition/tets_motor_dewalt/Src/main.c`
+initializes HAL, CubeMX peripherals, MCSDK, data logging, motor control, and
+the serial protocol. The main loop then calls their cooperative tasks.
 
-Les modules applicatifs sont placés dans
-``firmware_acquisition/tets_motor_dewalt/STM32CubeIDE/Application/User`` :
+Application modules are in
+`firmware_acquisition/tets_motor_dewalt/STM32CubeIDE/Application/User`:
 
-* ``app_serial_control.c`` utilise une réception interrompue et une file de
-  caractères pour parser les commandes ASCII ;
-* ``app_motor_control.c`` applique les rampes, limites et arrêts MCSDK ;
-* ``app_datalog.c`` planifie les capteurs et alimente une file de transmission
-  UART non bloquante ;
-* ``d6t_ir.c`` et ``ds18b20.c`` isolent les protocoles des capteurs.
+* `app_serial_control.c` uses interrupt-driven reception and a character
+  queue to parse ASCII commands;
+* `app_motor_control.c` applies MCSDK ramps, limits, and shutdowns;
+* `app_datalog.c` schedules the sensors and feeds a nonblocking UART
+  transmit queue;
+* `d6t_ir.c` and `ds18b20.c` isolate sensor protocols.
 
-Le dashboard conserve Tkinter dans le thread principal. Les lectures série et
-les séquences de démarrage/arrêt utilisent des threads et communiquent avec
-l'interface par des ``queue.Queue``. Cette frontière évite les accès Tkinter
-depuis un thread de communication.
+The dashboard keeps Tkinter on the main thread. Serial reads and startup and
+shutdown sequences use threads that communicate with the interface through
+`queue.Queue` objects. This boundary avoids accessing Tkinter from a
+communication thread.
 
-Firmware de validation
-----------------------
-
-Le point d'entrée ``firmware_validation/Src/main.c`` initialise le contrôle
-moteur et le datalogging autonome. La période des features est fixée à 100 ms,
-soit 10 Hz, dans ``Inc/preprocess_ewma.h``.
-
-``APP_NEAI_MODEL_ENABLED`` sélectionne le contrat UART à la compilation :
-
-* ``0U`` : 55 valeurs numériques pour le Serial Emulator ;
-* ``1U`` : ``d6t_temp_c;predicted_temp_c`` pour l'interface de validation.
-
-Le changement de mode exige un clean build, car la sélection est faite par le
-préprocesseur C.
-
-Contrats de données
+Validation firmware
 -------------------
 
-Le firmware d'acquisition annonce les colonnes avec ``#CSV_HEADER`` puis émet
-des lignes ``DATA``. Le dashboard ne conserve que les huit colonnes suivantes :
+The entry point `firmware_validation/Src/main.c` initializes motor control and
+standalone data logging. The feature period is fixed at 100 ms (10 Hz) in
+`Inc/preprocess_ewma.h`.
+
+`APP_NEAI_MODEL_ENABLED` selects the UART contract at compile time:
+
+* `0U`: 55 numeric values for the Serial Emulator;
+* `1U`: `d6t_temp_c;predicted_temp_c` for the validation interface.
+
+Changing modes requires a clean build because the C preprocessor makes the
+selection.
+
+Data contracts
+--------------
+
+The acquisition firmware announces columns with `#CSV_HEADER` and then emits
+`DATA` rows. The dashboard keeps only these eight columns:
 
 .. code-block:: text
 
    stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
 
-Le point-virgule est le séparateur des fichiers écrits par Python. Le protocole
-UART du firmware d'acquisition utilise en revanche des virgules. Le dashboard
-fait cette conversion lors de l'écriture.
+Python writes semicolon-separated files. By contrast, the acquisition
+firmware's UART protocol uses commas. The dashboard converts the separators
+when writing the file.
 
-Construction des features
---------------------------
+Feature construction
+--------------------
 
-Six mesures explicatives sont utilisées directement : température DS18B20,
-tensions ``d/q``, vitesse mécanique et courants ``d/q``. Cinq grandeurs sont
-dérivées :
+Six explanatory measurements are used directly: DS18B20 temperature, d/q
+voltages, mechanical speed, and d/q currents. Five quantities are derived:
 
 .. math::
 
@@ -99,37 +97,34 @@ dérivées :
    speed\_current &= n\,i_s \\
    speed\_power &= n\,S_{el}
 
-Chaque grandeur parmi ces onze signaux est conservée instantanément et déclinée
-avec quatre EWMA : :math:`11 \times (1 + 4) = 55` features. La cible D6T ne
-reçoit aucune EWMA.
+Each of these eleven signals is kept as an instantaneous value and given four
+EWMAs: :math:`11 \times (1 + 4) = 55` features. The D6T target has no EWMA.
 
-Règle de fréquence des EWMA
----------------------------
+EWMA sampling rate
+------------------
 
-Les spans historiques ``1320``, ``3360``, ``6360`` et ``9480`` correspondent à
-un datalogging de référence à 2 Hz. Pour conserver les mêmes constantes de temps
-lorsque la période DATA change, le prétraitement applique :
+The historical spans `1320`, `3360`, `6360`, and `9480` correspond to a
+reference logging rate of 2 Hz. To preserve the same time constants when the
+DATA period changes, preprocessing applies:
 
 .. math::
 
-   span_{nouveau} = span_{2Hz} \times \frac{f_{acquisition}}{2}
+   span_{\mathrm{new}} = span_{2Hz} \times \frac{f_{\mathrm{acquisition}}}{2}
 
-Un log à 10 Hz utilise donc les spans ``6600``, ``16800``, ``31800`` et
-``47400``.
+A 10 Hz log therefore uses spans `6600`, `16800`, `31800`, and `47400`.
 
-Le script Python déduit :math:`f_{acquisition}` de la médiane des écarts
-strictement positifs de ``stm32_time_ms``. Le firmware de validation utilise
-directement les spans à 10 Hz. Le test de parité vérifie l'ordre et la
-récurrence entre les deux implémentations.
+The Python script derives :math:`f_{\mathrm{acquisition}}` from the median of
+strictly positive differences in `stm32_time_ms`. The validation firmware
+uses the 10 Hz spans directly. The parity test checks order and recurrence
+between the two implementations.
 
-Limites d'architecture
-----------------------
+Architecture limitations
+------------------------
 
-* Il n'existe pas de build firmware autonome versionné hors STM32CubeIDE.
-* Le changement de modèle est valide seulement si les 55 axes, leur ordre,
-   l'ABI hard-float et l'API NanoEdge restent compatibles.
-* La remise à l'échelle Python suppose une cadence représentative dans les
-   timestamps ; une fréquence forcée incorrecte modifie la mémoire temporelle
-   des EWMA.
-* Le remplacement global des valeurs manquantes par zéro peut masquer une
-   mesure D6T absente ; ce point doit être contrôlé avant l'apprentissage.
+* There is no versioned standalone firmware build outside STM32CubeIDE.
+* A replacement model is valid only if the 55 axes, their order, the
+  hard-float ABI, and the NanoEdge API remain compatible.
+* Python rescaling assumes the timestamps represent the sampling rate; an
+  incorrect forced frequency changes the EWMAs' temporal memory.
+* Replacing missing values with zero may conceal an absent D6T measurement;
+  check this before training.

@@ -1,126 +1,130 @@
-# Interface de validation thermique
+# Temperature Validation Interface
 
-L'application `test/temperature_validation_gui.py` compare en temps réel la
-température mesurée par le D6T et la température estimée par NanoEdge AI sur la
-carte STM32. Elle est destinée au firmware de `firmware_validation`, pas au
-firmware piloté par le dashboard de datalogging.
+The `test/temperature_validation_gui.py` application compares the temperature
+measured by the D6T with the temperature estimated by NanoEdge AI on the STM32
+board in real time. It is intended for `firmware_validation`, not for the
+firmware controlled by the data logging dashboard.
 
-## Préparer le firmware
+## Prepare the firmware
 
-Activer le modèle dans `firmware_validation/Inc/app_config.h` :
+Enable the model in `firmware_validation/Inc/app_config.h`:
 
 ```c
 #define APP_NEAI_MODEL_ENABLED  1U
 ```
 
-Effectuer ensuite un **Clean Project**, reconstruire le projet et reflasher la
-carte. Le flux USART1 démarre automatiquement au boot à 115200 bauds, 8N1. Une
-trame valide contient exactement deux nombres finis séparés par un point-virgule :
+Then run **Clean Project**, rebuild, and reflash the board. The USART1 stream
+starts automatically at boot at 115200 baud, 8N1. A valid frame contains
+exactly two finite numbers separated by a semicolon:
 
 ```text
 <d6t_temp_c>;<predicted_temp_c>
 ```
 
-Exemple :
+Example:
 
 ```text
 31.400000;30.872314
 ```
 
-Dans ce firmware, B2 lance désormais un profil moteur à 30 A maximum : départ à
-2000 rpm, puis cible pseudo-aléatoire entre 2000 et 4000 rpm, modifiée toutes
-les 10 à 30 secondes par pas de 200 à 500 rpm avec une rampe de 300 rpm/s. Ces
-changements ne modifient pas le protocole série ci-dessus. Ne les utiliser
-qu'après qualification électrique, thermique et mécanique du banc.
+In this firmware, B2 starts a motor profile with `Iq` limited to 25 A; the
+`Id/Iq` command magnitude and shutdown threshold on measured magnitude are
+limited to 28 A. The first target, then a new target every 2 to 5 seconds,
+are drawn directly and pseudorandomly between 2000 and 4000 rpm. Startup
+and transition ramps are 500 electrical Hz/s, or 15,000 rpm/s with two
+pole pairs. These changes do not alter the serial protocol above. Use them
+only after electrical, thermal, and mechanical qualification of the test bench.
+Preventive DC bus protection is disabled (`M1_BUS_PROTECTION=false`):
+monitor regenerative overvoltage during rapid deceleration and validate
+absorption or braking capacity.
 
-## Lancement
+## Start the application
 
-Sélection manuelle du port dans l'interface :
+Select the port manually in the interface:
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py
 ```
 
-Connexion automatique à un port :
+Connect automatically to a port:
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --port COM5
 ```
 
-Mode de démonstration sans carte :
+Demo mode without a board:
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --demo
 ```
 
-Fermer le dashboard, Motor Pilot et tout terminal série avant la connexion : un
-port COM ne peut appartenir qu'à une application à la fois.
+Close the dashboard, Motor Pilot, and any serial terminal before connecting:
+a COM port can belong to only one application at a time.
 
-Sous Windows, une erreur transitoire `ClearCommError` est retentée jusqu'à
-100 fois, avec une pause de 150 ms entre les tentatives. La fenêtre de reprise
-est donc d'environ 15 secondes, hors durée des opérations série. Une autre
-erreur ou l'épuisement des tentatives ferme la liaison et remonte le diagnostic.
+On Windows, a transient `ClearCommError` is retried up to 100 times, with a
+150 ms pause between attempts. The recovery window is therefore about
+15 seconds, excluding the duration of serial operations. Any other error
+or exhausted retries close the connection and report the diagnosis.
 
-## Affichage et calculs
+## Display and calculations
 
-Les deux températures sont affichées avec une décimale. Le graphique conserve
-les 90 dernières secondes et jusqu'à 1800 points. Une donnée qui n'a pas été
-rafraîchie depuis plus de 2 secondes est considérée comme ancienne par
-l'interface.
+Both temperatures are shown to one decimal place. The chart retains the
+latest 90 seconds and up to 1800 points. The interface considers a reading
+stale if it has not been refreshed for more than 2 seconds.
 
-Pour chaque échantillon :
+For each sample:
 
 ```text
-erreur_signée = prédiction - D6T
-erreur_absolue = abs(erreur_signée)
-MAE_cumulée = somme(erreurs_absolues) / nombre_échantillons
+signed_error = prediction - D6T
+absolute_error = abs(signed_error)
+cumulative_MAE = sum(absolute_errors) / sample_count
 ```
 
-La MAE reste exprimée en degrés Celsius. Les seuils visuels sont :
+MAE remains in degrees Celsius. Visual thresholds are:
 
-| Écart absolu | Classe | Couleur |
+| Absolute error | Class | Color |
 |---|---|---|
-| `< 0,5 °C` | Excellent | vert |
-| `0,5 °C à < 1,0 °C` | Bon | bleu |
-| `1,0 °C à 1,5 °C` | À surveiller | orange |
-| `> 1,5 °C` | Écart élevé | rouge |
+| `< 0.5 °C` | Excellent | Green |
+| `0.5 °C to < 1.0 °C` | Good | Blue |
+| `1.0 °C to 1.5 °C` | Monitor | Orange |
+| `> 1.5 °C` | High error | Red |
 
-Les trames non ASCII, non numériques, non finies ou n'ayant pas exactement deux
-champs sont ignorées et comptabilisées comme invalides.
+Non-ASCII, nonnumeric, nonfinite frames, and frames without exactly two
+fields are ignored and counted as invalid.
 
-## Enregistrement CSV
+## CSV recording
 
-Chaque connexion crée automatiquement dans `validation/` un fichier nommé :
+Each connection automatically creates a file in `validation/` named:
 
 ```text
 validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv
 ```
 
-Chaque ligne est vidée immédiatement sur disque et contient :
+Each row is flushed to disk immediately and contains:
 
 ```text
 elapsed_s;d6t_temp_c;predicted_temp_c;signed_error_c;absolute_error_c;cumulative_mae_c
 ```
 
-Les nombres sont enregistrés à leur précision de calcul, avec six décimales.
-Le bouton **Exporter CSV** crée une copie ailleurs. **Réinitialiser** efface les
-données affichées et remet la MAE à zéro, sans interrompre l'enregistreur
-automatique de la connexion en cours.
+Numbers are saved at their calculation precision, with six decimal places.
+The **Exporter CSV** (Export CSV) button creates a copy elsewhere.
+**Réinitialiser** (Reset) clears the displayed data and resets MAE to zero
+without interrupting automatic recording for the current connection.
 
-## Vérification
+## Verification
 
-Les tests unitaires ne nécessitent ni carte ni fenêtre graphique :
+The unit tests need neither a board nor a graphical window:
 
 ```powershell
 .\.venv\Scripts\python.exe .\validation\test\test_temperature_validation_gui.py
 ```
 
-Ils vérifient actuellement trois comportements : la détection d'une erreur
-`ClearCommError`, la reprise de lecture après cette erreur et l'écriture avec
-flush immédiat d'un échantillon CSV. Ils ne valident pas le rendu visuel, le
-port COM réel ni les performances statistiques du modèle.
+They currently check three behaviors: detection of `ClearCommError`,
+continued reading after that error, and immediate flushing of a CSV sample.
+They do not validate the visual rendering, the physical COM port, or the
+model's statistical performance.
 
-Le contrôle matériel du protocole se lance depuis la racine du dépôt :
+Run the hardware protocol check from the repository root:
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model

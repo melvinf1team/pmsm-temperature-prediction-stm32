@@ -1,31 +1,30 @@
-Prétraitement EWMA
+EWMA Preprocessing
 ==================
 
-Rôle du script
+Script purpose
 --------------
 
-``pretraitement/preprocess_logs_ewma.py`` transforme les logs bruts du dashboard
-en fichiers adaptés à NanoEdge AI Studio. Par défaut :
+`pretraitement/preprocess_logs_ewma.py` converts raw dashboard logs into files
+suitable for NanoEdge AI Studio. By default:
 
-* entrée : ``datalogging/logs/daq_log_*.csv`` ;
-* sortie : ``pretraitement/logs_processed_ewma`` ;
-* séparateur CSV : ``;`` ;
-* en-tête désactivé ;
-* timestamp exclu de la sortie.
+* input: `datalogging/logs/daq_log_*.csv`;
+* output: `pretraitement/logs_processed_ewma`;
+* CSV separator: `;`;
+* header: disabled;
+* timestamp: omitted from output.
 
-Target NanoEdge AI
+NanoEdge AI target
 ------------------
 
-``d6t_temp_c`` est la première colonne du fichier de sortie. Elle représente la
-target d'extrapolation et n'est jamais utilisée pour construire des EWMA. Le
-script ne la convertit pas en numérique : une chaîne ``NaN`` ou une cellule
-vide lue avec ``keep_default_na=False`` est conservée telle quelle. Ces lignes
-doivent être contrôlées ou filtrées avant l'apprentissage.
+`d6t_temp_c` is the first column of the output file. It is the extrapolation
+target and is never used to build EWMAs. The script does not convert it to a
+number: a `NaN` string or empty cell read with `keep_default_na=False` stays
+unchanged. Check or filter those rows before training.
 
-Colonnes explicatives
----------------------
+Explanatory columns
+-------------------
 
-Les colonnes instantanées utilisées comme features sont :
+The instantaneous input features are:
 
 .. code-block:: text
 
@@ -36,10 +35,10 @@ Les colonnes instantanées utilisées comme features sont :
    motor_id_a
    motor_iq_a
 
-Features physiques dérivées
----------------------------
+Derived physical features
+-------------------------
 
-Le script ajoute les grandeurs suivantes :
+The script adds these quantities:
 
 .. math::
 
@@ -61,110 +60,107 @@ Le script ajoute les grandeurs suivantes :
 
    speed\_power = motor\_speed\_mech\_rpm \times S_{el}
 
-Dimension et ordre de sortie
-----------------------------
+Output dimensions and order
+---------------------------
 
-Les onze variables explicatives sont les six entrées brutes suivies des cinq
-grandeurs dérivées. Pour chacune, le fichier contient la valeur instantanée,
-puis ses quatre EWMA. Il contient donc :math:`11 \times 5 = 55` features.
+The eleven explanatory variables are the six raw inputs followed by the five
+derived quantities. For each variable, the file contains its instantaneous
+value and four EWMAs, giving :math:`11 \times 5 = 55` features.
 
-L'ordre est déterministe :
+The order is deterministic:
 
 .. code-block:: text
 
    d6t_temp_c
-   [stm32_time_ms si --include-time]
-   ds18b20_temp_c, puis ses 4 EWMA
-   motor_ud_v, puis ses 4 EWMA
-   motor_uq_v, puis ses 4 EWMA
-   motor_speed_mech_rpm, puis ses 4 EWMA
-   motor_id_a, puis ses 4 EWMA
-   motor_iq_a, puis ses 4 EWMA
-   u_s, puis ses 4 EWMA
-   i_s, puis ses 4 EWMA
-   S_el, puis ses 4 EWMA
-   speed_current, puis ses 4 EWMA
-   speed_power, puis ses 4 EWMA
+   [stm32_time_ms if --include-time]
+   ds18b20_temp_c, then its 4 EWMAs
+   motor_ud_v, then its 4 EWMAs
+   motor_uq_v, then its 4 EWMAs
+   motor_speed_mech_rpm, then its 4 EWMAs
+   motor_id_a, then its 4 EWMAs
+   motor_iq_a, then its 4 EWMAs
+   u_s, then its 4 EWMAs
+   i_s, then its 4 EWMAs
+   S_el, then its 4 EWMAs
+   speed_current, then its 4 EWMAs
+   speed_power, then its 4 EWMAs
 
-``stm32_time_ms`` n'est pas une entrée du modèle. Avec ``--include-time``, le
-fichier contient donc une cible, un timestamp informatif et 55 features.
+`stm32_time_ms` is not a model input. With `--include-time`, the file
+therefore contains one target, an informational timestamp, and 55 features.
 
 EWMA
 ----
 
-Les EWMA sont calculées sur les features instantanées et dérivées. Pour chaque
-colonne, le script ajoute une colonne par span. Le calcul pandas utilise :
+EWMAs are computed from instantaneous and derived features. The script adds
+one column per span for each input column. The pandas calculation is:
 
 .. code-block:: python
 
    series.ewm(span=span, adjust=False).mean()
 
-La fréquence d'acquisition est déduite de la médiane des écarts positifs de
-``stm32_time_ms``. Si le timestamp n'est pas utilisable, l'option
-``--frequency-hz`` permet de forcer la fréquence.
+The acquisition rate is derived from the median of positive differences in
+`stm32_time_ms`. If the timestamp cannot be used, `--frequency-hz` can
+set the frequency explicitly.
 
-Les spans sont remis à l'échelle depuis la référence à 2 Hz :
+Spans are scaled from the 2 Hz reference:
 
 .. math::
 
    span = \max\left(1,\operatorname{round}\left(span_{2Hz}
-          \frac{f_{acquisition}}{2}\right)\right)
+          \frac{f_{\mathrm{acquisition}}}{2}\right)\right)
 
-Les quatre références sont ``1320``, ``3360``, ``6360`` et ``9480``. À 10 Hz,
-les spans produits sont ``6600``, ``16800``, ``31800`` et ``47400``.
+The four reference spans are `1320`, `3360`, `6360`, and `9480`. At 10 Hz,
+they become `6600`, `16800`, `31800`, and `47400`.
 
-Options de sortie
------------------
+Output options
+--------------
 
-``--header``
-   Écrit les noms de colonnes dans le CSV traité.
+`--header`
+   Writes column names in the processed CSV file.
 
-``--no-header``
-   Supprime les noms de colonnes pour un import compact.
+`--no-header`
+   Omits column names for compact import.
 
-``--include-time``
-   Conserve ``stm32_time_ms`` juste après la target.
+`--include-time`
+   Keeps `stm32_time_ms` immediately after the target.
 
-``--frequency-hz``
-   Force la fréquence d'acquisition et donc les spans EWMA.
+`--frequency-hz`
+   Sets the acquisition rate and therefore the EWMA spans.
 
-``--input-dir`` et ``--output-dir``
-   Remplacent les dossiers configurés dans ``preprocess_ewma.yaml``.
+`--input-dir` and `--output-dir`
+   Override the directories in `preprocess_ewma.yaml`.
 
-``--pattern``
-   Remplace le motif ``daq_log_*.csv``.
+`--pattern`
+   Overrides the `daq_log_*.csv` pattern.
 
-``--config``
-   Charge un fichier YAML explicite.
+`--config`
+   Loads an explicit YAML file.
 
-Les variables d'environnement équivalentes sont
-``PMSM_PREPROCESS_INPUT_DIR``, ``PMSM_PREPROCESS_OUTPUT_DIR`` et
-``PMSM_PREPROCESS_PATTERN``. Même avec ``--frequency-hz``, la colonne
-``stm32_time_ms`` reste obligatoire dans le CSV d'entrée.
+Equivalent environment variables are `PMSM_PREPROCESS_INPUT_DIR`,
+`PMSM_PREPROCESS_OUTPUT_DIR`, and `PMSM_PREPROCESS_PATTERN`. Even with
+`--frequency-hz`, the input CSV must contain `stm32_time_ms`.
 
-Nettoyage numérique
--------------------
+Numeric cleanup
+---------------
 
-``stm32_time_ms`` et les six entrées explicatives sont convertis avec
-``errors="coerce"``. Les grandeurs dérivées et EWMA sont ensuite calculées, les
-valeurs infinies deviennent manquantes, puis les valeurs manquantes numériques
-sont remplacées par ``0.0``.
+`stm32_time_ms` and the six explanatory inputs are converted with
+`errors="coerce"`. Derived values and EWMAs are then computed, infinite
+values become missing, and missing numeric values are replaced with `0.0`.
 
-La cible est volontairement exclue de la conversion numérique. Avec les options
-de lecture actuelles, ses marqueurs texte invalides ne sont donc pas remplacés
-par ``fillna(0.0)``. Cette asymétrie préserve l'information d'une mesure D6T
-absente, mais impose un contrôle explicite avant l'import.
+The target is deliberately excluded from numeric conversion. With the
+current read options, invalid text markers in it are therefore not replaced
+by `fillna(0.0)`. This preserves evidence of a missing D6T measurement but
+requires an explicit check before import.
 
-Reproductibilité et précautions
+Reproducibility and precautions
 -------------------------------
 
-Le nom du fichier de sortie est identique au nom d'entrée. Une nouvelle
-exécution dans le même dossier remplace donc le résultat précédent. Pour figer
-un dataset :
+The output file has the same name as the input file. Another run in the same
+directory therefore overwrites the previous result. To preserve a dataset:
 
-1. conserver les CSV bruts et la configuration YAML utilisée ;
-2. noter la fréquence forcée éventuelle et le choix d'en-tête ;
-3. vérifier le nombre et l'ordre des colonnes ;
-4. comparer l'ordre aux 55 lignes de
-   ``firmware_validation/AI_Model/feature_order.txt`` ;
-5. archiver les métriques avec l'export NanoEdge correspondant.
+1. keep the raw CSV files and YAML configuration used;
+2. record any forced frequency and the header setting;
+3. check the number and order of columns;
+4. compare the order with the 55 lines in
+   `firmware_validation/AI_Model/feature_order.txt`;
+5. archive metrics with the corresponding NanoEdge export.
