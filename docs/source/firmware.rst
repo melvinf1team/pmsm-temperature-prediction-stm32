@@ -17,8 +17,8 @@ The main application modules are:
    `ERR` responses.
 
 `app_motor_control.c`
-   Motor startup, shutdown, runtime configuration, and current and
-   overspeed protections.
+   Motor startup, shutdown, runtime configuration, current and overspeed
+   protections, and TB-200S DAC conversion and scheduling.
 
 `app_datalog.c`
    USART ownership, nonblocking TX queue, CSV header, and `DATA` rows.
@@ -65,6 +65,11 @@ period, and DS18B20 period against their limits. A valid configuration calls
 `ACQ_START` validates only the two periods, forces the motor to stop, and
 arms the logger without requiring a motor configuration.
 
+`LOAD,<amps>` selects a fixed 0.05--0.25 A TB-200S command;
+`LOAD,VARIABLE` selects pseudorandom values in the same range every 2--5
+seconds. Both forms answer `ACK,LOAD`. The dashboard sends the load command
+after `CFG` and before `START`.
+
 Protocol limits are 100 to 4500 rpm, at most 30 A for `Iq` and the hard
 stop, at most 50 electrical Hz/s for acceleration, 1 to 10,000 ms for
 `DATA`, and at most 10,000 ms for the DS18B20. A requested DS18B20 period
@@ -88,6 +93,12 @@ transition use the fast MCSDK ramp of 500 electrical Hz/s; with two pole
 pairs, this is 15,000 mechanical rpm/s. A second press stops the motor.
 Deferred processing and 250 ms debounce avoid calling MCSDK from the
 interrupt.
+
+B2 always enables variable TB-200S load: the DAC is forced to 0.05 A before
+MCSDK starts, then a different value from 0.05 to 0.25 A is drawn every
+2--5 seconds. Pressing B2 overrides any earlier serial load/profile choice,
+so the physical button consistently starts the fully variable speed-and-load
+profile. Every stop returns the DAC command to 0.05 A.
 
 The B2 profile is an internal path: it does not raise the 50 electrical
 Hz/s ceiling for configurations received over UART. A new UART
@@ -114,10 +125,11 @@ header is:
 
 .. code-block:: text
 
-   #CSV_HEADER,stm32_time_ms,d6t_temp_c,ds18b20_temp_c,motor_ud_v,motor_uq_v,motor_speed_mech_rpm,motor_id_a,motor_iq_a
+   #CSV_HEADER,stm32_time_ms,d6t_temp_c,ds18b20_temp_c,motor_ud_v,motor_uq_v,motor_speed_mech_rpm,motor_id_a,motor_iq_a,load_setpoint_a
 
 Each `DATA` row contains the STM32 tick, temperatures, reconstructed d/q
-voltages, mechanical speed, and d/q currents. The d/q voltages come from
+voltages, mechanical speed, d/q currents, and the instantaneous commanded
+TB-200S current. The d/q voltages come from
 `CurrCtrl_M1.Ddq_out_pu` and the DC bus voltage. Outside RUN, motor values
 are set to zero to avoid logging stale MCSDK values.
 
@@ -182,10 +194,16 @@ AI validation firmware
 ----------------------
 
 `firmware_validation` is a second standalone project, simplified for
-NanoEdge validation. It no longer includes the dashboard command protocol or
+NanoEdge validation. It does not include the full dashboard motor protocol or
 ASCII debug module. The UART stream starts automatically, and its format
-depends only on `APP_NEAI_MODEL_ENABLED`: two temperatures with the model
-enabled, or 55 features with the model disabled.
+depends on `APP_NEAI_MODEL_ENABLED`: D6T temperature, prediction, and
+`load_setpoint_a` with the model enabled, or 55 features with the model
+disabled. Its receive path accepts four predefined `PROFILE,<TOKEN>` commands
+plus `STOP` and is used by `temperature_validation_gui.py`. An accepted
+profile answers `ACK,PROFILE,<TOKEN>`; a stop answers `ACK,STOP`.
+The firmware retains `LOAD,<amps>` and `LOAD,VARIABLE` only as a low-level
+backward-compatibility path. The validation GUI neither sends nor exposes
+those legacy commands, and a profile command or B2 replaces their state.
 
 The library is stored in `firmware_validation/AI_Model` and linked by both
 Debug and Release configurations. At compile time, `app_ai_model.c` checks
@@ -214,5 +232,12 @@ so a clean build and reflash are required after changing
 `APP_NEAI_MODEL_ENABLED`.
 
 Motor control and the random B2 profile use the same limits and settings as
-the acquisition firmware. Speed changes add no text to UART, preserving the
-NanoEdge data contract.
+the acquisition firmware. B2 always selects `VARIABLE_ALL`, regardless of a
+previous serial profile. Speed and load changes add no text to UART,
+preserving the NanoEdge data contract.
+
+Both projects configure `PA5 / DAC1_OUT2` for the TB-200S. The DAC uses its
+external buffered output and the 0--10 V / 0--3 A nominal conversion, while
+software restricts commands to 0.05--0.25 A. See :doc:`cablage` for CN7-32,
+the 1 kOhm/4.7 uF network, common ground, and the low-voltage calibration
+warning.

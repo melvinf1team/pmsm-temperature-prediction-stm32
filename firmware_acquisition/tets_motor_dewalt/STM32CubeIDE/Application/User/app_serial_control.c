@@ -216,6 +216,12 @@ static char *AppSerial_FindCommand(char *line)
     return p;
   }
 
+  p = strstr(line, "LOAD,");
+  if (p != NULL)
+  {
+    return p;
+  }
+
   p = strstr(line, "START");
   if (p != NULL)
   {
@@ -443,6 +449,29 @@ static bool AppSerial_ParseAcqStart(const char *line,
   return ((*p == '\0') || (*p == '\r') || (*p == '\n'));
 }
 
+static bool AppSerial_ParseFixedLoad(const char *line, float *load_a)
+{
+  char *p = (char *)line;
+
+  /* Format attendu : LOAD,<ampères> */
+  if (strncmp(p, "LOAD,", 5U) != 0)
+  {
+    return false;
+  }
+  p += 5U;
+
+  if (!AppSerial_ParseFloat(&p, load_a))
+  {
+    return false;
+  }
+
+  while ((*p == ' ') || (*p == '\t'))
+  {
+    p++;
+  }
+  return ((*p == '\0') || (*p == '\r') || (*p == '\n'));
+}
+
 /*
  * ================================
  * COMMAND HANDLERS
@@ -572,6 +601,40 @@ static void AppSerial_HandleAcqStart(const char *line)
   }
 }
 
+static void AppSerial_HandleLoad(const char *line)
+{
+  float load_a;
+  bool ok;
+
+  if (strcmp(line, "LOAD,VARIABLE") == 0)
+  {
+    ok = AppMotorControl_SetLoadVariable();
+  }
+  else
+  {
+    if (!AppSerial_ParseFixedLoad(line, &load_a))
+    {
+      AppSerial_SendErr("BAD_LOAD");
+      return;
+    }
+
+    if ((load_a < APP_TB200S_MIN_LOAD_A) ||
+        (load_a > APP_TB200S_MAX_LOAD_A))
+    {
+      AppSerial_SendErr("LOAD_VALUE_OUT_OF_RANGE");
+      return;
+    }
+    ok = AppMotorControl_SetLoadFixed(load_a);
+  }
+
+  if (!ok)
+  {
+    AppSerial_SendErr("LOAD_DAC_FAILED");
+    return;
+  }
+  AppSerial_SendAck("LOAD");
+}
+
 static void AppSerial_HandleStart(void)
 {
   bool ok;
@@ -642,6 +705,10 @@ static void AppSerial_HandleLine(char *line)
   else if (strncmp(cmd, "ACQ_START,", 10U) == 0)
   {
     AppSerial_HandleAcqStart(cmd);
+  }
+  else if (strncmp(cmd, "LOAD,", 5U) == 0)
+  {
+    AppSerial_HandleLoad(cmd);
   }
   else if (strcmp(cmd, "START") == 0)
   {

@@ -61,6 +61,15 @@
 #define APP_BUTTON_DEBOUNCE_MS              250U
 #define APP_START_RETRY_PERIOD_MS           100U
 
+/* TB-200S : mode 0-10 V pour 0-3 A, soit V_ADJ = I_LOAD * 10 / 3.
+ * Le DAC 12 bits est référencé à la VDDA nominale de 3,3 V. */
+#define APP_TB200S_DAC_VREF_V               3.3f
+#define APP_TB200S_FULL_SCALE_V              10.0f
+#define APP_TB200S_FULL_SCALE_A              3.0f
+#define APP_TB200S_DAC_MAX_CODE              4095U
+#define APP_TB200S_MIN_CHANGE_PERIOD_MS      2000U
+#define APP_TB200S_MAX_CHANGE_PERIOD_MS      5000U
+
 /*
  * Le PI vitesse généré par Workbench est trop agressif lorsque l'on autorise
  * plus de 5 A. On réduit ses gains au runtime pour éviter les appels de couple
@@ -78,6 +87,13 @@
 #define APP_IQ_LIMIT_RAMP_A_PER_S           1.5f
 
 extern MCI_Handle_t *pMCI[NBR_OF_MOTORS];
+extern DAC_HandleTypeDef hdac1;
+
+typedef enum
+{
+  APP_TB200S_LOAD_FIXED = 0,
+  APP_TB200S_LOAD_VARIABLE
+} AppTb200sLoadMode_t;
 
 typedef enum
 {
@@ -107,6 +123,12 @@ static bool app_button_profile_active = false;
 static bool app_button_speed_change_scheduled = false;
 static uint32_t app_button_next_speed_change_ms = 0U;
 static uint32_t app_button_random_state = 0x6D2B79F5U;
+
+static AppTb200sLoadMode_t app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
+static float app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
+static float app_tb200s_load_setpoint_a = APP_TB200S_MIN_LOAD_A;
+static bool app_tb200s_change_scheduled = false;
+static uint32_t app_tb200s_next_change_ms = 0U;
 
 static float app_target_speed_rpm = APP_DEFAULT_TARGET_SPEED_RPM;
 static float app_iq_limit_a = APP_DEFAULT_IQ_LIMIT_A;
@@ -143,6 +165,17 @@ static uint32_t AppMotorControl_ButtonRandomNext(void)
   return random_value;
 }
 
+static void AppMotorControl_ReseedRandom(uint32_t now)
+{
+  app_button_random_state ^= now + 0x9E3779B9U;
+  if (app_button_random_state == 0U)
+  {
+    app_button_random_state = 0x6D2B79F5U;
+  }
+
+  (void)AppMotorControl_ButtonRandomNext();
+}
+
 static uint32_t AppMotorControl_ButtonRandomRange(uint32_t minimum,
                                                    uint32_t maximum)
 {
@@ -158,6 +191,171 @@ static uint32_t AppMotorControl_ButtonRandomRange(uint32_t minimum,
   } while (random_value < rejection_threshold);
 
   return minimum + (random_value % range);
+}
+
+static uint32_t AppMotorControl_LoadToDacCode(float load_a)
+{
+  float adj_voltage_v = load_a *
+    (APP_TB200S_FULL_SCALE_V / APP_TB200S_FULL_SCALE_A);
+  float code = (adj_voltage_v / APP_TB200S_DAC_VREF_V) *
+    (float)APP_TB200S_DAC_MAX_CODE;
+
+  if (code <= 0.0f)
+  {
+    return 0U;
+  }
+  if (code >= (float)APP_TB200S_DAC_MAX_CODE)
+  {
+    return APP_TB200S_DAC_MAX_CODE;
+  }
+  return (uint32_t)(code + 0.5f);
+}
+
+static bool AppMotorControl_ApplyLoadSetpoint(float load_a)
+{
+  uint32_t dac_code = AppMotorControl_LoadToDacCode(load_a);
+
+  if (HAL_DAC_SetValue(&hdac1,
+                       DAC_CHANNEL_2,
+                       DAC_ALIGN_12B_R,
+                       dac_code) != HAL_OK)
+  {
+    return false;
+  }
+
+  app_tb200s_load_setpoint_a = load_a;
+  return true;
+}
+
+static void AppMotorControl_ScheduleNextLoadChange(uint32_t now)
+{
+  uint32_t delay_ms = AppMotorControl_ButtonRandomRange(
+    APP_TB200S_MIN_CHANGE_PERIOD_MS,
+    APP_TB200S_MAX_CHANGE_PERIOD_MS);
+
+  app_tb200s_next_change_ms = now + delay_ms;
+  app_tb200s_change_scheduled = true;
+}
+
+static bool AppMotorControl_SelectAndApplyNextLoad(void)
+{
+  uint32_t current_ma = (uint32_t)((app_tb200s_load_setpoint_a * 1000.0f) + 0.5f);
+  uint32_t next_ma;
+
+  do
+  {
+    next_ma = AppMotorControl_ButtonRandomRange(
+      (uint32_t)(APP_TB200S_MIN_LOAD_A * 1000.0f),
+      (uint32_t)(APP_TB200S_MAX_LOAD_A * 1000.0f));
+  } while (next_ma == current_ma);
+
+  return AppMotorControl_ApplyLoadSetpoint((float)next_ma / 1000.0f);
+}
+
+static bool AppMotorControl_PrepareLoadForMotorStart(void)
+{
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+  return AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A);
+}
+
+static bool AppMotorControl_OnMotorRunning(uint32_t now)
+{
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+
+  if (app_tb200s_load_mode == APP_TB200S_LOAD_VARIABLE)
+  {
+    if (!AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A))
+    {
+      return false;
+    }
+    AppMotorControl_ScheduleNextLoadChange(now);
+    return true;
+  }
+
+  return AppMotorControl_ApplyLoadSetpoint(app_tb200s_requested_load_a);
+}
+
+static void AppMotorControl_OnMotorStopped(void)
+{
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+  (void)AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A);
+}
+
+static bool AppMotorControl_ServiceVariableLoad(uint32_t now)
+{
+  if (app_tb200s_load_mode != APP_TB200S_LOAD_VARIABLE)
+  {
+    return true;
+  }
+
+  if (!app_tb200s_change_scheduled)
+  {
+    AppMotorControl_ScheduleNextLoadChange(now);
+    return true;
+  }
+
+  if ((int32_t)(now - app_tb200s_next_change_ms) < 0)
+  {
+    return true;
+  }
+
+  if (!AppMotorControl_SelectAndApplyNextLoad())
+  {
+    return false;
+  }
+
+  AppMotorControl_ScheduleNextLoadChange(now);
+  return true;
+}
+
+bool AppMotorControl_SetLoadFixed(float load_a)
+{
+  if (!AppMotorControl_IsFiniteFloat(load_a) ||
+      (load_a < APP_TB200S_MIN_LOAD_A) ||
+      (load_a > APP_TB200S_MAX_LOAD_A))
+  {
+    return false;
+  }
+
+  app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
+  app_tb200s_requested_load_a = load_a;
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+
+  /* Hors RUN, 0,05 A est imposé afin que le prochain lancement ne puisse
+   * jamais se faire sous une charge plus élevée. */
+  return AppMotorControl_ApplyLoadSetpoint(
+    (app_mc_state == APP_MC_RUNNING) ? load_a : APP_TB200S_MIN_LOAD_A);
+}
+
+bool AppMotorControl_SetLoadVariable(void)
+{
+  uint32_t now = HAL_GetTick();
+
+  AppMotorControl_ReseedRandom(now);
+  app_tb200s_load_mode = APP_TB200S_LOAD_VARIABLE;
+  app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+
+  if (!AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A))
+  {
+    return false;
+  }
+
+  if (app_mc_state == APP_MC_RUNNING)
+  {
+    AppMotorControl_ScheduleNextLoadChange(now);
+  }
+  return true;
+}
+
+float AppMotorControl_GetLoadSetpointA(void)
+{
+  return app_tb200s_load_setpoint_a;
 }
 
 static void AppMotorControl_ScheduleNextButtonSpeedChange(uint32_t now)
@@ -197,16 +395,18 @@ static void AppMotorControl_StartButtonProfile(uint32_t now)
 {
   float initial_speed_rpm;
 
-  app_button_random_state ^= now + 0x9E3779B9U;
-  if (app_button_random_state == 0U)
-  {
-    app_button_random_state = 0x6D2B79F5U;
-  }
-
-  (void)AppMotorControl_ButtonRandomNext();
+  AppMotorControl_ReseedRandom(now);
   app_button_profile_active = true;
   app_button_speed_change_scheduled = false;
   app_button_next_speed_change_ms = 0U;
+  /* B2 est toujours le profil autonome tout-variable. Une ancienne commande
+   * série ne doit donc pas laisser le frein en mode fixe lors d'un lancement
+   * manuel ultérieur. Le dashboard renvoie LOAD avant chacun de ses START. */
+  app_tb200s_load_mode = APP_TB200S_LOAD_VARIABLE;
+  app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+  (void)AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A);
 
   initial_speed_rpm = AppMotorControl_SelectNextButtonSpeed();
   AppMotorControl_SetButtonProfileConfig(initial_speed_rpm);
@@ -420,6 +620,17 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 
 void AppMotorControl_Init(void)
 {
+  app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
+  app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
+  app_tb200s_load_setpoint_a = APP_TB200S_MIN_LOAD_A;
+  app_tb200s_change_scheduled = false;
+  app_tb200s_next_change_ms = 0U;
+  if ((HAL_DAC_Start(&hdac1, DAC_CHANNEL_2) != HAL_OK) ||
+      !AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A))
+  {
+    Error_Handler();
+  }
+
   app_mc_boot_ms = HAL_GetTick();
   app_motor_start_requested = false;
   app_motor_next_start_attempt_ms = 0U;
@@ -454,6 +665,14 @@ bool AppMotorControl_Start(void)
     return false;
   }
 
+  /* La charge minimale est écrite avant toute polarisation/démarrage MCSDK.
+   * Une consigne fixe supérieure n'est restaurée qu'après confirmation RUN. */
+  if (!AppMotorControl_PrepareLoadForMotorStart())
+  {
+    app_mc_state = APP_MC_FAULT;
+    return false;
+  }
+
   app_active_iq_limit_a = app_iq_limit_a;
   if (app_active_iq_limit_a > APP_IQ_START_LIMIT_A)
   {
@@ -483,6 +702,7 @@ void AppMotorControl_Stop(void)
   app_motor_start_requested = false;
   AppMotorControl_StopButtonProfile();
   MC_StopMotor1();
+  AppMotorControl_OnMotorStopped();
 
   app_mc_state = APP_MC_IDLE;
   app_mc_start_ms = 0U;
@@ -553,7 +773,7 @@ static void AppMotorControl_HandleButtonToggle(void)
   AppMotorControl_StartButtonProfile(now);
   app_motor_start_requested = true;
   app_motor_next_start_attempt_ms = 0U;
-  AppDatalog_SendText("#B2,START_REQUESTED,random_rpm=2000-4000,change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
+  AppDatalog_SendText("#B2,START_REQUESTED,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
 }
 
 static void AppMotorControl_ServiceStartRequest(uint32_t now,
@@ -581,7 +801,7 @@ static void AppMotorControl_ServiceStartRequest(uint32_t now,
 
   if (AppMotorControl_Start())
   {
-    AppDatalog_SendText("#B2,START,random_rpm=2000-4000,change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
+    AppDatalog_SendText("#B2,START,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
   }
   else
   {
@@ -634,6 +854,7 @@ void AppMotorControl_Task(void)
   if (current_faults != MC_NO_FAULTS)
   {
     MC_StopMotor1();
+    AppMotorControl_OnMotorStopped();
     app_mc_state = APP_MC_FAULT;
     return;
   }
@@ -656,16 +877,25 @@ void AppMotorControl_Task(void)
         AppMotorControl_ResetSpeedPi();
         AppMotorControl_SetIqLimit(app_active_iq_limit_a, true);
         AppMotorControl_ApplySpeedReference();
+        if (!AppMotorControl_OnMotorRunning(now))
+        {
+          MC_StopMotor1();
+          AppMotorControl_OnMotorStopped();
+          app_mc_state = APP_MC_FAULT;
+          break;
+        }
         app_mc_overcurrent_since_ms = 0U;
         app_mc_overspeed_since_ms = 0U;
       }
       else if ((mc_state == FAULT_NOW) || (mc_state == FAULT_OVER))
       {
+        AppMotorControl_OnMotorStopped();
         app_mc_state = APP_MC_FAULT;
       }
       else if ((now - app_mc_start_ms) > APP_STARTUP_TIMEOUT_MS)
       {
         MC_StopMotor1();
+        AppMotorControl_OnMotorStopped();
         app_mc_state = APP_MC_FAULT;
       }
       break;
@@ -673,6 +903,13 @@ void AppMotorControl_Task(void)
     case APP_MC_RUNNING:
     {
       AppMotorControl_ServiceButtonProfile(now);
+      if (!AppMotorControl_ServiceVariableLoad(now))
+      {
+        MC_StopMotor1();
+        AppMotorControl_OnMotorStopped();
+        app_mc_state = APP_MC_FAULT;
+        return;
+      }
       AppMotorControl_UpdateIqLimitRamp(now);
 
       dq_float_t idq = MC_GetCurrentMotor1_F();
@@ -687,6 +924,7 @@ void AppMotorControl_Task(void)
         app_motor_start_requested = false;
         AppMotorControl_StopButtonProfile();
         MC_StopMotor1();
+        AppMotorControl_OnMotorStopped();
         app_mc_state = APP_MC_FAULT;
         return;
       }
@@ -703,6 +941,7 @@ void AppMotorControl_Task(void)
           if ((now - app_mc_overcurrent_since_ms) >= APP_HARD_STOP_DEBOUNCE_MS)
           {
             MC_StopMotor1();
+            AppMotorControl_OnMotorStopped();
             app_mc_state = APP_MC_FAULT;
           }
         }
@@ -726,6 +965,7 @@ void AppMotorControl_Task(void)
           app_motor_start_requested = false;
           AppMotorControl_StopButtonProfile();
           MC_StopMotor1();
+          AppMotorControl_OnMotorStopped();
           app_mc_state = APP_MC_FAULT;
           return;
         }
@@ -750,6 +990,7 @@ void AppMotorControl_Task(void)
           if ((now - app_mc_overspeed_since_ms) >= APP_OVERSPEED_DEBOUNCE_MS)
           {
             MC_StopMotor1();
+            AppMotorControl_OnMotorStopped();
             app_mc_state = APP_MC_FAULT;
           }
         }

@@ -316,7 +316,8 @@ static void AppDatalog_SendHeader(void)
     "motor_uq_v,"
     "motor_speed_mech_rpm,"
     "motor_id_a,"
-    "motor_iq_a\r\n"
+    "motor_iq_a,"
+    "load_setpoint_a\r\n"
   );
 }
 
@@ -370,6 +371,11 @@ static void AppDatalog_SendDataLine(uint32_t now)
   AppDatalog_LineAppendMilliCsv(line, sizeof(line), &used, AppDatalog_FloatToMilli(speed_mech_rpm));
   AppDatalog_LineAppendMilliCsv(line, sizeof(line), &used, AppDatalog_FloatToMilli(idq.D));
   AppDatalog_LineAppendMilliCsv(line, sizeof(line), &used, AppDatalog_FloatToMilli(idq.Q));
+  AppDatalog_LineAppendMilliCsv(line,
+                                sizeof(line),
+                                &used,
+                                AppDatalog_FloatToMilli(
+                                  AppMotorControl_GetLoadSetpointA()));
 
   AppDatalog_LineAppend(line, sizeof(line), &used, "\r\n");
 

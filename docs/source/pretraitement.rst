@@ -12,6 +12,8 @@ suitable for NanoEdge AI Studio. By default:
 * CSV separator: `;`;
 * header: disabled;
 * timestamp: omitted from output.
+* TB-200S load command: accepted in the raw input but omitted from the
+  model-ready output unless `--include-load-setpoint` is requested.
 
 NanoEdge AI target
 ------------------
@@ -67,6 +69,13 @@ The eleven explanatory variables are the six raw inputs followed by the five
 derived quantities. For each variable, the file contains its instantaneous
 value and four EWMAs, giving :math:`11 \times 5 = 55` features.
 
+`load_setpoint_a` is a commanded TB-200S current, not a measured motor
+quantity. It is not smoothed and is not one of the 55 axes expected by the
+currently embedded NanoEdge AI model. The default output therefore remains
+strictly backward-compatible. With `--include-load-setpoint`, the command is
+appended after all 55 model features; use this form for traceability or future
+model experiments, not as a drop-in input for the current 55-axis model.
+
 The order is deterministic:
 
 .. code-block:: text
@@ -84,6 +93,7 @@ The order is deterministic:
    S_el, then its 4 EWMAs
    speed_current, then its 4 EWMAs
    speed_power, then its 4 EWMAs
+   [load_setpoint_a if --include-load-setpoint]
 
 `stm32_time_ms` is not a model input. With `--include-time`, the file
 therefore contains one target, an informational timestamp, and 55 features.
@@ -124,6 +134,15 @@ Output options
 `--include-time`
    Keeps `stm32_time_ms` immediately after the target.
 
+`--include-load-setpoint`
+   Appends the unfiltered `load_setpoint_a` command after the 55 model axes.
+   A legacy input without this column produces an empty/`NaN` value rather
+   than inventing a zero-current command.
+
+`--no-include-load-setpoint`
+   Keeps the historical target-plus-55 schema. This is the default and the
+   form required by the current embedded model.
+
 `--frequency-hz`
    Sets the acquisition rate and therefore the EWMA spans.
 
@@ -143,9 +162,12 @@ Equivalent environment variables are `PMSM_PREPROCESS_INPUT_DIR`,
 Numeric cleanup
 ---------------
 
-`stm32_time_ms` and the six explanatory inputs are converted with
-`errors="coerce"`. Derived values and EWMAs are then computed, infinite
-values become missing, and missing numeric values are replaced with `0.0`.
+`stm32_time_ms`, the six explanatory inputs, and `load_setpoint_a` when
+present are converted with `errors="coerce"`. Derived values and EWMAs are
+then computed. Infinite or missing **model features** are replaced with
+`0.0`. The load command is deliberately excluded from this fallback: when it
+is included in the output, invalid, infinite, or historically absent values
+remain empty/`NaN` so they cannot be mistaken for a measured 0 A command.
 
 The target is deliberately excluded from numeric conversion. With the
 current read options, invalid text markers in it are therefore not replaced

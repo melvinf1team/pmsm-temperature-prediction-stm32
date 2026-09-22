@@ -11,7 +11,8 @@ Select the mode at compile time in `Inc/app_config.h`:
 #define APP_NEAI_MODEL_ENABLED  1U
 ```
 
-- `1U`: run the embedded model and output `D6T temperature;prediction`;
+- `1U`: run the embedded model and output
+  `D6T temperature;prediction;TB-200S load setpoint`;
 - `0U`: skip the model and output 55 features for the Serial Emulator.
 
 The stream starts automatically at boot. It contains no header, `DATA`
@@ -26,6 +27,7 @@ Validation-specific components are mainly in:
 | `STM32CubeIDE/Application/User/preprocess_ewma.c` | Float32 computation of 55 features |
 | `STM32CubeIDE/Application/User/app_ai_model.c` | NanoEdge AI checks and calls |
 | `STM32CubeIDE/Application/User/app_datalog.c` | Acquisition, timing, and USART1 output |
+| `STM32CubeIDE/Application/User/app_motor_control.c` | Motor state machine and TB-200S DAC/load scheduler |
 | `Inc/app_config.h` | Model/Emulator mode selection |
 | `Inc/preprocess_ewma.h` | Preprocessing period and dimensions |
 | `AI_Model/feature_order.txt` | Required order of 55 axes |
@@ -52,6 +54,45 @@ the `Id/Iq` command magnitude and application shutdown threshold on measured
 magnitude are capped at 28 A. This internal profile does not raise the
 50 electrical Hz/s limit for the acquisition firmware's UART configurations.
 A second press stops and disables the profile.
+
+B2 always selects the fully variable profile. It forces the TB-200S command
+to 0.05 A before starting the motor, then varies both speed and brake load;
+it overrides an earlier serial load or profile selection. The same profile, and
+three controlled alternatives, are available over USART1:
+
+| Command | Speed | Brake command |
+|---|---|---|
+| `PROFILE,STABLE` | 2500 rpm | Fixed 0.10 A |
+| `PROFILE,VARIABLE_LOAD` | 2500 rpm | Pseudorandom 0.05--0.25 A every 2--5 s |
+| `PROFILE,VARIABLE_SPEED` | Pseudorandom 2000--4000 rpm every 2--5 s | Fixed 0.10 A |
+| `PROFILE,VARIABLE_ALL` | Pseudorandom 2000--4000 rpm every 2--5 s | Pseudorandom 0.05--0.25 A every 2--5 s |
+
+All four commands first arm the DAC at 0.05 A and then start the motor. For
+the fixed-load profiles, 0.10 A is applied only after MCSDK reports `RUN`.
+They use the same 500 electrical Hz/s ramp and 25 A/28 A profile limits as B2.
+An accepted request returns `ACK,PROFILE,<TOKEN>`. `STOP` is idempotent,
+stops the motor, restores 0.05 A, and returns `ACK,STOP`. A missing or unknown
+profile token returns `ERR,BAD_PROFILE`; a DAC initialization failure returns
+`ERR,LOAD_DAC_FAILED`; an internal profile rejection returns
+`ERR,PROFILE_REJECTED`; other unknown commands return `ERR,UNKNOWN_COMMAND`.
+If a different profile is already active, the firmware requests its stop,
+waits asynchronously for MCSDK to return to `IDLE`, and then starts the newly
+armed profile. The acknowledgment confirms acceptance, not that `RUN` has
+already been reached.
+
+For low-level backward compatibility, the firmware still parses
+`LOAD,<amps>` and `LOAD,VARIABLE`. The validation GUI no longer sends or
+exposes these commands; `PROFILE,<TOKEN>` and B2 both replace any legacy load
+state.
+
+Both firmware projects drive `PA5 / DAC1_OUT2` on Morpho `CN7-32`. Connect it
+through 1 kΩ to TB-200S `ADJ`, connect board and controller grounds, and fit
+4.7 µF from ADJ to GND (`+` on ADJ for a polarized capacitor). Use the
+controller's 0--10 V external-input mode, never connect its `+10V` terminal
+to the STM32, and see the root README for the full pin audit and calibration
+warning. Only 0.1667--0.8333 V is requested; no 0--10 V amplifier is used.
+Because the buffered STM32G473 DAC is guaranteed only from 0.2 V, measure and
+qualify the nominal 0.1667 V / 0.05 A launch point on the actual hardware.
 
 A nonfinite (`NaN` or infinite) MCSDK current or speed reading immediately
 stops the motor, disables B2, and puts motor control into a fault state.
@@ -103,21 +144,37 @@ With `APP_NEAI_MODEL_ENABLED == 1U`, `app_ai_model.c` checks library identity
 and dimensions, initializes extrapolation, copies the 55-`float` vector,
 then calls `neai_extrapolation()`.
 
-Each valid UART line contains two temperatures in degrees Celsius:
+Each valid UART line contains the two temperatures in degrees Celsius and the
+instantaneous commanded TB-200S current in amperes:
 
 ```text
-<d6t_temp_c>;<predicted_temp_c>
+<d6t_temp_c>;<predicted_temp_c>;<load_setpoint_a>
 ```
 
 Example:
 
 ```text
-31.400000;30.872314
+31.400000;30.872314;0.125000
 ```
 
 No line is emitted until the D6T provides a valid reading, or if NanoEdge
 initialization or inference fails. B2 speed changes add no text to the data
 stream.
+
+The companion `validation/test/temperature_validation_gui.py` separates the
+serial connection from motor control. Connecting never sends a motor command.
+Its visual `Collecte seule` card records the stream without controlling the
+motor, allowing B2 to start `VARIABLE_ALL` physically. The four controlled
+cards map to the four `PROFILE,<TOKEN>` commands and are started explicitly
+with **Démarrer ce profil**; **Arrêter le moteur** sends `STOP` only after the
+GUI has launched a profile. A pure collection session neither stops a B2 run
+nor sends a command when closing. When it owns the active profile, the GUI
+attempts a safety `STOP` before disconnecting or closing.
+
+The dashboard presents separate serial, data, and motor indicators, five KPI
+cards, a read-only TB-200S load gauge, and synchronized temperature, error, and
+load plots. It records `load_setpoint_a` in its validation CSV and still
+accepts a legacy two-field temperature line.
 
 Check the contract with a connected board:
 
@@ -246,9 +303,11 @@ files:
 ```
 
 This check covers the global 4500 rpm and 30 A ceilings, 14 A polarization,
-and B2's 25 A `Iq`, 28 A total threshold, 2000–4000 rpm range, direct draws,
+B2's 25 A `Iq`, 28 A total threshold, 2000–4000 rpm range, direct draws,
 2 to 5 second delays, and 500 electrical Hz/s ramp. It also checks the
-analog current range.
+0.05--0.25 A TB-200S range, four validation profiles, 2--5 second schedules,
+PA5/DAC1_OUT2 setup, profile command handlers, raw telemetry field, and analog
+current range.
 
 Compare simulated float32 preprocessing with pandas:
 
@@ -256,15 +315,14 @@ Compare simulated float32 preprocessing with pandas:
 .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_preprocess_parity.py
 ```
 
-State rechecked on September 15, 2026: the first seven logs pass, but
+State rechecked on September 21, 2026: the first seven logs pass, but
 `daq_log_20260827_080523.csv` reaches a scaled relative error of `0.000512959`
 on `speed_power_ewma_6600` at row 60913, against a `0.0005` limit. The full
 test currently fails. Assess this small float32 drift before changing the
 tolerance or implementation.
 
-The latest versioned Debug and Release builds produce their ELF files under
-STM32CubeIDE 2.1.1. The current revision of both controllers passes ARM GCC
-14.3 syntax compilation with the project options; a full relink has not been
-run. The serial check and qualification at 4500 rpm/30 A require a board and
-a secured test bench. No continuous integration pipeline is provided in the
-repository.
+All four current Debug/Release targets produce their ELF files under
+STM32CubeIDE 2.1.1, and all changed C sources pass ARM GCC 14.3 syntax
+compilation with warnings enabled. The serial check, TB-200S voltage/current
+calibration, and qualification at 4500 rpm/30 A require a board on a secured
+test bench. No continuous integration pipeline is provided in the repository.

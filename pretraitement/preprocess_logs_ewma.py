@@ -3,9 +3,12 @@
 The script reads CSV files produced by
 ``datalogging/motor_datalog_gui_dashboard.py``, keeps ``d6t_temp_c`` as the
 unchanged first-column target, then builds explanatory variables and their
-EWMAs. Reference EWMA spans were set for 2 Hz and are rescaled using the
-input file's actual acquisition rate. Paths can be supplied through the
-command line, a YAML file, or environment variables via ConfigArgParse.
+EWMAs. On request, the optional ``load_setpoint_a`` command is preserved as an
+unfiltered output column; legacy logs that do not contain it receive an unknown
+(NaN) value. The default output remains the historical target-plus-55 contract.
+Reference EWMA spans were set for 2 Hz and are rescaled using the input file's
+actual acquisition rate. Paths can be supplied through the command line, a
+YAML file, or environment variables via ConfigArgParse.
 """
 
 import os
@@ -36,12 +39,17 @@ WRITE_HEADER = False
 # Mettre a True si vous voulez garder stm32_time_ms dans les CSV de sortie.
 INCLUDE_TIME_MS = False
 
+# Mettre a True pour ajouter la consigne TB-200S apres les 55 axes du modele.
+# False preserve le contrat positionnel historique attendu par NanoEdge AI.
+INCLUDE_LOAD_SETPOINT = False
+
 # Spans optimises pour un datalogging a 2 Hz.
 REFERENCE_FREQUENCY_HZ = 2.0
 REFERENCE_SPANS = [1320, 3360, 6360, 9480]
 
 TIME_COLUMN = "stm32_time_ms"
 TARGET_COLUMN = "d6t_temp_c"
+LOAD_SETPOINT_COLUMN = "load_setpoint_a"
 
 # Colonnes explicatives : la target d6t_temp_c n'est jamais lissée.
 FEATURE_INPUT_COLUMNS = [
@@ -137,6 +145,22 @@ def parse_args(argv=None):
         dest="include_time_ms",
         action="store_false",
         help="Omit the stm32_time_ms column from the output CSV file.",
+    )
+    parser.add_argument(
+        "--include-load-setpoint",
+        dest="include_load_setpoint",
+        action="store_true",
+        default=INCLUDE_LOAD_SETPOINT,
+        help=(
+            "Append the unfiltered load_setpoint_a command after the 55 model "
+            "features. Legacy logs receive an empty/NaN value."
+        ),
+    )
+    parser.add_argument(
+        "--no-include-load-setpoint",
+        dest="include_load_setpoint",
+        action="store_false",
+        help="Keep the historical target-plus-55 output schema (default).",
     )
     args = parser.parse_args(argv)
     args.input_dir = path_from_arg(args.input_dir)
@@ -247,28 +271,63 @@ def build_ewma_features(df, spans):
     return pd.DataFrame(features, index=df.index)
 
 
-def output_columns(spans, include_time_ms):
+def model_feature_columns(spans):
+    """Return the ordered 55-feature contract used by the embedded model.
+
+    ``load_setpoint_a`` deliberately does not belong to this list: it is a
+    piecewise-constant command, not a measured signal to smooth, and the
+    currently exported firmware model still consumes the historical 55 axes.
+    """
+    columns = []
+
+    for column in EWM_COLUMNS:
+        columns.append(column)
+
+        for span in spans:
+            columns.append(f"{column}_ewma_{span}")
+
+    return columns
+
+
+def output_columns(spans, include_time_ms, include_load_setpoint=False):
     columns_to_keep = [TARGET_COLUMN]
 
     if include_time_ms:
         columns_to_keep.append(TIME_COLUMN)
 
-    for column in EWM_COLUMNS:
-        columns_to_keep.append(column)
+    columns_to_keep.extend(model_feature_columns(spans))
 
-        for span in spans:
-            columns_to_keep.append(f"{column}_ewma_{span}")
+    if include_load_setpoint:
+        # Append the command after the historical model features so their
+        # positions remain unchanged for existing positional consumers.
+        columns_to_keep.append(LOAD_SETPOINT_COLUMN)
 
     return columns_to_keep
 
 
-def process_file(csv_file, output_dir, write_header, include_time_ms, forced_frequency_hz):
+def process_file(
+    csv_file,
+    output_dir,
+    write_header,
+    include_time_ms,
+    forced_frequency_hz,
+    include_load_setpoint=False,
+):
     print(f"Processing {csv_file.name}")
 
     df = pd.read_csv(csv_file, sep=";", keep_default_na=False)
     require_columns(df, [TIME_COLUMN] + INPUT_COLUMNS, csv_file)
 
-    for column in [TIME_COLUMN] + FEATURE_INPUT_COLUMNS:
+    if include_load_setpoint and LOAD_SETPOINT_COLUMN not in df.columns:
+        # An absent command in a legacy log is unknown, not a zero-load
+        # measurement. Keep the output schema stable without fabricating data.
+        df[LOAD_SETPOINT_COLUMN] = np.nan
+
+    numeric_input_columns = [TIME_COLUMN] + FEATURE_INPUT_COLUMNS
+    if LOAD_SETPOINT_COLUMN in df.columns:
+        numeric_input_columns.append(LOAD_SETPOINT_COLUMN)
+
+    for column in numeric_input_columns:
         df[column] = pd.to_numeric(df[column], errors="coerce")
 
     acquisition_frequency_hz = detect_acquisition_frequency_hz(df, forced_frequency_hz)
@@ -290,19 +349,32 @@ def process_file(csv_file, output_dir, write_header, include_time_ms, forced_fre
         axis=1,
     )
 
-    df.replace(
-        [np.inf, -np.inf],
-        np.nan,
-        inplace=True,
-    )
+    columns_to_sanitize = model_feature_columns(spans)
+    if include_time_ms:
+        columns_to_sanitize = [TIME_COLUMN] + columns_to_sanitize
 
-    df.fillna(
-        0.0,
-        inplace=True,
+    # The embedded feature contract replaces invalid measured/derived values
+    # with zero. Do not apply that fallback to the load command: NaN carries
+    # the important distinction between "unknown" and a real 0 A setpoint.
+    df[columns_to_sanitize] = (
+        df[columns_to_sanitize]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
     )
+    if include_load_setpoint:
+        df[LOAD_SETPOINT_COLUMN] = df[LOAD_SETPOINT_COLUMN].replace(
+            [np.inf, -np.inf],
+            np.nan,
+        )
 
-    df_out = df[output_columns(spans, include_time_ms)]
-    assert not df_out.drop(columns=[TARGET_COLUMN]).isna().any().any()
+    df_out = df[
+        output_columns(
+            spans,
+            include_time_ms,
+            include_load_setpoint=include_load_setpoint,
+        )
+    ]
+    assert not df_out[columns_to_sanitize].isna().any().any()
 
     output_file = output_dir / csv_file.name
     df_out.to_csv(
@@ -333,6 +405,7 @@ def main():
             write_header=args.write_header,
             include_time_ms=args.include_time_ms,
             forced_frequency_hz=args.frequency_hz,
+            include_load_setpoint=args.include_load_setpoint,
         )
 
     print("Done.")

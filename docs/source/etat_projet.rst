@@ -1,7 +1,7 @@
 Project Assessment and Status
 =============================
 
-This page summarizes the repository audit updated on September 15, 2026.
+This page summarizes the repository audit updated on September 21, 2026.
 It separates locally verified findings from checks requiring the physical
 test bench or STM32CubeIDE.
 
@@ -37,16 +37,16 @@ threshold and the lack of a strict policy for invalid D6T targets.
 Verification status
 -------------------
 
-.. csv-table:: Results as of September 15, 2026
+.. csv-table:: Results as of September 21, 2026
    :header: "Check", "Status", "Result"
    :widths: 25, 20, 55
 
    "Strict Sphinx build", "Passed", "No warnings with -W --keep-going"
    "NanoEdge export consistency", "Passed", "Valid ID, ABI, symbols, dimensions, and Ridge artifacts"
-   "Temperature interface tests", "Passed", "3 tests run"
-   "Motor limit consistency", "Passed", "Dashboard, firmware, IOC, WBDEF, and Workbench checked"
+   "Profile-aware GUI/preprocessing tests", "Passed", "Targeted validation, dashboard, and preprocessing suites run"
+   "Motor and TB-200S consistency", "Passed", "Dashboard, firmware, PA5/DAC1, IOC, WBDEF, and Workbench checked"
    "Python/float32 parity", "Failed", "0.000512959 against a 0.0005 limit on the latest log"
-   "Motor controllers", "ARM syntax passed", "Both app_motor_control.c files pass ARM GCC 14.3 with -Ofast, -Wall, -Wextra, and -Wpedantic; no full relink"
+   "Firmware Debug/Release targets", "Passed", "All four ELF targets rebuilt; changed C files pass ARM GCC 14.3 with -Wall, -Wextra, and -Wpedantic"
    "USART1 contract on target", "Not run", "Requires a programmed board and COM port"
 
 Strengths
@@ -62,8 +62,9 @@ Robust acquisition
    the CSV regularly.
 
 Explicit contracts
-   The eight raw columns, 55 input axes, and two validation output formats
-   are defined and can be checked.
+   The nine raw columns, 55 input axes, and two validation modes are defined
+   and can be checked. Model-mode telemetry contains two temperatures plus
+   `load_setpoint_a`.
 
 Defense in depth
    Limits are checked on the PC and in firmware. Motor control monitors
@@ -97,6 +98,13 @@ Preventive DC bus protection is disabled in the current Workbench configuration
 (`M1_BUS_PROTECTION=false`). Downward transitions at this ramp rate can feed
 energy back and raise bus voltage. Monitor that voltage and validate supply
 absorption or braking before running the complete profile.
+
+The TB-200S control is intentionally limited to 0.05--0.25 A and uses only
+about 0.1667--0.8333 V from PA5/DAC1_OUT2. The lowest command is below the
+STM32G473 buffered-DAC guaranteed 0.2 V linear range. Measure the ADJ voltage
+and actual brake-controller output at both endpoints, and calibrate or revise
+the interface if 0.05 A accuracy is required. The logged value is a command,
+not independent current feedback.
 
 2. Numeric parity above the threshold
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,11 +144,12 @@ criterion.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Medium priority.** There is no CI or single test command.
-`validate_motor_limits.py` fixes the constants and generator files, and
-the three interface tests cover serial recovery and CSV writing, but not
-visual thresholds, all parser cases, dashboard arguments, or preprocessing
-of invalid files. Headless builds were run, but their command is not
-versioned and the state machines have no host unit tests.
+`validate_motor_limits.py` fixes the constants, DAC pin, protocol markers,
+and generator files. The targeted GUI and preprocessing tests cover profile
+command serialization, acknowledgments, startup order, legacy telemetry, CSV
+writing, and raw schema evolution, but not visual thresholds, all parser
+cases, dashboard arguments, or the firmware state machines on a host.
+Headless build commands are not versioned.
 
 6. Dependencies and privacy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -159,7 +168,8 @@ Recommended action plan
 
 1. Qualify 4500 rpm and 30 A gradually on an instrumented test bench, then
    validate the 25 A/28 A B2 profile and its 500 electrical Hz/s ramp
-   across the full range with shutdown measures active.
+   across the full range with shutdown measures active. Before that run,
+   measure PA5/ADJ and the TB-200S output at 0.05 A and 0.25 A.
 2. Diagnose the `speed_power_ewma_6600` divergence in the August 27 log
    before changing parity tolerance.
 3. Validate `d6t_temp_c` explicitly and report rows rejected during

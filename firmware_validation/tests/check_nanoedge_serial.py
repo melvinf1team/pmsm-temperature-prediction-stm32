@@ -12,8 +12,11 @@ from serial.tools import list_ports
 
 EXPECTED_COUNTS = {
     "emulator": 55,
-    "model": 2,
+    "model": 3,
 }
+
+MIN_LOAD_SETPOINT_A = 0.05
+MAX_LOAD_SETPOINT_A = 0.25
 
 
 def available_ports() -> str:
@@ -57,7 +60,10 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         choices=sorted(EXPECTED_COUNTS),
         default="model",
-        help="model: D6T/prediction; emulator: vector of 55 features.",
+        help=(
+            "model: D6T/prediction/TB-200S load command; "
+            "emulator: vector of 55 features."
+        ),
     )
     return parser.parse_args()
 
@@ -87,6 +93,13 @@ def main() -> None:
                 continue
 
             values = parse_line(raw_line, expected_count)
+            if args.mode == "model" and not (
+                MIN_LOAD_SETPOINT_A <= values[2] <= MAX_LOAD_SETPOINT_A
+            ):
+                raise ValueError(
+                    "consigne TB-200S hors plage: "
+                    f"{values[2]:.6f} A"
+                )
             checked += 1
             deadline = time.monotonic() + args.timeout
 
@@ -94,7 +107,8 @@ def main() -> None:
                 print(
                     f"ligne {checked}: D6T={values[0]:.6f} C, "
                     f"prediction={values[1]:.6f} C, "
-                    f"erreur={values[1] - values[0]:+.6f} C"
+                    f"erreur={values[1] - values[0]:+.6f} C, "
+                    f"charge={values[2]:.6f} A"
                 )
             elif checked <= 3:
                 print(

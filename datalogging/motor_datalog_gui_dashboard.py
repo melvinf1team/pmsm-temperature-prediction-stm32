@@ -3,8 +3,9 @@
 This module provides a Tkinter application for controlling an STM32
 B-G473E-ZEST1S with an STDES-LVHP01 power board, running a simple motor
 sequence, receiving UART measurements, recording CSV, and displaying live
-values. The final CSV is written to ``datalogging/logs`` and keeps only the STM32
-columns needed for NanoEdge AI preprocessing, without a PC timestamp. Default
+values. The final CSV is written to ``datalogging/logs`` and keeps the STM32
+columns needed for NanoEdge AI preprocessing plus the TB-200S load setpoint,
+without a PC timestamp. Default
 paths can be overridden by command-line options, YAML, or environment
 variables through ConfigArgParse.
 
@@ -12,6 +13,8 @@ The expected firmware serial protocol is line-oriented text::
 
     SYNC
     CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>,<datalog_ms>,<ds18b20_ms>
+    LOAD,<amps>
+    LOAD,VARIABLE
     START
     ACQ_START,<datalog_ms>,<ds18b20_ms>
     STOP
@@ -68,18 +71,24 @@ MAX_HARD_LIMIT_A = 30.0
 MAX_ACCEL_ELEC_HZ_S = 50.0
 MAX_DATALOG_MS = 10000
 MAX_DS18B20_MS = 10000
+MIN_LOAD_SETPOINT_A = 0.05
+MAX_LOAD_SETPOINT_A = 0.25
 
 ACQUISITION_MODE_MOTOR = "Motor + logging"
 ACQUISITION_MODE_IDLE = "Logging only (motor stopped)"
 ACQUISITION_MODES = (ACQUISITION_MODE_MOTOR, ACQUISITION_MODE_IDLE)
+LOAD_MODE_FIXED = "Fixed"
+LOAD_MODE_VARIABLE = "Variable"
+LOAD_MODES = (LOAD_MODE_FIXED, LOAD_MODE_VARIABLE)
 CUSTOM_PROFILE_NAME = "Custom"
 # Keep the former built-in name reserved in existing profile files.
 LEGACY_CUSTOM_PROFILE_NAME = "Personnalisé"
 
 # Columns written to the final CSV. Additional board columns may be displayed
-# live, but only these columns are retained in the data log.
+# live, but only preprocessing inputs and the requested load are retained.
 D6T_TEMPERATURE_COLUMN = "d6t_temp_c"
 D6T_TEMPERATURE_COLUMNS = {D6T_TEMPERATURE_COLUMN}
+LOAD_SETPOINT_COLUMN = "load_setpoint_a"
 
 CSV_OUTPUT_COLUMNS = [
     "stm32_time_ms",
@@ -90,6 +99,7 @@ CSV_OUTPUT_COLUMNS = [
     "motor_speed_mech_rpm",
     "motor_id_a",
     "motor_iq_a",
+    LOAD_SETPOINT_COLUMN,
 ]
 
 NON_PLOT_FIELDS = {"stm32_time_ms", "motor_speed_elec_hz", "motor_vbus_v"}
@@ -135,6 +145,9 @@ class MotorProfile:
         accel_elec_hz_s: Acceleration ramp in electrical hertz per second.
         datalog_ms: Firmware ``DATA`` transmission period.
         ds18b20_ms: DS18B20 sensor refresh period.
+        load_mode: TB-200S command mode, ``"Fixed"`` or ``"Variable"``.
+        load_setpoint_a: Fixed load request in amperes. In variable mode the
+            firmware starts at 0.05 A and selects subsequent values itself.
     """
     name: str
     speed_value: float
@@ -144,6 +157,8 @@ class MotorProfile:
     accel_elec_hz_s: float
     datalog_ms: int
     ds18b20_ms: int
+    load_mode: str = LOAD_MODE_FIXED
+    load_setpoint_a: float = MIN_LOAD_SETPOINT_A
 
 
 # Built-in base profile; user profiles are loaded from motor_profiles.json.
@@ -157,8 +172,40 @@ PROFILES = {
         accel_elec_hz_s=5.0,
         datalog_ms=100,
         ds18b20_ms=1000,
+        load_mode=LOAD_MODE_FIXED,
+        load_setpoint_a=MIN_LOAD_SETPOINT_A,
     ),
 }
+
+
+def normalize_load_mode(value):
+    """Return the canonical load mode used by profiles and UART commands."""
+    normalized = str(value).strip().casefold()
+    if normalized == LOAD_MODE_FIXED.casefold():
+        return LOAD_MODE_FIXED
+    if normalized == LOAD_MODE_VARIABLE.casefold():
+        return LOAD_MODE_VARIABLE
+    raise ValueError(f"Unsupported TB-200S load mode: {value!r}")
+
+
+def build_load_command(mode, load_setpoint_a=MIN_LOAD_SETPOINT_A):
+    """Build a validated, line-oriented TB-200S firmware command."""
+    normalized_mode = normalize_load_mode(mode)
+    if normalized_mode == LOAD_MODE_VARIABLE:
+        return "LOAD,VARIABLE\n"
+
+    try:
+        setpoint = float(load_setpoint_a)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The TB-200S load setpoint must be numeric.") from exc
+    if not math.isfinite(setpoint):
+        raise ValueError("The TB-200S load setpoint must be finite.")
+    if not MIN_LOAD_SETPOINT_A <= setpoint <= MAX_LOAD_SETPOINT_A:
+        raise ValueError(
+            f"The TB-200S load setpoint must be between "
+            f"{MIN_LOAD_SETPOINT_A:.2f} and {MAX_LOAD_SETPOINT_A:.2f} A."
+        )
+    return f"LOAD,{setpoint:.3f}\n"
 
 
 BUILTIN_PROFILE_NAMES = set(PROFILES.keys())
@@ -254,6 +301,7 @@ KNOWN_FIELDS = {
     "motor_speed_mech_rpm": ("Mech. speed", "rpm"),
     "motor_id_a": ("Id", "A"),
     "motor_iq_a": ("Iq", "A"),
+    LOAD_SETPOINT_COLUMN: ("TB-200S load", "A"),
 }
 
 DEFAULT_LIVE_FIELDS = [
@@ -265,6 +313,7 @@ DEFAULT_LIVE_FIELDS = [
     "motor_speed_mech_rpm",
     "motor_id_a",
     "motor_iq_a",
+    LOAD_SETPOINT_COLUMN,
 ]
 
 DEFAULT_PLOT_FIELDS = {
@@ -275,6 +324,7 @@ DEFAULT_PLOT_FIELDS = {
     "motor_speed_mech_rpm": "Mech. speed (rpm)",
     "motor_id_a": "Id (A)",
     "motor_iq_a": "Iq (A)",
+    LOAD_SETPOINT_COLUMN: "TB-200S load (A)",
 }
 
 DEFAULT_PLOT_SELECTION = {"motor_speed_mech_rpm", "motor_iq_a", "ds18b20_temp_c", "d6t_temp_c"}
@@ -287,6 +337,7 @@ PLOT_COLORS = {
     "motor_speed_mech_rpm": "#A3E635",
     "motor_id_a": "#2DD4BF",
     "motor_iq_a": "#F472B6",
+    LOAD_SETPOINT_COLUMN: "#FBBF24",
 }
 
 FIELD_ACCENTS = {
@@ -299,6 +350,7 @@ FIELD_ACCENTS = {
     "motor_speed_mech_rpm": "#A3E635",
     "motor_id_a": "#22D3EE",
     "motor_iq_a": "#F472B6",
+    LOAD_SETPOINT_COLUMN: "#FBBF24",
 }
 
 
@@ -383,6 +435,11 @@ class MotorDatalogGui(tk.Tk):
         self.status_detail_var = tk.StringVar(value="Select a COM port and settings.")
         self.warning_var = tk.StringVar(value="")
         self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
+        self.active_load_mode = LOAD_MODE_FIXED
+        self.active_load_setpoint_a = MIN_LOAD_SETPOINT_A
+
+        self.load_mode_var = tk.StringVar(value=LOAD_MODE_FIXED)
+        self.load_setpoint_var = tk.StringVar(value=self.format_float(MIN_LOAD_SETPOINT_A))
 
         self.live_fields = list(DEFAULT_LIVE_FIELDS)
         self.live_vars = {key: tk.StringVar(value=self.default_live_value(key)) for key in self.live_fields}
@@ -809,8 +866,27 @@ class MotorDatalogGui(tk.Tk):
         self.entry_widgets["hard_limit"] = self.hard_entry
         self.compact_form_row(profile, "Iq limit", self.iq_entry, "Hard stop", self.hard_entry, 3)
 
+        self.load_mode_combo = ttk.Combobox(
+            profile,
+            textvariable=self.load_mode_var,
+            values=LOAD_MODES,
+            state="readonly",
+            width=8,
+        )
+        self.combo_widgets["load_mode"] = self.load_mode_combo
+        self.load_setpoint_entry = ttk.Entry(profile, textvariable=self.load_setpoint_var, width=8)
+        self.entry_widgets["load_setpoint"] = self.load_setpoint_entry
+        self.compact_form_row(
+            profile,
+            "TB-200S mode",
+            self.load_mode_combo,
+            "Load (A)",
+            self.load_setpoint_entry,
+            4,
+        )
+
         self.save_profile_button = self.small_button(profile, "Save profile", self.save_current_profile, COLORS["lime"])
-        self.save_profile_button.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self.save_profile_button.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         self.save_profile_button.grid_remove()
 
         self.motor_profile_widgets = [
@@ -821,6 +897,8 @@ class MotorDatalogGui(tk.Tk):
             self.accel_entry,
             self.iq_entry,
             self.hard_entry,
+            self.load_mode_combo,
+            self.load_setpoint_entry,
         ]
 
         csv_card, csv_box = self.card(parent, "CSV output", padx=14, pady=12, accent=COLORS["amber"])
@@ -1033,11 +1111,13 @@ class MotorDatalogGui(tk.Tk):
         self.speed_hz_var.trace_add("write", self.on_speed_hz_changed)
         self.pole_pairs_var.trace_add("write", self.on_pole_pairs_changed)
         self.acquisition_mode_var.trace_add("write", self.on_acquisition_mode_changed)
+        self.load_mode_var.trace_add("write", self.on_load_mode_changed)
 
         for var in [
             self.iq_limit_var,
             self.hard_limit_var,
             self.accel_var,
+            self.load_setpoint_var,
             self.datalog_ms_var,
             self.ds18b20_ms_var,
         ]:
@@ -1082,6 +1162,12 @@ class MotorDatalogGui(tk.Tk):
                         self.profile_load_errors.append(f"Profile '{name}' skipped: invalid speed_unit.")
                         continue
 
+                    try:
+                        load_mode = normalize_load_mode(item.get("load_mode", LOAD_MODE_FIXED))
+                    except ValueError:
+                        self.profile_load_errors.append(f"Profile '{name}' skipped: invalid load_mode.")
+                        continue
+
                     profiles[name] = MotorProfile(
                         name=name,
                         speed_value=float(item.get("speed_value", 600.0)),
@@ -1091,6 +1177,10 @@ class MotorDatalogGui(tk.Tk):
                         accel_elec_hz_s=float(item.get("accel_elec_hz_s", 5.0)),
                         datalog_ms=int(item.get("datalog_ms", 100)),
                         ds18b20_ms=int(item.get("ds18b20_ms", 1000)),
+                        load_mode=load_mode,
+                        load_setpoint_a=float(
+                            item.get("load_setpoint_a", MIN_LOAD_SETPOINT_A)
+                        ),
                     )
             except Exception as exc:
                 self.profile_load_errors.append(f"Could not load {profile_store_path.name}: {exc}")
@@ -1155,11 +1245,21 @@ class MotorDatalogGui(tk.Tk):
 
     @staticmethod
     def csv_value_for_column(row, column):
-        """Return a CSV value, using NaN for missing infrared readings."""
+        """Return a CSV value, using NaN for unavailable sensor/setpoint data."""
         value = row.get(column, "")
-        if column in D6T_TEMPERATURE_COLUMNS and str(value).strip() == "":
+        if (
+            column in D6T_TEMPERATURE_COLUMNS or column == LOAD_SETPOINT_COLUMN
+        ) and str(value).strip() == "":
             return "NaN"
         return value
+
+    def load_setpoint_fallback(self):
+        """Return a best-effort load value for legacy firmware telemetry."""
+        if self.active_acquisition_mode != ACQUISITION_MODE_MOTOR:
+            return "NaN"
+        if self.active_load_mode == LOAD_MODE_FIXED:
+            return f"{self.active_load_setpoint_a:.6f}"
+        return "NaN"
 
     def reset_live_values(self):
         """Reset live cards before a new acquisition."""
@@ -1245,8 +1345,15 @@ class MotorDatalogGui(tk.Tk):
         self.acquisition_mode_combo.configure(state="disabled" if controls_locked else "readonly")
 
         for widget in self.motor_profile_widgets:
-            if widget is self.profile_combo:
+            if widget in {self.profile_combo, self.load_mode_combo}:
                 widget.configure(state="disabled" if (idle_mode or controls_locked) else "readonly")
+            elif widget is self.load_setpoint_entry:
+                load_is_variable = self.load_mode_var.get() == LOAD_MODE_VARIABLE
+                widget.configure(
+                    state="disabled"
+                    if (idle_mode or controls_locked or load_is_variable)
+                    else "normal"
+                )
             else:
                 widget.configure(state="disabled" if (idle_mode or controls_locked) else "normal")
 
@@ -1260,6 +1367,13 @@ class MotorDatalogGui(tk.Tk):
     def on_acquisition_mode_changed(self, *_args):
         """Handle switching between motor control and stopped-motor acquisition."""
         self.update_acquisition_mode_ui()
+        self.validate_form()
+
+    def on_load_mode_changed(self, *_args):
+        """Update the load field and profile state after a fixed/variable change."""
+        self.update_acquisition_mode_ui()
+        if not self.is_idle_acquisition_mode():
+            self.switch_to_custom_due_to_edit()
         self.validate_form()
 
     def switch_to_custom_due_to_edit(self):
@@ -1402,6 +1516,8 @@ class MotorDatalogGui(tk.Tk):
             accel_elec_hz_s=cfg["accel"],
             datalog_ms=cfg["datalog_ms"],
             ds18b20_ms=cfg["ds18b20_ms"],
+            load_mode=cfg["load_mode"],
+            load_setpoint_a=cfg["load_setpoint_a"],
         )
 
         self.profiles[name] = profile
@@ -1574,9 +1690,12 @@ class MotorDatalogGui(tk.Tk):
             self.accel_var.set(str(profile.accel_elec_hz_s))
             self.datalog_ms_var.set(str(profile.datalog_ms))
             self.ds18b20_ms_var.set(str(profile.ds18b20_ms))
+            self.load_mode_var.set(normalize_load_mode(profile.load_mode))
+            self.load_setpoint_var.set(self.format_float(profile.load_setpoint_a))
         finally:
             self._applying_profile = False
 
+        self.update_acquisition_mode_ui()
         self.update_save_profile_button()
         self.validate_form()
 
@@ -1627,9 +1746,15 @@ class MotorDatalogGui(tk.Tk):
             iq_limit = float(self.iq_limit_var.get().replace(",", "."))
             hard_limit = float(self.hard_limit_var.get().replace(",", "."))
             accel = float(self.accel_var.get().replace(",", "."))
+            load_mode = normalize_load_mode(self.load_mode_var.get())
+            if load_mode == LOAD_MODE_FIXED:
+                load_setpoint_a = float(self.load_setpoint_var.get().replace(",", "."))
+            else:
+                load_setpoint_a = MIN_LOAD_SETPOINT_A
 
             if not all(math.isfinite(value) for value in (
-                    target_rpm, speed_hz, iq_limit, hard_limit, accel)):
+                    target_rpm, speed_hz, iq_limit, hard_limit, accel,
+                    load_setpoint_a)):
                 raise ValueError("Motor settings must be finite numbers.")
             if not MIN_TARGET_SPEED_RPM <= target_rpm <= MAX_TARGET_SPEED_RPM:
                 raise ValueError(
@@ -1651,12 +1776,19 @@ class MotorDatalogGui(tk.Tk):
                 raise ValueError(
                     f"Acceleration must be at most {MAX_ACCEL_ELEC_HZ_S:g} electrical Hz/s."
                 )
+            if not MIN_LOAD_SETPOINT_A <= load_setpoint_a <= MAX_LOAD_SETPOINT_A:
+                raise ValueError(
+                    f"The TB-200S load must be between {MIN_LOAD_SETPOINT_A:.2f} "
+                    f"and {MAX_LOAD_SETPOINT_A:.2f} A."
+                )
 
             config.update({
                 "target_rpm": target_rpm,
                 "iq_limit": iq_limit,
                 "hard_limit": hard_limit,
                 "accel": accel,
+                "load_mode": load_mode,
+                "load_setpoint_a": load_setpoint_a,
             })
 
         return config
@@ -1792,6 +1924,8 @@ class MotorDatalogGui(tk.Tk):
         iq_limit = None
         hard_limit = None
         accel = None
+        load_mode = None
+        load_setpoint_a = None
 
         if not idle_mode:
             target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Speed (rpm)", 0)
@@ -1800,6 +1934,23 @@ class MotorDatalogGui(tk.Tk):
             iq_limit = parse_float("iq_limit", self.iq_limit_var, "Iq limit", 0)
             hard_limit = parse_float("hard_limit", self.hard_limit_var, "Hard stop", 0)
             accel = parse_float("accel", self.accel_var, "Acceleration", 0)
+            try:
+                load_mode = normalize_load_mode(self.load_mode_var.get())
+            except ValueError:
+                self.set_combo_invalid("load_mode", True)
+                errors.append("The TB-200S load mode is invalid.")
+            if load_mode == LOAD_MODE_FIXED:
+                load_setpoint_a = parse_float(
+                    "load_setpoint",
+                    self.load_setpoint_var,
+                    "TB-200S load",
+                    0,
+                )
+            elif load_mode == LOAD_MODE_VARIABLE:
+                warnings.append(
+                    "Variable TB-200S load starts at 0.05 A, then changes "
+                    "randomly between 0.05 A and 0.25 A every 2-5 s."
+                )
 
         datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "DATA period", 0)
         ds18b20_ms = parse_int("ds18b20_ms", self.ds18b20_ms_var, "DS18B20 period", 0)
@@ -1838,6 +1989,15 @@ class MotorDatalogGui(tk.Tk):
             self.set_field_invalid("accel", True)
             errors.append(
                 f"Maximum allowed acceleration is {MAX_ACCEL_ELEC_HZ_S:g} electrical Hz/s."
+            )
+
+        if load_setpoint_a is not None and not (
+            MIN_LOAD_SETPOINT_A <= load_setpoint_a <= MAX_LOAD_SETPOINT_A
+        ):
+            self.set_field_invalid("load_setpoint", True)
+            errors.append(
+                f"The TB-200S load must be between {MIN_LOAD_SETPOINT_A:.2f} "
+                f"and {MAX_LOAD_SETPOINT_A:.2f} A."
             )
 
         if datalog_ms is not None and datalog_ms > MAX_DATALOG_MS:
@@ -1928,6 +2088,9 @@ class MotorDatalogGui(tk.Tk):
         self.is_running = False
         self.is_stopping = False
         self.active_acquisition_mode = cfg["acquisition_mode"]
+        if cfg["acquisition_mode"] == ACQUISITION_MODE_MOTOR:
+            self.active_load_mode = cfg["load_mode"]
+            self.active_load_setpoint_a = cfg["load_setpoint_a"]
 
         self.start_button.configure(state=tk.DISABLED, bg="#14532D", fg="white")
         self.stop_button.configure(state=tk.NORMAL)
@@ -1981,6 +2144,16 @@ class MotorDatalogGui(tk.Tk):
                 self.clear_ack_queue()
                 self.send_command(cfg_cmd, char_delay=0.003)
                 self.wait_for_ack("CFG", timeout=5.0)
+
+                time.sleep(0.1)
+
+                load_cmd = build_load_command(
+                    cfg["load_mode"],
+                    cfg["load_setpoint_a"],
+                )
+                self.clear_ack_queue()
+                self.send_command(load_cmd, char_delay=0.002)
+                self.wait_for_ack("LOAD", timeout=5.0)
 
                 time.sleep(0.1)
 
@@ -2315,6 +2488,8 @@ class MotorDatalogGui(tk.Tk):
                 return
 
             row = dict(zip(self.csv_columns, values))
+            if LOAD_SETPOINT_COLUMN not in row:
+                row[LOAD_SETPOINT_COLUMN] = self.load_setpoint_fallback()
             self.csv_writer.writerow([self.csv_value_for_column(row, col) for col in self.csv_output_columns])
             self.csv_pending_rows += 1
             self.flush_csv()

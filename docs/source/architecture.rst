@@ -11,7 +11,7 @@ but have different operating protocols and required sampling rates.
 Responsibilities:
 
 * the acquisition firmware controls the motor, reads sensors, enforces safety
-  limits, and responds to dashboard commands;
+  limits, drives the TB-200S DAC setpoint, and responds to dashboard commands;
 * the dashboard manages the serial session, display, and raw CSV file;
 * preprocessing turns measurements into a training dataset;
 * the validation firmware reproduces the 55 features and, depending on its
@@ -24,6 +24,7 @@ Responsibilities:
    DS18B20 -------+--> acquisition firmware +--> Tkinter dashboard
                   |            ^            |
    MCSDK ---------+            | USART1     +--> live display
+   TB-200S <--- DAC1_OUT2      |
                                |
                           PC commands
 
@@ -31,6 +32,8 @@ Responsibilities:
                                                                    |
                                                                    v
    D6T + DS18B20 + MCSDK --> validation firmware --> features or prediction
+                                 |
+                                 +-- DAC1_OUT2 --> TB-200S
 
 Acquisition firmware
 --------------------
@@ -44,7 +47,9 @@ Application modules are in
 
 * `app_serial_control.c` uses interrupt-driven reception and a character
   queue to parse ASCII commands;
-* `app_motor_control.c` applies MCSDK ramps, limits, and shutdowns;
+* `app_motor_control.c` applies MCSDK ramps, limits, and shutdowns, converts
+  the 0.05--0.25 A TB-200S command to a DAC value, and schedules fixed or
+  variable load operation;
 * `app_datalog.c` schedules the sensors and feeds a nonblocking UART
   transmit queue;
 * `d6t_ir.c` and `ds18b20.c` isolate sensor protocols.
@@ -64,7 +69,14 @@ standalone data logging. The feature period is fixed at 100 ms (10 Hz) in
 `APP_NEAI_MODEL_ENABLED` selects the UART contract at compile time:
 
 * `0U`: 55 numeric values for the Serial Emulator;
-* `1U`: `d6t_temp_c;predicted_temp_c` for the validation interface.
+* `1U`: `d6t_temp_c;predicted_temp_c;load_setpoint_a` for the validation
+  interface; the PC parser remains compatible with the former two fields.
+
+The validation logger also owns USART1 reception. Its deliberately small
+control protocol accepts `PROFILE,<TOKEN>`, where the token is `STABLE`,
+`VARIABLE_LOAD`, `VARIABLE_SPEED`, or `VARIABLE_ALL`, plus `STOP`. It does not
+expose the acquisition firmware's broader configurable motor protocol.
+Connecting the validation GUI alone sends no motor command.
 
 Changing modes requires a clean build because the C preprocessor makes the
 selection.
@@ -73,15 +85,20 @@ Data contracts
 --------------
 
 The acquisition firmware announces columns with `#CSV_HEADER` and then emits
-`DATA` rows. The dashboard keeps only these eight columns:
+`DATA` rows. The dashboard keeps these nine columns:
 
 .. code-block:: text
 
-   stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
+   stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a;load_setpoint_a
 
 Python writes semicolon-separated files. By contrast, the acquisition
 firmware's UART protocol uses commas. The dashboard converts the separators
 when writing the file.
+
+`load_setpoint_a` is deliberately outside the 55-axis model contract. It is
+the commanded brake current and is retained in the raw data for experiment
+traceability. Offline preprocessing ignores it by default; the optional
+`--include-load-setpoint` switch appends it after all 55 axes without EWMA.
 
 Feature construction
 --------------------

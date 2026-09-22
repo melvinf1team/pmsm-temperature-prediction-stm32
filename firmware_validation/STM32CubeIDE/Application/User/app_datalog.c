@@ -30,6 +30,8 @@
 #define APP_DATALOG_UART_PUMP_MAX_BYTES  256U
 #define APP_DATALOG_LINE_SIZE            1024U
 #define APP_DATALOG_MAX_FLOAT_WHOLE      4294967040.0f
+#define APP_DATALOG_RX_QUEUE_SIZE          256U
+#define APP_DATALOG_RX_LINE_SIZE            64U
 #define APP_EWMA_SNAPSHOT_MAGIC           0x45574D41UL
 #define APP_EWMA_SNAPSHOT_VERSION         1UL
 #define APP_EWMA_SNAPSHOT_COUNT           2U
@@ -69,6 +71,12 @@ static uint32_t ewma_snapshot_sequence = 0U;
 static char tx_buffer[APP_DATALOG_TX_BUFFER_SIZE];
 static volatile uint16_t tx_head = 0U;
 static volatile uint16_t tx_tail = 0U;
+
+static volatile uint8_t rx_queue[APP_DATALOG_RX_QUEUE_SIZE];
+static volatile uint16_t rx_head = 0U;
+static volatile uint16_t rx_tail = 0U;
+static char rx_line[APP_DATALOG_RX_LINE_SIZE];
+static uint16_t rx_index = 0U;
 
 static uint32_t AppDatalog_Crc32Update(uint32_t crc,
                                       const volatile void *data,
@@ -228,6 +236,241 @@ static bool AppDatalog_UartQueueText(const char *text)
   }
 
   return true;
+}
+
+static void AppDatalog_RxPush(uint8_t value)
+{
+  uint16_t next = (uint16_t)((rx_head + 1U) % APP_DATALOG_RX_QUEUE_SIZE);
+
+  if (next != rx_tail)
+  {
+    rx_queue[rx_head] = value;
+    rx_head = next;
+  }
+}
+
+static bool AppDatalog_RxPop(uint8_t *value)
+{
+  if ((value == NULL) || (rx_tail == rx_head))
+  {
+    return false;
+  }
+
+  *value = rx_queue[rx_tail];
+  rx_tail = (uint16_t)((rx_tail + 1U) % APP_DATALOG_RX_QUEUE_SIZE);
+  return true;
+}
+
+void AppDatalog_OnUsart1Irq(void)
+{
+  if (LL_USART_IsActiveFlag_ORE(USART1))
+  {
+    LL_USART_ClearFlag_ORE(USART1);
+  }
+  if (LL_USART_IsActiveFlag_FE(USART1))
+  {
+    LL_USART_ClearFlag_FE(USART1);
+  }
+  if (LL_USART_IsActiveFlag_NE(USART1))
+  {
+    LL_USART_ClearFlag_NE(USART1);
+  }
+
+  while (LL_USART_IsActiveFlag_RXNE_RXFNE(USART1))
+  {
+    AppDatalog_RxPush(LL_USART_ReceiveData8(USART1));
+  }
+}
+
+static bool AppDatalog_ParseFloat(const char *text, float *value)
+{
+  const char *cursor = text;
+  uint32_t integer = 0U;
+  uint32_t fraction = 0U;
+  uint32_t scale = 1U;
+  bool has_digit = false;
+
+  if ((text == NULL) || (value == NULL))
+  {
+    return false;
+  }
+
+  while ((*cursor >= '0') && (*cursor <= '9'))
+  {
+    has_digit = true;
+    integer = (integer * 10U) + (uint32_t)(*cursor - '0');
+    cursor++;
+  }
+
+  if (*cursor == '.')
+  {
+    cursor++;
+    while ((*cursor >= '0') && (*cursor <= '9'))
+    {
+      has_digit = true;
+      if (scale < 1000000U)
+      {
+        fraction = (fraction * 10U) + (uint32_t)(*cursor - '0');
+        scale *= 10U;
+      }
+      cursor++;
+    }
+  }
+
+  while ((*cursor == ' ') || (*cursor == '\t'))
+  {
+    cursor++;
+  }
+
+  if (!has_digit || (*cursor != '\0'))
+  {
+    return false;
+  }
+
+  *value = (float)integer + ((float)fraction / (float)scale);
+  return true;
+}
+
+static bool AppDatalog_ParseProfile(const char *token,
+                                    AppMotorProfile_t *profile,
+                                    const char **ack_text)
+{
+  if ((token == NULL) || (profile == NULL) || (ack_text == NULL))
+  {
+    return false;
+  }
+
+  if (strcmp(token, "STABLE") == 0)
+  {
+    *profile = APP_MOTOR_PROFILE_STABLE;
+    *ack_text = "ACK,PROFILE,STABLE\r\n";
+    return true;
+  }
+  if (strcmp(token, "VARIABLE_LOAD") == 0)
+  {
+    *profile = APP_MOTOR_PROFILE_VARIABLE_LOAD;
+    *ack_text = "ACK,PROFILE,VARIABLE_LOAD\r\n";
+    return true;
+  }
+  if (strcmp(token, "VARIABLE_SPEED") == 0)
+  {
+    *profile = APP_MOTOR_PROFILE_VARIABLE_SPEED;
+    *ack_text = "ACK,PROFILE,VARIABLE_SPEED\r\n";
+    return true;
+  }
+  if (strcmp(token, "VARIABLE_ALL") == 0)
+  {
+    *profile = APP_MOTOR_PROFILE_VARIABLE_ALL;
+    *ack_text = "ACK,PROFILE,VARIABLE_ALL\r\n";
+    return true;
+  }
+
+  return false;
+}
+
+static void AppDatalog_HandleCommand(char *line)
+{
+  float load_a;
+  bool ok;
+  AppMotorProfile_t profile;
+  AppMotorProfileStartResult_t profile_result;
+  const char *profile_ack;
+
+  if (strcmp(line, "STOP") == 0)
+  {
+    AppMotorControl_Stop();
+    (void)AppDatalog_UartQueueText("ACK,STOP\r\n");
+    return;
+  }
+  if (strncmp(line, "PROFILE,", 8U) == 0)
+  {
+    if (!AppDatalog_ParseProfile(&line[8], &profile, &profile_ack))
+    {
+      (void)AppDatalog_UartQueueText("ERR,BAD_PROFILE\r\n");
+      return;
+    }
+
+    profile_result = AppMotorControl_StartProfile(profile);
+    if (profile_result == APP_MOTOR_PROFILE_START_ACCEPTED)
+    {
+      (void)AppDatalog_UartQueueText(profile_ack);
+    }
+    else if (profile_result == APP_MOTOR_PROFILE_START_LOAD_ERROR)
+    {
+      (void)AppDatalog_UartQueueText("ERR,LOAD_DAC_FAILED\r\n");
+    }
+    else
+    {
+      (void)AppDatalog_UartQueueText("ERR,PROFILE_REJECTED\r\n");
+    }
+    return;
+  }
+  if (strcmp(line, "PROFILE") == 0)
+  {
+    (void)AppDatalog_UartQueueText("ERR,BAD_PROFILE\r\n");
+    return;
+  }
+  if (strcmp(line, "LOAD,VARIABLE") == 0)
+  {
+    ok = AppMotorControl_SetLoadVariable();
+  }
+  else if (strncmp(line, "LOAD,", 5U) == 0)
+  {
+    if (!AppDatalog_ParseFloat(&line[5], &load_a))
+    {
+      (void)AppDatalog_UartQueueText("ERR,BAD_LOAD\r\n");
+      return;
+    }
+    if ((load_a < APP_TB200S_MIN_LOAD_A) ||
+        (load_a > APP_TB200S_MAX_LOAD_A))
+    {
+      (void)AppDatalog_UartQueueText("ERR,LOAD_VALUE_OUT_OF_RANGE\r\n");
+      return;
+    }
+    ok = AppMotorControl_SetLoadFixed(load_a);
+  }
+  else
+  {
+    (void)AppDatalog_UartQueueText("ERR,UNKNOWN_COMMAND\r\n");
+    return;
+  }
+
+  (void)AppDatalog_UartQueueText(ok
+    ? "ACK,LOAD\r\n"
+    : "ERR,LOAD_DAC_FAILED\r\n");
+}
+
+static void AppDatalog_SerialTask(void)
+{
+  uint8_t value;
+
+  while (AppDatalog_RxPop(&value))
+  {
+    if (value == '\r')
+    {
+      continue;
+    }
+    if (value == '\n')
+    {
+      rx_line[rx_index] = '\0';
+      AppDatalog_HandleCommand(rx_line);
+      rx_index = 0U;
+      continue;
+    }
+
+    if ((value >= 32U) && (value <= 126U))
+    {
+      if (rx_index < (APP_DATALOG_RX_LINE_SIZE - 1U))
+      {
+        rx_line[rx_index++] = (char)value;
+      }
+      else
+      {
+        rx_index = 0U;
+        (void)AppDatalog_UartQueueText("ERR,RX_LINE_TOO_LONG\r\n");
+      }
+    }
+  }
 }
 
 static void AppDatalog_UartRecover(void)
@@ -449,6 +692,11 @@ static void AppDatalog_SendDataLine(void)
                              &used,
                              ";",
                              predicted_temperature_c);
+  AppDatalog_LineAppendFloat(app_datalog_line,
+                             sizeof(app_datalog_line),
+                             &used,
+                             ";",
+                             AppMotorControl_GetLoadSetpointA());
 #else
   for (size_t index = 0U; index < PREPROCESS_EWMA_OUTPUT_COUNT; index++)
   {
@@ -474,6 +722,9 @@ void AppDatalog_Init(void)
   AppDatalog_TakeOverUsart1();
   tx_head = 0U;
   tx_tail = 0U;
+  rx_head = 0U;
+  rx_tail = 0U;
+  rx_index = 0U;
 
   D6TIR_Init();
   DS18B20_Init();
@@ -488,6 +739,13 @@ void AppDatalog_Init(void)
   ds18b20_next_start_ms = now;
   ds18b20_conversion_ready_ms = 0U;
   next_data_ms = now;
+
+  LL_USART_ClearFlag_ORE(USART1);
+  LL_USART_ClearFlag_FE(USART1);
+  LL_USART_ClearFlag_NE(USART1);
+  LL_USART_EnableIT_RXNE_RXFNE(USART1);
+  LL_USART_EnableIT_ERROR(USART1);
+  HAL_NVIC_EnableIRQ(USART1_IRQn);
 }
 
 void AppDatalog_Task(void)
@@ -495,6 +753,7 @@ void AppDatalog_Task(void)
   uint32_t now = HAL_GetTick();
 
   AppDatalog_UartPump();
+  AppDatalog_SerialTask();
   D6TIR_Task(now);
   AppDatalog_Ds18b20Task(now);
 

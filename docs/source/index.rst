@@ -8,7 +8,8 @@ directly on an STM32.
 The documented test bench uses a **B-G473E-ZEST1S**, an **STDES-LVHP01** power
 board, an **Omron D6T** infrared sensor, and a **DS18B20**. The
 `d6t_temp_c` temperature is the target; motor measurements and the
-DS18B20 temperature are the explanatory variables.
+DS18B20 temperature are the explanatory variables. A **TB-200S** controller
+applies a fixed or variable powder-brake load from the PA5/DAC1_OUT2 command.
 
 Recommended reading
 -------------------

@@ -35,7 +35,7 @@
 #include "mcp_config.h"
 
 /* USER CODE BEGIN Includes */
-#include "stm32g4xx_ll_usart.h"
+#include "app_datalog.h"
 /* USER CODE END Includes */
 
 /** @addtogroup MCSDK
@@ -69,14 +69,7 @@ void SysTick_Handler(void);
 //cstat !MISRAC2012-Rule-8.4
 void USART1_IRQHandler(void)
 {
-  LL_USART_ClearFlag_ORE(USART1);
-  LL_USART_ClearFlag_FE(USART1);
-  LL_USART_ClearFlag_NE(USART1);
-
-  while (LL_USART_IsActiveFlag_RXNE_RXFNE(USART1))
-  {
-    (void)LL_USART_ReceiveData8(USART1);
-  }
+  AppDatalog_OnUsart1Irq();
 }
 
 /**

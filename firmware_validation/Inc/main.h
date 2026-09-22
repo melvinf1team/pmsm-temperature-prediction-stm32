@@ -103,6 +103,8 @@ void Error_Handler(void);
 #define M1_PWM_WH_GPIO_Port GPIOC
 #define M1_CURR_AMP_W_Pin GPIO_PIN_8
 #define M1_CURR_AMP_W_GPIO_Port GPIOA
+#define TB200S_ADJ_Pin GPIO_PIN_5
+#define TB200S_ADJ_GPIO_Port GPIOA
 #define UART_RX_Pin GPIO_PIN_10
 #define UART_RX_GPIO_Port GPIOA
 #define M1_PWM_UL_Pin GPIO_PIN_10

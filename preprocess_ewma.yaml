@@ -1,3 +1,4 @@
 input-dir: datalogging/logs
 output-dir: pretraitement/logs_processed_ewma
 pattern: daq_log_*.csv
+include-load-setpoint: false

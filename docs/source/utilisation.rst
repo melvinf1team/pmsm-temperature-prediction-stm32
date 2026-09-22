@@ -10,7 +10,7 @@ Recommended sequence
 4. Start `datalogging/motor_datalog_gui_dashboard.py`.
 5. Select the port, 115200 baud, and session mode.
 6. In motor mode, choose or create a profile; in acquisition-only mode, enter
-   only the periods.
+   only the periods. Select a fixed TB-200S load or `Variable`.
 7. Check the CSV path, then start the session.
 8. Stop with the dashboard button, which sends `STOP` before closing resources.
 9. Inspect the raw CSV file before running preprocessing.
@@ -31,6 +31,7 @@ authority for commands sent directly over UART:
    "Acceleration", "greater than 0 to 50 electrical Hz/s", "Same limit in dashboard and firmware"
    "DATA period", "1 to 10,000 ms", "Sets the raw CSV sampling rate"
    "DS18B20 period", "750 to 10,000 ms", "Firmware raises shorter UART requests to 750 ms"
+   "TB-200S command", "0.05 to 0.25 A", "Fixed, or pseudorandom every 2 to 5 seconds"
 
 .. danger::
 
@@ -54,13 +55,24 @@ In both firmware projects, the first press of B2 starts this profile:
   15,000 rpm/s with two pole pairs;
 * the PI `Iq` output is limited to 25 A, while the `Id/Iq` command
   magnitude and shutdown threshold on measured magnitude are limited to 28 A.
+* the TB-200S command is forced to 0.05 A for motor launch, then changes
+  pseudorandomly between 0.05 and 0.25 A every 2 to 5 seconds;
 
 The pseudorandom generator is seeded with the time of the B2 press. The new
 setpoint is processed in the main loop, not in the interrupt. A second press
 stops the motor and disables the profile. Startup polarization stays at 14 A.
-The 500 electrical Hz/s B2 ramp is internal; UART profiles and the dashboard
-remain capped at 50 electrical Hz/s. A new UART configuration disables the B2
-profile and takes control immediately.
+Pressing B2 always selects the fully variable profile. It overrides any
+earlier serial load/profile selection and varies both speed and TB-200S load.
+The 500 electrical Hz/s profile ramp applies to B2 in both firmware projects
+and to the four ``PROFILE`` commands in the validation firmware. Motor starts
+configured by the acquisition dashboard remain capped at 50 electrical Hz/s.
+A new acquisition UART configuration disables the B2 profile and takes
+control immediately.
+
+The 0.05 A launch value also applies to UART-controlled starts. A fixed
+request above 0.05 A is applied only after MCSDK reports RUN. Variable load
+starts at 0.05 A and waits for its first 2--5 second deadline before drawing
+another value. Stopping returns the command to 0.05 A.
 
 Raw dashboard columns
 ---------------------
@@ -70,7 +82,7 @@ these columns in this order:
 
 .. code-block:: text
 
-   stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a
+   stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a;load_setpoint_a
 
 `stm32_time_ms`
    Board timestamp in milliseconds. Preprocessing uses it to derive the
@@ -92,6 +104,10 @@ these columns in this order:
 `motor_id_a` and `motor_iq_a`
    Motor d/q currents in amperes.
 
+`load_setpoint_a`
+   Instantaneous TB-200S current command in amperes. It is a setpoint, not an
+   independently measured brake current.
+
 Serial protocol
 ---------------
 
@@ -101,6 +117,8 @@ Commands sent by the dashboard:
 
    SYNC
    CFG,<target_rpm>,<iq_limit_a>,<hard_limit_a>,<accel_elec_hz_s>,<datalog_ms>,<ds18b20_ms>
+   LOAD,<load_setpoint_a>
+   LOAD,VARIABLE
    START
    ACQ_START,<datalog_ms>,<ds18b20_ms>
    STOP
@@ -111,6 +129,7 @@ Expected responses and messages:
 
    ACK,SYNC
    ACK,CFG
+   ACK,LOAD
    ACK,START
    ACK,ACQ_START
    ACK,STOP
@@ -136,7 +155,8 @@ timestamp checks easier.
 
 Before preprocessing, check at least:
 
-* that all eight expected columns are present;
+* that all nine expected columns are present;
+* that `load_setpoint_a` starts at 0.05 A and stays inside 0.05--0.25 A;
 * that `stm32_time_ms` increases mostly monotonically;
 * the test's sampling rate and duration;
 * `NaN` or empty lines in the D6T target;
@@ -149,17 +169,48 @@ After preprocessing, the CSV file begins with `d6t_temp_c`. Use this first
 column as the extrapolation target. The other columns are instantaneous,
 derived, and EWMA-smoothed features.
 
-By default, the processed file has no header. Use `--header` to inspect it,
-then compare its final order with
+By default, the processed file has no header and omits `load_setpoint_a`, so
+the target-plus-55 model contract is unchanged. Use `--header` to inspect it,
+or `--include-load-setpoint` to append the unfiltered command for
+traceability. Do not feed that optional 56th value to the current model. Then
+compare the model-feature order with
 `firmware_validation/AI_Model/feature_order.txt` before replacing the model.
 
 On-device validation
 --------------------
 
-The `firmware_validation` project is not controlled by dashboard commands.
-Its stream starts automatically at boot:
+The `firmware_validation` project is not controlled by the acquisition
+dashboard's `CFG`/`START` sequence. Its stream starts automatically at boot.
+Opening the temperature-validation GUI connection does not send a motor
+command. The visual `Collecte seule` card leaves motor control entirely to the
+operator; B2 can then start the fully variable standalone profile. The other
+GUI cards send one of these commands only when **Démarrer ce profil** is
+pressed:
 
-* model enabled: `d6t_temp_c;predicted_temp_c`;
+.. code-block:: text
+
+   PROFILE,STABLE
+   PROFILE,VARIABLE_LOAD
+   PROFILE,VARIABLE_SPEED
+   PROFILE,VARIABLE_ALL
+   STOP
+
+The four profiles respectively select stable speed/stable load, stable
+speed/variable load, variable speed/stable load, or both variable. Stable
+speed is 2500 rpm, variable speed is drawn from 2000--4000 rpm every 2--5
+seconds, stable load is 0.10 A, and variable load is drawn from
+0.05--0.25 A every 2--5 seconds. Every start first commands 0.05 A; 0.10 A
+is applied only after MCSDK reaches RUN.
+
+The firmware answers `ACK,PROFILE,<TOKEN>` or `ACK,STOP`; invalid requests
+return `ERR,<reason>`. **Arrêter le moteur** sends `STOP` only if the GUI
+launched a profile. A collection-only disconnect sends nothing; when the GUI
+owns the active profile, disconnecting or closing attempts a safety `STOP`.
+
+Telemetry remains independent of this control choice:
+
+* model enabled: `d6t_temp_c;predicted_temp_c;load_setpoint_a` (the GUI also
+  accepts the legacy two-field form);
 * model disabled: 55 numeric values for the Serial Emulator.
 
 Select the mode with `APP_NEAI_MODEL_ENABLED` in `Inc/app_config.h`. Perform a

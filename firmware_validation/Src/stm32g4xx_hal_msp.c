@@ -545,7 +545,22 @@ void HAL_CORDIC_MspDeInit(CORDIC_HandleTypeDef* hcordic)
   */
 void HAL_DAC_MspInit(DAC_HandleTypeDef* hdac)
 {
-  if(hdac->Instance==DAC3)
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(hdac->Instance==DAC1)
+  {
+    /* Peripheral clock enable */
+    __HAL_RCC_DAC1_CLK_ENABLE();
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    /**DAC1 GPIO Configuration
+    PA5     ------> DAC1_OUT2
+    */
+    GPIO_InitStruct.Pin = TB200S_ADJ_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(TB200S_ADJ_GPIO_Port, &GPIO_InitStruct);
+  }
+  else if(hdac->Instance==DAC3)
   {
     /* USER CODE BEGIN DAC3_MspInit 0 */
 
@@ -578,7 +593,13 @@ void HAL_DAC_MspInit(DAC_HandleTypeDef* hdac)
   */
 void HAL_DAC_MspDeInit(DAC_HandleTypeDef* hdac)
 {
-  if(hdac->Instance==DAC3)
+  if(hdac->Instance==DAC1)
+  {
+    /* Peripheral clock disable */
+    __HAL_RCC_DAC1_CLK_DISABLE();
+    HAL_GPIO_DeInit(TB200S_ADJ_GPIO_Port, TB200S_ADJ_Pin);
+  }
+  else if(hdac->Instance==DAC3)
   {
     /* USER CODE BEGIN DAC3_MspDeInit 0 */
 

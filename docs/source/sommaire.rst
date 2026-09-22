@@ -19,7 +19,9 @@ Main directories
 
 `firmware_validation/`
    Standalone STM32CubeIDE project. It reproduces preprocessing at 10 Hz and
-   publishes either 55 features or the D6T measurement and model prediction.
+   publishes either 55 features or the D6T measurement, model prediction, and
+   TB-200S command. It accepts four predefined speed/load profiles and a stop
+   command over USART1.
 
 `validation/`
    PC interface for temperature comparison, associated unit tests, and CSV
@@ -42,7 +44,8 @@ Processing flow
 
 1. The acquisition firmware waits for a command sequence from the dashboard.
 2. The dashboard receives `#CSV_HEADER` followed by `DATA` rows and writes a
-   semicolon-separated raw CSV file.
+   nine-column semicolon-separated raw CSV file, including
+   `load_setpoint_a`.
 3. Preprocessing keeps `d6t_temp_c` as the target, computes five physical
    quantities, and adds four EWMAs for each of eleven explanatory variables.
 4. The target plus 55 features are imported into NanoEdge AI Studio.

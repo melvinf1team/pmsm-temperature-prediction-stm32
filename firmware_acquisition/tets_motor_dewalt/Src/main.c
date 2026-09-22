@@ -56,6 +56,7 @@ COMP_HandleTypeDef hcomp7;
 
 CORDIC_HandleTypeDef hcordic;
 
+DAC_HandleTypeDef hdac1;
 DAC_HandleTypeDef hdac3;
 DAC_HandleTypeDef hdac4;
 
@@ -85,6 +86,7 @@ static void MX_COMP4_Init(void);
 static void MX_COMP6_Init(void);
 static void MX_COMP7_Init(void);
 static void MX_CORDIC_Init(void);
+static void MX_DAC1_Init(void);
 static void MX_DAC3_Init(void);
 static void MX_DAC4_Init(void);
 static void MX_OPAMP3_Init(void);
@@ -140,6 +142,7 @@ int main(void)
   MX_COMP6_Init();
   MX_COMP7_Init();
   MX_CORDIC_Init();
+  MX_DAC1_Init();
   MX_DAC3_Init();
   MX_DAC4_Init();
   MX_OPAMP3_Init();
@@ -618,6 +621,39 @@ static void MX_CORDIC_Init(void)
 
   /* USER CODE END CORDIC_Init 2 */
 
+}
+
+/**
+  * @brief DAC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_DAC1_Init(void)
+{
+
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /** DAC1 channel 2 drives the TB-200S ADJ input through a 1 kohm resistor.
+  */
+  hdac1.Instance = DAC1;
+  if (HAL_DAC_Init(&hdac1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
+  sConfig.DAC_DMADoubleDataMode = DISABLE;
+  sConfig.DAC_SignedFormat = DISABLE;
+  sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
+  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
+  sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
+  if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /**

@@ -24,6 +24,12 @@ EXPECTED_B2_IQ_LIMIT_A = 25.0
 EXPECTED_B2_TOTAL_CURRENT_A = 28.0
 EXPECTED_B2_ACCEL_ELEC_HZ_S = 500.0
 EXPECTED_CFG_MAX_ACCEL_ELEC_HZ_S = 50.0
+EXPECTED_TB200S_MIN_LOAD_A = 0.05
+EXPECTED_TB200S_MAX_LOAD_A = 0.25
+EXPECTED_TB200S_MIN_PERIOD_MS = 2000.0
+EXPECTED_TB200S_MAX_PERIOD_MS = 5000.0
+EXPECTED_PROFILE_FIXED_SPEED_RPM = 2500.0
+EXPECTED_PROFILE_FIXED_LOAD_A = 0.10
 
 
 def numeric_define(path: Path, name: str) -> float:
@@ -74,6 +80,8 @@ def validate_firmware_root(root: Path) -> None:
     assert numeric_define(app_header, "APP_MOTOR_MAX_TARGET_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
     assert numeric_define(app_header, "APP_MOTOR_MAX_IQ_LIMIT_A") == EXPECTED_MAX_CURRENT_A
     assert numeric_define(app_header, "APP_MOTOR_MAX_TOTAL_CURRENT_A") == EXPECTED_MAX_CURRENT_A
+    assert numeric_define(app_header, "APP_TB200S_MIN_LOAD_A") == EXPECTED_TB200S_MIN_LOAD_A
+    assert numeric_define(app_header, "APP_TB200S_MAX_LOAD_A") == EXPECTED_TB200S_MAX_LOAD_A
 
     assert numeric_define(drive_header, "MAX_APPLICATION_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
     assert numeric_define(drive_header, "BOARD_MAX_CURRENT") == EXPECTED_MAX_CURRENT_A
@@ -119,6 +127,18 @@ def validate_firmware_root(root: Path) -> None:
     for name, expected in expected_b2_defines.items():
         assert numeric_define(app_source, name) == expected
 
+    assert (
+        numeric_define(app_source, "APP_TB200S_MIN_CHANGE_PERIOD_MS")
+        == EXPECTED_TB200S_MIN_PERIOD_MS
+    )
+    assert (
+        numeric_define(app_source, "APP_TB200S_MAX_CHANGE_PERIOD_MS")
+        == EXPECTED_TB200S_MAX_PERIOD_MS
+    )
+    assert numeric_define(app_source, "APP_TB200S_DAC_VREF_V") == 3.3
+    assert numeric_define(app_source, "APP_TB200S_FULL_SCALE_V") == 10.0
+    assert numeric_define(app_source, "APP_TB200S_FULL_SCALE_A") == 3.0
+
     source = app_source.read_text(encoding="utf-8")
     assert (
         numeric_define(app_source, "APP_CFG_MAX_ACCEL_ELEC_HZ_S")
@@ -126,7 +146,19 @@ def validate_firmware_root(root: Path) -> None:
     )
     assert "APP_BUTTON_MIN_SPEED_STEP_RPM" not in source
     assert "APP_BUTTON_MAX_SPEED_STEP_RPM" not in source
-    assert "initial_speed_rpm = AppMotorControl_SelectNextButtonSpeed();" in source
+    if root == ACQUISITION_ROOT:
+        assert "initial_speed_rpm = AppMotorControl_SelectNextButtonSpeed();" in source
+    else:
+        assert (
+            numeric_define(app_source, "APP_PROFILE_FIXED_SPEED_RPM")
+            == EXPECTED_PROFILE_FIXED_SPEED_RPM
+        )
+        assert (
+            numeric_define(app_source, "APP_PROFILE_FIXED_LOAD_A")
+            == EXPECTED_PROFILE_FIXED_LOAD_A
+        )
+        assert "? AppMotorControl_SelectNextButtonSpeed()" in source
+        assert ": APP_PROFILE_FIXED_SPEED_RPM;" in source
     assert "(uint32_t)APP_BUTTON_MIN_TARGET_SPEED_RPM" in source
     assert "(uint32_t)APP_BUTTON_MAX_TARGET_SPEED_RPM" in source
     assert "} while ((float)next_speed_rpm == app_target_speed_rpm);" in source
@@ -144,8 +176,35 @@ def validate_firmware_root(root: Path) -> None:
         "AppMotorControl_SelectNextButtonSpeed",
         "AppMotorControl_ScheduleNextButtonSpeedChange",
         "AppMotorControl_ServiceButtonProfile",
+        "AppMotorControl_PrepareLoadForMotorStart",
+        "AppMotorControl_OnMotorRunning",
+        "AppMotorControl_ServiceVariableLoad",
+        "AppMotorControl_SetLoadFixed",
+        "AppMotorControl_SetLoadVariable",
+        "AppMotorControl_GetLoadSetpointA",
     ):
         assert function_name in source
+
+    start_body = source.split("bool AppMotorControl_Start(void)", maxsplit=1)[1].split(
+        "void AppMotorControl_Stop(void)", maxsplit=1
+    )[0]
+    assert start_body.index("AppMotorControl_PrepareLoadForMotorStart()") < start_body.index(
+        "MC_StartWithPolarizationMotor1()"
+    )
+    assert "AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A)" in source
+    assert "AppMotorControl_ScheduleNextLoadChange(now);" in source
+    assert "(app_mc_state == APP_MC_RUNNING) ? load_a : APP_TB200S_MIN_LOAD_A" in source
+
+    ioc_text = (root / "tets_motor_dewalt.ioc").read_text(encoding="utf-8")
+    assert "PA5.Signal=DAC1_OUT2" in ioc_text
+    assert "PA5.GPIO_Label=TB200S_ADJ" in ioc_text
+    assert "DAC1.DAC_OutputBuffer-DAC_OUT2=DAC_OUTPUTBUFFER_ENABLE" in ioc_text
+
+    main_source = (root / "Src" / "main.c").read_text(encoding="utf-8")
+    msp_source = (root / "Src" / "stm32g4xx_hal_msp.c").read_text(encoding="utf-8")
+    assert "MX_DAC1_Init();" in main_source
+    assert "HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_2)" in main_source
+    assert "PA5     ------> DAC1_OUT2" in msp_source
 
     assert source.count("AppMotorControl_ApplySpeedReference();") >= 3
     assert "if (speed_limit_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM)" in source
@@ -164,6 +223,47 @@ def validate_firmware_root(root: Path) -> None:
         assert "AppMotorControl_ServiceStartRequest" in source
         assert "if (state != IDLE)" in source
         assert "iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500" in source
+        serial_source = (
+            root / "STM32CubeIDE" / "Application" / "User" / "app_serial_control.c"
+        ).read_text(encoding="utf-8")
+        datalog_source = (
+            root / "STM32CubeIDE" / "Application" / "User" / "app_datalog.c"
+        ).read_text(encoding="utf-8")
+        assert 'strcmp(line, "LOAD,VARIABLE") == 0' in serial_source
+        assert 'AppSerial_SendAck("LOAD")' in serial_source
+        assert '"load_setpoint_a\\r\\n"' in datalog_source
+    else:
+        datalog_source = (
+            root / "STM32CubeIDE" / "Application" / "User" / "app_datalog.c"
+        ).read_text(encoding="utf-8")
+        assert 'strcmp(line, "LOAD,VARIABLE") == 0' in datalog_source
+        assert '"ACK,LOAD\\r\\n"' in datalog_source
+        assert "AppMotorControl_GetLoadSetpointA()" in datalog_source
+        assert "AppMotorControl_StartProfile" in source
+        assert "AppMotorControl_ConfigureProfile" in source
+        assert "app_button_speed_variable = variable_speed;" in source
+        assert "app_tb200s_requested_load_a = variable_load" in source
+        assert "? APP_TB200S_MIN_LOAD_A" in source
+        assert ": APP_PROFILE_FIXED_LOAD_A;" in source
+        assert (
+            "AppMotorControl_StartProfile(APP_MOTOR_PROFILE_VARIABLE_ALL)"
+            in source
+        )
+        assert "if (!app_tb200s_load_command_received)" not in source
+        assert "app_motor_start_requested = true;" in source
+
+        for token in (
+            "STABLE",
+            "VARIABLE_LOAD",
+            "VARIABLE_SPEED",
+            "VARIABLE_ALL",
+        ):
+            assert f'PROFILE,{token}' in datalog_source
+            assert f'ACK,PROFILE,{token}\\r\\n' in datalog_source
+        assert 'strcmp(line, "STOP") == 0' in datalog_source
+        assert '"ACK,STOP\\r\\n"' in datalog_source
+        assert '"ERR,BAD_PROFILE\\r\\n"' in datalog_source
+        assert '"ERR,UNKNOWN_COMMAND\\r\\n"' in datalog_source
 
     parameters_source = (root / "Src" / "mc_parameters.c").read_text(encoding="utf-8")
     polpulse_source = (root / "Src" / "mc_polpulse.c").read_text(encoding="utf-8")
@@ -183,6 +283,9 @@ def main() -> None:
     assert dashboard.MAX_IQ_LIMIT_A == EXPECTED_MAX_CURRENT_A
     assert dashboard.MAX_HARD_LIMIT_A == EXPECTED_MAX_CURRENT_A
     assert dashboard.MAX_ACCEL_ELEC_HZ_S == 50.0
+    assert dashboard.MIN_LOAD_SETPOINT_A == EXPECTED_TB200S_MIN_LOAD_A
+    assert dashboard.MAX_LOAD_SETPOINT_A == EXPECTED_TB200S_MAX_LOAD_A
+    assert dashboard.LOAD_SETPOINT_COLUMN in dashboard.CSV_OUTPUT_COLUMNS
 
     profiles = json.loads(
         (PROJECT_ROOT / "datalogging" / "motor_profiles.json").read_text(encoding="utf-8")
@@ -200,7 +303,8 @@ def main() -> None:
 
     print(
         "Motor limits validation passed: global 4500 rpm/30 A; "
-        "B2 2000-4000 rpm, 2-5 s, Iq 25 A, total 28 A, 500 Hz_e/s."
+        "B2 2000-4000 rpm and TB-200S 0.05-0.25 A every 2-5 s; "
+        "Iq 25 A, total 28 A, 500 Hz_e/s."
     )
 
 

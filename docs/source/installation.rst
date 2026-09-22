@@ -100,9 +100,11 @@ From the repository root:
    python .\firmware_validation\tests\validate_preprocess_parity.py
    python .\firmware_validation\tests\validate_neai_export.py
    python .\firmware_validation\tests\validate_motor_limits.py
+   python .\datalogging\test_motor_datalog_gui_dashboard.py
+   python .\pretraitement\test\test_preprocess_logs_ewma.py
    python .\validation\test\test_temperature_validation_gui.py
 
-The last three commands pass for the documented state. The parity test
+The last five commands pass for the documented state. The parity test
 currently exceeds its tolerance on the August 27, 2026 log; see
 :doc:`validation_ia` for the exact result before using it as an acceptance
 criterion.
