@@ -51,7 +51,7 @@ Acquisition firmware --USART1--> Python dashboard --> Raw CSV files
 
 ## Prerequisites
 
-- Windows with Python 3 and Tkinter;
+- Windows with Python 3.10 or newer and Tkinter;
 - STM32CubeIDE with a GNU Arm toolchain compatible with Cortex-M4 hard-float;
 - STM32CubeProgrammer/ST-LINK to program the board;
 - NanoEdge AI Studio to train or replace the embedded library;
@@ -94,16 +94,14 @@ V_ADJ = load_setpoint_a × 10 / 3
 0.25 A -> 0.8333 V
 ```
 
-No 0–10 V amplifier is used. `PA4/DAC1_OUT1` and `PA6/DAC2_OUT1` were also
-free in the original `.ioc` files, but PA5 is the selected accessible output;
-DAC3/DAC4 remain reserved for motor protection comparators. Note that the
-STM32G473 guarantees its buffered DAC linear output only from 0.2 V, so the
-nominal 0.05 A point must be measured and qualified on the real bench. See
-[`docs/source/cablage.rst`](docs/source/cablage.rst) for the complete pin
-audit and safety checklist, the
+No 0–10 V amplifier is used. DAC3/DAC4 are reserved for the motor
+overcurrent comparators. The STM32G473 buffered DAC is guaranteed linear only
+from 0.2 V, so the nominal 0.05 A point must be measured and qualified on the
+bench. See [`docs/source/cablage.rst`](docs/source/cablage.rst) for the DAC
+pin table and safety checklist, the
 [B-G473E-ZEST1S user manual](https://www.st.com/resource/en/user_manual/um3118-motor-control-discovery-kit-with-stm32g473qe-mcu-stmicroelectronics.pdf),
- this [third-party mirror of a TB-200S external-control reference](https://manuals.plus/ae/1005008626943763),
- and the controller manual supplied with the exact TB-200S revision.
+a [TB-200S external-control reference (third-party mirror)](https://manuals.plus/ae/1005008626943763),
+and the manual supplied with the TB-200S controller.
 
 ## Acquisition and data logging
 
@@ -120,9 +118,9 @@ Two modes are available:
   recording a cooling phase.
 
 In both cases, `STOP` ends the session cleanly. Motor profiles are loaded from
-`datalogging/motor_profiles.json`. Each motor profile now selects either a
-fixed 0.05–0.25 A brake command or `Variable` for a new pseudorandom command
-every 2–5 seconds.
+`datalogging/motor_profiles.json`. Each motor profile selects either a fixed
+0.05–0.25 A brake command or `Variable` (pseudorandom command every
+2–5 seconds).
 
 The raw CSV uses semicolons and contains nine columns:
 
@@ -131,7 +129,8 @@ stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_r
 ```
 
 `load_setpoint_a` is the instantaneous command reported by the firmware, not
-an independently measured brake current.
+an independently measured brake current. The logs stored in
+`datalogging/logs` contain only the first eight columns.
 
 Configure paths in `dashboard_config.yaml`, with `--config`, or with these
 environment variables:
@@ -167,17 +166,19 @@ The script reads `datalogging/logs/daq_log_*.csv` and writes results to
 4. adds four EWMAs to each of the eleven explanatory variables;
 5. produces **55 features** in addition to the target.
 
-The new raw `load_setpoint_a` column is accepted without changing this model
-contract. It is omitted by default. Add `--include-load-setpoint` to append
-the unfiltered command after the 55 axes for traceability; do not use that
-extra column with the current 55-input embedded model.
+The TB-200S `load_setpoint_a` command is not a model input and is omitted by
+default. Like the timestamp, it can be kept in the output: it is then written
+unfiltered after the 55 features, and left empty for logs that do not contain
+it. Do not feed this extra column to the 55-input embedded model.
 
 Reference spans `[1320, 3360, 6360, 9480]` correspond to 2 Hz. The actual
 rate is derived from the median of positive `stm32_time_ms` differences, then
 the spans are rescaled. At 10 Hz, they become
 `[6600, 16800, 31800, 47400]`.
 
-By default, the output has neither a header nor a timestamp. Main options:
+By default, the output has no header, no timestamp, and no load command. Set
+`WRITE_HEADER`, `INCLUDE_TIME_MS`, or `INCLUDE_LOAD_SETPOINT` to `True` at the
+top of the script to change these defaults, or use the command-line options:
 
 ```powershell
 python .\pretraitement\preprocess_logs_ewma.py --header
@@ -187,15 +188,15 @@ python .\pretraitement\preprocess_logs_ewma.py --frequency-hz 10
 python .\pretraitement\preprocess_logs_ewma.py --config .\preprocess_ewma.yaml
 ```
 
-`PMSM_PREPROCESS_INPUT_DIR`, `PMSM_PREPROCESS_OUTPUT_DIR`, and
-`PMSM_PREPROCESS_PATTERN` override the input directory, output directory,
+`--no-header`, `--no-include-time`, and `--no-include-load-setpoint` force the
+opposite choice. `PMSM_PREPROCESS_INPUT_DIR`, `PMSM_PREPROCESS_OUTPUT_DIR`,
+and `PMSM_PREPROCESS_PATTERN` override the input directory, output directory,
 and filename pattern respectively.
 
-> **Data quality:** the current implementation converts explanatory variables
-> to numbers and replaces their invalid or infinite values with `0.0`. The
-> `d6t_temp_c` target is not converted: a `NaN` string or empty cell therefore
-> remains in the output. Check and filter these rows before importing into
-> NanoEdge AI Studio.
+> **Data quality:** preprocessing converts explanatory variables to numbers
+> and replaces their invalid or infinite values with `0.0`. Rows whose
+> `d6t_temp_c` target is not a finite number are dropped from the output after
+> the EWMAs are computed; their count is printed for each file.
 
 ## Acquisition firmware
 
@@ -227,37 +228,34 @@ Application limits are 4500 rpm, 30 A for `Iq`, and 30 A for total current.
 Minimum speed is 100 rpm, and acceleration is capped at 50 electrical Hz/s
 in both dashboard and firmware.
 
-B2 starts a standalone variable-speed profile separate from UART
-configuration. The first target and each subsequent one are drawn directly
-and pseudorandomly from the entire 2000–4000 rpm range. The target changes
-every 2 to 5 seconds, and consecutive draws cannot be identical. Startup
-and every transition use the fast MCSDK ramp of 500 electrical Hz/s, or
-15,000 rpm/s with the configured two pole pairs. The PI `Iq` output is capped
-at 25 A; the `Id/Iq` command magnitude and application shutdown threshold
-on measured magnitude are capped at 28 A. A second press stops the profile.
-The TB-200S command is set to 0.05 A before launch, then changes randomly
-between 0.05 and 0.25 A every 2–5 seconds. A fixed UART request above 0.05 A
-is likewise deferred until the motor reaches RUN; variable mode waits 2–5
-seconds before its first new draw.
-Pressing B2 always selects the fully variable profile: it overrides any
-earlier serial load selection, varies both speed and TB-200S load, and can be
-stopped with a second press.
-The 50 electrical Hz/s ceiling still applies to motor starts configured by
-the acquisition dashboard. The four validation-firmware `PROFILE` commands
-use the same 500 electrical Hz/s ramp as B2. A new acquisition UART
-configuration disables the standalone profile and takes control immediately.
+B2 starts a standalone profile in which both speed and TB-200S load vary,
+regardless of any earlier `LOAD` command:
 
-The setpoint is reapplied when MCSDK actually reaches `RUN`. A restart
+- speed: pseudorandom target drawn from 2000–4000 rpm every 2–5 seconds,
+  never twice the same value in a row;
+- ramp: 500 electrical Hz/s (15,000 rpm/s with two pole pairs) at startup
+  and on every change;
+- current: PI `Iq` output capped at 25 A; `Id/Iq` command magnitude and
+  shutdown threshold on measured magnitude capped at 28 A;
+- load: 0.05 A at launch, then pseudorandom 0.05–0.25 A every 2–5 seconds.
+
+A second press stops the motor. A `CFG` received over UART disables the B2
+profile and takes control; dashboard-configured starts stay capped at
+50 electrical Hz/s.
+
+UART starts also launch with a 0.05 A load command: a higher fixed setpoint is
+applied once MCSDK reaches `RUN`, and variable mode makes its first draw
+2–5 seconds later. The speed setpoint is reapplied on `RUN`, a restart
 requested during shutdown waits for `IDLE`, and overspeed protection never
 exceeds the absolute 4500 rpm ceiling.
 
 > **Qualification required:** these are software ceilings, not test bench
 > certification. Before running at 4500 rpm or 30 A, verify the motor,
 > STDES-LVHP01, supply, wiring, cooling, and protections. Startup polarization
-> deliberately remains limited to 14 A. Preventive DC bus protection is
-> disabled in the current configuration (`M1_BUS_PROTECTION=false`): rapid
-> B2 deceleration can regenerate energy into the bus. Monitor bus voltage
-> and validate absorption or braking capacity before the test.
+> is limited to 14 A. Preventive DC bus protection is disabled
+> (`M1_BUS_PROTECTION=false`): rapid B2 deceleration can regenerate energy
+> into the bus. Monitor bus voltage and validate absorption or braking
+> capacity before the test.
 
 ## NanoEdge AI validation firmware
 
@@ -284,9 +282,10 @@ profiles through `PROFILE,<TOKEN>`:
 | `VARIABLE_ALL` | Pseudorandom 2000–4000 rpm every 2–5 s | Pseudorandom 0.05–0.25 A every 2–5 s |
 
 Every profile forces 0.05 A before motor launch; fixed 0.10 A is applied only
-after MCSDK reaches `RUN`. The physical B2 button always launches
-`VARIABLE_ALL`. `STOP` stops the motor and returns the load to 0.05 A.
-Accepted commands answer `ACK,PROFILE,<TOKEN>` or `ACK,STOP`.
+after MCSDK reaches `RUN`. The four profiles use the B2 ramp and current
+limits, and the physical B2 button always launches `VARIABLE_ALL`. `STOP`
+stops the motor and returns the load to 0.05 A. Accepted commands answer
+`ACK,PROFILE,<TOKEN>` or `ACK,STOP`.
 
 The included export is a `1 x 55` Ridge regression for Cortex-M4 hard-float.
 Its ID is `6a99400cd097fef61cf265dc`. Export metadata reports a score of
@@ -311,10 +310,7 @@ python .\validation\test\test_temperature_validation_gui.py
 python .\firmware_validation\tests\validate_preprocess_parity.py
 ```
 
-The first five checks pass in the current state. The full parity test fails
-on `daq_log_20260827_080523.csv`: `0.000512959` on
-`speed_power_ewma_6600` against a tolerance of `0.0005`. See the validation
-section of `firmware_validation/README.md` before changing the threshold.
+All six checks pass.
 
 Check the serial contract with a connected board:
 
@@ -330,7 +326,7 @@ python .\validation\test\temperature_validation_gui.py --port COM5
 python .\validation\test\temperature_validation_gui.py --demo
 ```
 
-The redesigned interface presents five visual profile cards: `Collecte seule`,
+The interface presents five profile cards: `Collecte seule`,
 `Profil stable`, `Charge variable`, `Vitesse variable`, and `Tout variable`.
 Connecting never starts the motor. In `Collecte seule`, the GUI sends no motor
 command, so B2 can launch the standalone all-variable profile. For another
@@ -340,11 +336,10 @@ collection-only disconnect sends no command; when the GUI owns the active
 profile, disconnecting or closing attempts a safety `STOP`.
 
 The header keeps serial, data, and motor states distinct. Five KPI cards show
-the D6T temperature, AI prediction, signed instantaneous error, running MAE,
-and the reported TB-200S setpoint with a read-only gauge. Three synchronized
-plots show temperature, absolute error, and load over the latest 90 seconds.
-CSV export includes `load_setpoint_a`; legacy two-field telemetry is still
-accepted and shown as an unavailable load value.
+the D6T temperature, AI prediction, instantaneous error, running MAE, and the
+reported TB-200S setpoint with a read-only gauge. Three synchronized plots
+show temperature, absolute error, and load over the latest 90 seconds. The
+session CSV includes `load_setpoint_a`.
 
 ## Documentation
 
@@ -356,18 +351,15 @@ python -m sphinx -b html .\docs\source .\docs\build\html
 
 The generated entry point is `docs/build/html/index.html`. The documentation
 covers architecture, wiring, protocol, processing, both firmware projects,
-AI validation, and the Python API. The technical audit, risks, and action
-plan are in `docs/source/etat_projet.rst`.
+AI validation, and the Python API. Open points are listed in
+`docs/source/etat_projet.rst`.
 
-## Current limitations
+## Known limitations
 
 - No continuous integration pipeline is provided.
-- Firmware builds use the STM32CubeIDE-generated Makefiles; there is no
-  versioned toolchain bootstrap command.
+- Firmware builds rely on STM32CubeIDE; there is no versioned command-line
+  build.
 - The serial test requires a programmed board and an available COM port.
-- All four current Debug/Release targets produce ELF files and the changed C
-  sources pass ARM GCC 14.3 syntax checks. Physical test-bench validation
-  still needs to be run for this TB-200S revision.
-- Float32/pandas parity slightly exceeds tolerance on the latest log.
-- Independent validation metrics need their source CSV files for
-  reproducibility.
+- The TB-200S command chain and the 4500 rpm / 30 A limits are not qualified
+  on the physical test bench.
+- No versioned script computes model metrics on independent validation data.

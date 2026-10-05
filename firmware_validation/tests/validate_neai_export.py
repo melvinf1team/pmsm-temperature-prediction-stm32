@@ -1,4 +1,4 @@
-"""Valide la compatibilite structurelle d'un export NanoEdge avec le firmware."""
+"""Check that a NanoEdge AI export is structurally compatible with the firmware."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def load_json(path: Path):
 def header_define(header: str, name: str) -> str:
     match = re.search(rf"^#define\s+{re.escape(name)}\s+(.+?)\s*$", header, re.MULTILINE)
     if match is None:
-        raise AssertionError(f"Macro {name} absente de NanoEdgeAI.h")
+        raise AssertionError(f"Macro {name} missing from NanoEdgeAI.h")
     return match.group(1).strip().strip('"')
 
 
@@ -32,7 +32,7 @@ def main() -> None:
     required = [library, header_path, metadata_path, feature_order_path]
     missing = [str(path.relative_to(FIRMWARE_ROOT)) for path in required if not path.is_file()]
     if missing:
-        raise FileNotFoundError("Fichiers modele manquants: " + ", ".join(missing))
+        raise FileNotFoundError("Missing model files: " + ", ".join(missing))
 
     header = header_path.read_text(encoding="utf-8")
     metadata = load_json(metadata_path)
@@ -52,7 +52,7 @@ def main() -> None:
 
     library_bytes = library.read_bytes()
     for symbol in (b"neai_extrapolation_init", b"neai_extrapolation"):
-        assert symbol in library_bytes, f"Symbole {symbol.decode()} absent de libneai.a"
+        assert symbol in library_bytes, f"Symbol {symbol.decode()} missing from libneai.a"
 
     validate_ridge_artifacts(metadata, axis_count)
 
@@ -70,7 +70,7 @@ def validate_ridge_artifacts(metadata: dict, axis_count: int) -> None:
     preprocessing_path = MODEL_DIR / "artifacts" / "ridge_preprocessing_params.json"
 
     if not model_path.is_file() or not preprocessing_path.is_file():
-        raise FileNotFoundError("Artefacts Ridge manquants dans AI_Model/artifacts")
+        raise FileNotFoundError("Missing Ridge artifacts in AI_Model/artifacts")
 
     model = load_json(model_path)
     preprocessing = load_json(preprocessing_path)

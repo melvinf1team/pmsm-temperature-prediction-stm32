@@ -1,9 +1,10 @@
-"""Compare embedded float32 preprocessing with the reference pandas pipeline."""
+"""Compare the embedded preprocessing (float32 signals, double EWMA state) with pandas."""
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import math
 from pathlib import Path
 
 import numpy as np
@@ -14,13 +15,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REFERENCE_SCRIPT = PROJECT_ROOT / "pretraitement" / "preprocess_logs_ewma.py"
 FEATURE_ORDER_FILE = PROJECT_ROOT / "firmware_validation" / "AI_Model" / "feature_order.txt"
 DEFAULT_LOGS = PROJECT_ROOT / "datalogging" / "logs"
-MAX_SCALED_RELATIVE_ERROR = 5.0e-4
+# Covers float32 signals and output rounding; the EWMA state itself is double.
+MAX_SCALED_RELATIVE_ERROR = 1.0e-6
 
 
 def load_reference_module():
     spec = importlib.util.spec_from_file_location("preprocess_logs_ewma", REFERENCE_SCRIPT)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Impossible de charger {REFERENCE_SCRIPT}")
+        raise RuntimeError(f"Cannot load {REFERENCE_SCRIPT}")
 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -73,30 +75,30 @@ def simulate_embedded(frame: pd.DataFrame, spans: list[int], reference) -> np.nd
         )
 
         for span in spans:
-            alpha = np.float32(2.0 / (span + 1.0))
-            old_weight_factor = np.float32(1.0 - alpha)
-            mean = np.float32(0.0)
-            old_weight = np.float32(0.0)
+            # Python floats are IEEE doubles, like the firmware's EWMA state.
+            alpha = 2.0 / (span + 1.0)
+            old_weight_factor = 1.0 - alpha
+            mean = 0.0
+            old_weight = 0.0
             initialized = False
             result = np.empty(values.size, dtype=np.float32)
 
-            for index, value in enumerate(values):
-                value_is_valid = bool(np.isfinite(value))
+            for index, value in enumerate(values.tolist()):
+                value_is_valid = math.isfinite(value)
 
                 if initialized:
-                    old_weight = np.float32(old_weight * old_weight_factor)
+                    old_weight *= old_weight_factor
 
                     if value_is_valid:
                         if mean != value:
-                            numerator = np.float32(old_weight * mean) + np.float32(alpha * value)
-                            mean = np.float32(numerator / np.float32(old_weight + alpha))
-                        old_weight = np.float32(1.0)
+                            mean = (old_weight * mean + alpha * value) / (old_weight + alpha)
+                        old_weight = 1.0
                 elif value_is_valid:
                     mean = value
-                    old_weight = np.float32(1.0)
+                    old_weight = 1.0
                     initialized = True
 
-                result[index] = mean if initialized else np.float32(0.0)
+                result[index] = mean if initialized else 0.0
 
             output_columns.append(result)
 
@@ -127,11 +129,11 @@ def validate_file(csv_file: Path, reference) -> dict[str, float | int | str]:
     spans = reference.scaled_spans(frequency_hz)
 
     if spans != [6600, 16800, 31800, 47400]:
-        raise AssertionError(f"{csv_file.name}: spans inattendus {spans}")
+        raise AssertionError(f"{csv_file.name}: unexpected spans {spans}")
 
     names, expected = pandas_reference(frame, spans, reference)
     if firmware_feature_names() != names:
-        raise AssertionError("L'ordre des features firmware differe du script Python")
+        raise AssertionError("Firmware feature order differs from the Python script")
 
     actual = simulate_embedded(frame, spans, reference)
     absolute_error = np.abs(actual - expected)
@@ -141,8 +143,8 @@ def validate_file(csv_file: Path, reference) -> dict[str, float | int | str]:
     if maximum_error > MAX_SCALED_RELATIVE_ERROR:
         row, column = np.unravel_index(np.argmax(scaled_relative_error), expected.shape)
         raise AssertionError(
-            f"{csv_file.name}: erreur {maximum_error:.6g} sur "
-            f"{names[column]} a la ligne {row}"
+            f"{csv_file.name}: error {maximum_error:.6g} on "
+            f"{names[column]} at row {row}"
         )
 
     return {
@@ -170,7 +172,7 @@ def main() -> None:
     reference = load_reference_module()
     csv_files = sorted(args.logs.resolve().glob("daq_log_*.csv"))
     if not csv_files:
-        raise FileNotFoundError(f"Aucun log trouve dans {args.logs}")
+        raise FileNotFoundError(f"No log found in {args.logs}")
 
     for csv_file in csv_files:
         result = validate_file(csv_file, reference)

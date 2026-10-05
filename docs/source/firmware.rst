@@ -101,13 +101,13 @@ so the physical button consistently starts the fully variable speed-and-load
 profile. Every stop returns the DAC command to 0.05 A.
 
 The B2 profile is an internal path: it does not raise the 50 electrical
-Hz/s ceiling for configurations received over UART. A new UART
-configuration disables the standalone profile and takes control. During a
+Hz/s ceiling for configurations received over UART. A `CFG` command
+disables the standalone profile and takes control. During a
 downward transition, overspeed protection follows the setpoint actually
 being ramped by MCSDK while remaining capped at 4500 rpm. It therefore does
 not mistake normal ramp inertia for runaway speed.
 
-Preventive DC bus protection is currently disabled
+Preventive DC bus protection is disabled
 (`M1_BUS_PROTECTION=false`). Rapid deceleration can regenerate energy into
 the bus without dedicated software clamping. Qualify the bus voltage and
 the test bench's absorption or braking capacity before use.
@@ -157,7 +157,7 @@ Safety checks are split between the PC and firmware. The dashboard validates
 operator input. The firmware enforces final limits of 4500 rpm and 30 A and
 stops the motor on MCSDK fault, excessive total current, or overspeed.
 Workbench sources, `.ioc`, `.wbdef`, and generated C files use the same
-ceilings so regeneration does not reintroduce old values.
+ceilings, so a regeneration keeps them consistent.
 
 The overspeed threshold follows the setpoint with a margin but remains
 bounded by the absolute 4500 rpm ceiling. Direct configuration calls also
@@ -169,9 +169,9 @@ state machine. Such values cannot bypass overcurrent or overspeed checks.
 
 The calculated full scale of the current sensor is about 110 A with a 1 mΩ
 shunt and gain of 15. This representation range does not validate the board
-thermally. The PolPulse setpoint stays at 14 A so raising the ceiling does
-not create a 30 A startup pulse. The software threshold active during
-PolPulse and the DC profiler's maximum current remain capped at 30 A.
+thermally. The PolPulse setpoint is 14 A, so the startup pulse stays well
+below the 30 A ceiling. The software threshold active during PolPulse and the
+DC profiler's maximum current are capped at 30 A.
 
 Build and programming
 ---------------------
@@ -187,8 +187,8 @@ Review any regeneration from STM32CubeMX or Motor Control Workbench before
 building: it may change generated files, pin assignments, and current
 constants.
 
-The acquisition project's CMSIS/DSP path in `.cproject` is relative to the
-repository; it no longer depends on a former user's Workbench directory.
+The CMSIS/DSP include path in the acquisition project's `.cproject` is
+relative to the repository.
 
 AI validation firmware
 ----------------------
@@ -201,9 +201,9 @@ depends on `APP_NEAI_MODEL_ENABLED`: D6T temperature, prediction, and
 disabled. Its receive path accepts four predefined `PROFILE,<TOKEN>` commands
 plus `STOP` and is used by `temperature_validation_gui.py`. An accepted
 profile answers `ACK,PROFILE,<TOKEN>`; a stop answers `ACK,STOP`.
-The firmware retains `LOAD,<amps>` and `LOAD,VARIABLE` only as a low-level
-backward-compatibility path. The validation GUI neither sends nor exposes
-those legacy commands, and a profile command or B2 replaces their state.
+The firmware also accepts `LOAD,<amps>` and `LOAD,VARIABLE`. The validation
+GUI does not use them, and a profile command or B2 replaces the load mode
+they set.
 
 The library is stored in `firmware_validation/AI_Model` and linked by both
 Debug and Release configurations. At compile time, `app_ai_model.c` checks
@@ -217,7 +217,10 @@ startup is retried at a limited rate, without blocking. `MC_StopMotor1` is
 issued only once when entering a fault so MCSDK can reach an acknowledgeable
 state.
 
-The state of the 44 EWMAs is saved after each sample in two alternating
+The 44 EWMA states are kept in double precision: with spans up to 47400, the
+float32 increment `alpha * (x - mean)` would fall below the resolution of
+large signals such as `speed_power`. Features are output as float32. The
+state is saved after each sample in two alternating
 snapshots in SRAM section `.noinit`. A signature, version, sequence number,
 and CRC32 allow restoration of the latest complete snapshot after a CPU/NRST
 reset while the board remains powered. Power loss or an inconsistent snapshot

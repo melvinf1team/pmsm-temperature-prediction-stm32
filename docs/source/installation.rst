@@ -104,10 +104,7 @@ From the repository root:
    python .\pretraitement\test\test_preprocess_logs_ewma.py
    python .\validation\test\test_temperature_validation_gui.py
 
-The last five commands pass for the documented state. The parity test
-currently exceeds its tolerance on the August 27, 2026 log; see
-:doc:`validation_ia` for the exact result before using it as an acceptance
-criterion.
+All six commands pass.
 
 The following UART checks require a programmed board and must match the
 compiled mode:

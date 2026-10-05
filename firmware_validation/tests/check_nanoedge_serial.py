@@ -21,36 +21,36 @@ MAX_LOAD_SETPOINT_A = 0.25
 
 def available_ports() -> str:
     ports = [f"{port.device} ({port.description})" for port in list_ports.comports()]
-    return ", ".join(ports) if ports else "aucun port detecte"
+    return ", ".join(ports) if ports else "no port detected"
 
 
 def parse_line(raw_line: bytes, expected_count: int = 55) -> list[float]:
     try:
         line = raw_line.decode("ascii").strip()
     except UnicodeDecodeError as exc:
-        raise ValueError("octets non ASCII recus") from exc
+        raise ValueError("non-ASCII bytes received") from exc
 
     fields = line.split(";")
     if len(fields) != expected_count:
         preview = line[:120]
         raise ValueError(
-            f"{len(fields)} valeurs recues au lieu de {expected_count}: {preview!r}"
+            f"{len(fields)} values received instead of {expected_count}: {preview!r}"
         )
 
     try:
         values = [float(field) for field in fields]
     except ValueError as exc:
-        raise ValueError(f"champ non numerique dans: {line[:120]!r}") from exc
+        raise ValueError(f"nonnumeric field in: {line[:120]!r}") from exc
 
     if not all(math.isfinite(value) for value in values):
-        raise ValueError("NaN ou inf recu dans le vecteur NanoEdge")
+        raise ValueError("NaN or inf received in the NanoEdge vector")
 
     return values
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Check the NanoEdge Serial Emulator UART contract."
+        description="Check the UART contract of the validation firmware."
     )
     parser.add_argument("--port", help="Board serial port, for example COM7.")
     parser.add_argument("--baud", type=int, default=115200)
@@ -71,9 +71,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if not args.port:
-        raise SystemExit(f"Utilisez --port. Ports disponibles: {available_ports()}")
+        raise SystemExit(f"Use --port. Available ports: {available_ports()}")
     if args.lines <= 0:
-        raise SystemExit("--lines doit etre strictement positif")
+        raise SystemExit("--lines must be strictly positive")
 
     deadline = time.monotonic() + args.timeout
     checked = 0
@@ -87,8 +87,8 @@ def main() -> None:
             if not raw_line:
                 if time.monotonic() >= deadline:
                     raise TimeoutError(
-                        "aucune ligne complete recue; verifiez le COM, 115200 bauds "
-                        "et le flash du firmware_validation"
+                        "no complete line received; check the COM port, 115200 baud, "
+                        "and that firmware_validation is flashed"
                     )
                 continue
 
@@ -97,7 +97,7 @@ def main() -> None:
                 MIN_LOAD_SETPOINT_A <= values[2] <= MAX_LOAD_SETPOINT_A
             ):
                 raise ValueError(
-                    "consigne TB-200S hors plage: "
+                    "TB-200S setpoint out of range: "
                     f"{values[2]:.6f} A"
                 )
             checked += 1
@@ -105,18 +105,18 @@ def main() -> None:
 
             if checked <= 3 and args.mode == "model":
                 print(
-                    f"ligne {checked}: D6T={values[0]:.6f} C, "
+                    f"line {checked}: D6T={values[0]:.6f} C, "
                     f"prediction={values[1]:.6f} C, "
-                    f"erreur={values[1] - values[0]:+.6f} C, "
-                    f"charge={values[2]:.6f} A"
+                    f"error={values[1] - values[0]:+.6f} C, "
+                    f"load={values[2]:.6f} A"
                 )
             elif checked <= 3:
                 print(
-                    f"ligne {checked}: 55 valeurs, "
-                    f"premiere={values[0]:.6f}, derniere={values[-1]:.6f}"
+                    f"line {checked}: 55 values, "
+                    f"first={values[0]:.6f}, last={values[-1]:.6f}"
                 )
 
-    print(f"Contrat {args.mode} valide sur {checked} lignes.")
+    print(f"{args.mode} contract valid on {checked} lines.")
 
 
 if __name__ == "__main__":

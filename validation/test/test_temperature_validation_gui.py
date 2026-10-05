@@ -134,7 +134,7 @@ class ProfileProtocolTests(unittest.TestCase):
         self.assertEqual(parse_control_response(b"ACK,STOP\n"), ("stop_ack", None))
         self.assertEqual(parse_control_response("ERR,PROFILE"), ("error", None))
 
-    def test_parser_is_backward_compatible(self) -> None:
+    def test_parser_accepts_two_field_lines(self) -> None:
         self.assertEqual(parse_validation_line("30;31"), (30.0, 31.0, None))
         self.assertEqual(parse_validation_line("30;31;0.2"), (30.0, 31.0, 0.2))
 

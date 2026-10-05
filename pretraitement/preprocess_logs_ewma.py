@@ -3,9 +3,11 @@
 The script reads CSV files produced by
 ``datalogging/motor_datalog_gui_dashboard.py``, keeps ``d6t_temp_c`` as the
 unchanged first-column target, then builds explanatory variables and their
-EWMAs. On request, the optional ``load_setpoint_a`` command is preserved as an
-unfiltered output column; legacy logs that do not contain it receive an unknown
-(NaN) value. The default output remains the historical target-plus-55 contract.
+EWMAs. Rows whose target is not a finite number are dropped after the EWMAs
+are computed. The default output is the target followed by the 55 model
+features; ``stm32_time_ms`` and the TB-200S ``load_setpoint_a`` command can be
+added with ``INCLUDE_TIME_MS`` and ``INCLUDE_LOAD_SETPOINT`` or the matching
+command-line options. A log without ``load_setpoint_a`` gets an empty value.
 Reference EWMA spans were set for 2 Hz and are rescaled using the input file's
 actual acquisition rate. Paths can be supplied through the command line, a
 YAML file, or environment variables via ConfigArgParse.
@@ -27,23 +29,23 @@ INPUT_DIR = DATALOGGING_DIR / "logs"
 OUTPUT_DIR = SCRIPT_DIR / "logs_processed_ewma"
 INPUT_PATTERN = "daq_log_*.csv"
 
-# Fichiers YAML optionnels lus automatiquement par ConfigArgParse s'ils existent.
+# Optional YAML files read by ConfigArgParse when they exist.
 DEFAULT_CONFIG_FILES = [
     PROJECT_ROOT / "preprocess_ewma.yaml",
     SCRIPT_DIR / "preprocess_ewma.yaml",
 ]
 
-# Mettre a True pour ecrire les noms de colonnes dans les CSV de sortie.
+# Write column names in the output CSV files.
 WRITE_HEADER = False
 
-# Mettre a True si vous voulez garder stm32_time_ms dans les CSV de sortie.
+# Keep stm32_time_ms in the output CSV files, right after the target.
 INCLUDE_TIME_MS = False
 
-# Mettre a True pour ajouter la consigne TB-200S apres les 55 axes du modele.
-# False preserve le contrat positionnel historique attendu par NanoEdge AI.
+# Keep the TB-200S setpoint load_setpoint_a in the output CSV files, after the
+# 55 features. Leave False for files imported into NanoEdge AI.
 INCLUDE_LOAD_SETPOINT = False
 
-# Spans optimises pour un datalogging a 2 Hz.
+# Reference spans for 2 Hz data logging.
 REFERENCE_FREQUENCY_HZ = 2.0
 REFERENCE_SPANS = [1320, 3360, 6360, 9480]
 
@@ -51,7 +53,7 @@ TIME_COLUMN = "stm32_time_ms"
 TARGET_COLUMN = "d6t_temp_c"
 LOAD_SETPOINT_COLUMN = "load_setpoint_a"
 
-# Colonnes explicatives : la target d6t_temp_c n'est jamais lissée.
+# Explanatory columns; the d6t_temp_c target is never smoothed.
 FEATURE_INPUT_COLUMNS = [
     "ds18b20_temp_c",
     "motor_ud_v",
@@ -152,15 +154,15 @@ def parse_args(argv=None):
         action="store_true",
         default=INCLUDE_LOAD_SETPOINT,
         help=(
-            "Append the unfiltered load_setpoint_a command after the 55 model "
-            "features. Legacy logs receive an empty/NaN value."
+            "Keep the TB-200S load_setpoint_a column, after the 55 features, "
+            "in the output CSV file."
         ),
     )
     parser.add_argument(
         "--no-include-load-setpoint",
         dest="include_load_setpoint",
         action="store_false",
-        help="Keep the historical target-plus-55 output schema (default).",
+        help="Omit the load_setpoint_a column from the output CSV file.",
     )
     args = parser.parse_args(argv)
     args.input_dir = path_from_arg(args.input_dir)
@@ -171,16 +173,16 @@ def parse_args(argv=None):
 def require_input_directory(input_dir):
     """Validate that the input path exists and is a directory."""
     if not input_dir.exists():
-        raise FileNotFoundError(f"Dossier d'entree introuvable: {input_dir}")
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")
     if not input_dir.is_dir():
-        raise NotADirectoryError(f"Le chemin d'entree n'est pas un dossier: {input_dir}")
+        raise NotADirectoryError(f"Input path is not a directory: {input_dir}")
     return input_dir
 
 
 def prepare_output_directory(output_dir):
     """Create the output directory unless the path already exists as a file."""
     if output_dir.exists() and not output_dir.is_dir():
-        raise NotADirectoryError(f"Le chemin de sortie n'est pas un dossier: {output_dir}")
+        raise NotADirectoryError(f"Output path is not a directory: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -188,13 +190,13 @@ def prepare_output_directory(output_dir):
 def detect_acquisition_frequency_hz(df, forced_frequency_hz=None):
     if forced_frequency_hz is not None:
         if forced_frequency_hz <= 0.0:
-            raise ValueError("La frequence forcee doit etre strictement positive.")
+            raise ValueError("The forced frequency must be strictly positive.")
         return forced_frequency_hz
 
     if TIME_COLUMN not in df.columns:
         raise ValueError(
-            f"Impossible de deduire la frequence: colonne {TIME_COLUMN!r} absente. "
-            "Utilisez --frequency-hz pour la forcer."
+            f"Cannot derive the frequency: column {TIME_COLUMN!r} is missing. "
+            "Use --frequency-hz to set it."
         )
 
     time_ms = pd.to_numeric(df[TIME_COLUMN], errors="coerce")
@@ -203,8 +205,8 @@ def detect_acquisition_frequency_hz(df, forced_frequency_hz=None):
 
     if valid_deltas_ms.empty:
         raise ValueError(
-            f"Impossible de deduire la frequence depuis {TIME_COLUMN!r}. "
-            "Utilisez --frequency-hz pour la forcer."
+            f"Cannot derive the frequency from {TIME_COLUMN!r}. "
+            "Use --frequency-hz to set it."
         )
 
     median_period_ms = float(valid_deltas_ms.median())
@@ -223,7 +225,7 @@ def require_columns(df, columns, csv_file):
     missing_columns = [column for column in columns if column not in df.columns]
     if missing_columns:
         missing = ", ".join(missing_columns)
-        raise ValueError(f"{csv_file.name}: colonnes manquantes: {missing}")
+        raise ValueError(f"{csv_file.name}: missing columns: {missing}")
 
 
 def add_physical_features(df):
@@ -274,9 +276,9 @@ def build_ewma_features(df, spans):
 def model_feature_columns(spans):
     """Return the ordered 55-feature contract used by the embedded model.
 
-    ``load_setpoint_a`` deliberately does not belong to this list: it is a
-    piecewise-constant command, not a measured signal to smooth, and the
-    currently exported firmware model still consumes the historical 55 axes.
+    ``load_setpoint_a`` is not part of this list: it is a piecewise-constant
+    command, not a measured signal to smooth, and the embedded model takes
+    55 inputs.
     """
     columns = []
 
@@ -298,8 +300,7 @@ def output_columns(spans, include_time_ms, include_load_setpoint=False):
     columns_to_keep.extend(model_feature_columns(spans))
 
     if include_load_setpoint:
-        # Append the command after the historical model features so their
-        # positions remain unchanged for existing positional consumers.
+        # After the model features so their positions do not change.
         columns_to_keep.append(LOAD_SETPOINT_COLUMN)
 
     return columns_to_keep
@@ -319,9 +320,9 @@ def process_file(
     require_columns(df, [TIME_COLUMN] + INPUT_COLUMNS, csv_file)
 
     if include_load_setpoint and LOAD_SETPOINT_COLUMN not in df.columns:
-        # An absent command in a legacy log is unknown, not a zero-load
-        # measurement. Keep the output schema stable without fabricating data.
+        # An absent command is unknown, not a 0 A setpoint.
         df[LOAD_SETPOINT_COLUMN] = np.nan
+        print(f"  {LOAD_SETPOINT_COLUMN} missing: column written empty")
 
     numeric_input_columns = [TIME_COLUMN] + FEATURE_INPUT_COLUMNS
     if LOAD_SETPOINT_COLUMN in df.columns:
@@ -353,9 +354,8 @@ def process_file(
     if include_time_ms:
         columns_to_sanitize = [TIME_COLUMN] + columns_to_sanitize
 
-    # The embedded feature contract replaces invalid measured/derived values
-    # with zero. Do not apply that fallback to the load command: NaN carries
-    # the important distinction between "unknown" and a real 0 A setpoint.
+    # Invalid model features become zero; the load command keeps NaN so an
+    # unknown value is not confused with a real 0 A setpoint.
     df[columns_to_sanitize] = (
         df[columns_to_sanitize]
         .replace([np.inf, -np.inf], np.nan)
@@ -376,6 +376,13 @@ def process_file(
     ]
     assert not df_out[columns_to_sanitize].isna().any().any()
 
+    # EWMAs cover every sample, as on the board; only the output rows need a valid target.
+    valid_target = np.isfinite(pd.to_numeric(df_out[TARGET_COLUMN], errors="coerce"))
+    dropped_rows = int((~valid_target).sum())
+    if dropped_rows:
+        print(f"  Rows dropped (invalid {TARGET_COLUMN}): {dropped_rows}")
+        df_out = df_out[valid_target]
+
     output_file = output_dir / csv_file.name
     df_out.to_csv(
         output_file,
@@ -392,11 +399,11 @@ def main():
     output_dir = prepare_output_directory(args.output_dir)
 
     if not args.pattern.strip():
-        raise ValueError("Le motif de fichiers CSV ne peut pas etre vide.")
+        raise ValueError("The CSV file pattern cannot be empty.")
 
     csv_files = sorted(input_dir.glob(args.pattern))
     if not csv_files:
-        raise FileNotFoundError(f"Aucun fichier trouve dans {input_dir} avec le motif {args.pattern!r}")
+        raise FileNotFoundError(f"No file found in {input_dir} matching {args.pattern!r}")
 
     for csv_file in csv_files:
         process_file(

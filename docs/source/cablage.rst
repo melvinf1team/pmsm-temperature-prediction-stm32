@@ -102,10 +102,9 @@ firmware is 0--10 V for 0--3 A:
 Consequently, 0.05 A maps to 0.1667 V and 0.25 A maps to 0.8333 V. No
 0--10 V gain stage is fitted.
 
-Available DAC outputs were checked against both CubeMX projects and the
-B-G473E-ZEST1S connector tables:
+DAC outputs of the B-G473E-ZEST1S and their use in both CubeMX projects:
 
-.. list-table:: External DAC pin audit
+.. list-table:: External DAC outputs
    :header-rows: 1
 
    * - STM32 signal

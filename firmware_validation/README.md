@@ -24,7 +24,7 @@ Validation-specific components are mainly in:
 
 | Path | Purpose |
 |---|---|
-| `STM32CubeIDE/Application/User/preprocess_ewma.c` | Float32 computation of 55 features |
+| `STM32CubeIDE/Application/User/preprocess_ewma.c` | Computation of the 55 features |
 | `STM32CubeIDE/Application/User/app_ai_model.c` | NanoEdge AI checks and calls |
 | `STM32CubeIDE/Application/User/app_datalog.c` | Acquisition, timing, and USART1 output |
 | `STM32CubeIDE/Application/User/app_motor_control.c` | Motor state machine and TB-200S DAC/load scheduler |
@@ -42,7 +42,7 @@ tools. Review any CubeMX/Workbench regeneration before integrating it.
 Limits shared by the dashboard and both firmware projects are 4500 rpm,
 30 A for `Iq`, and 30 A for total current. The current sensor has a calculated
 full scale of about 110 A; this ensures numeric representation, not the test
-bench's thermal capacity. Startup polarization remains capped at 14 A; its
+bench's thermal capacity. Startup polarization is capped at 14 A; its
 software threshold and the DC profiler cannot exceed 30 A.
 
 The first press of B2 immediately draws a pseudorandom first target between
@@ -51,9 +51,7 @@ one, is then drawn directly from this entire range every 2 to 5 seconds.
 Startup and transitions use a 500 electrical Hz/s MCSDK ramp, or
 15,000 rpm/s with two pole pairs. The PI `Iq` output is capped at 25 A;
 the `Id/Iq` command magnitude and application shutdown threshold on measured
-magnitude are capped at 28 A. This internal profile does not raise the
-50 electrical Hz/s limit for the acquisition firmware's UART configurations.
-A second press stops and disables the profile.
+magnitude are capped at 28 A. A second press stops and disables the profile.
 
 B2 always selects the fully variable profile. It forces the TB-200S command
 to 0.05 A before starting the motor, then varies both speed and brake load;
@@ -76,21 +74,21 @@ profile token returns `ERR,BAD_PROFILE`; a DAC initialization failure returns
 `ERR,LOAD_DAC_FAILED`; an internal profile rejection returns
 `ERR,PROFILE_REJECTED`; other unknown commands return `ERR,UNKNOWN_COMMAND`.
 If a different profile is already active, the firmware requests its stop,
-waits asynchronously for MCSDK to return to `IDLE`, and then starts the newly
-armed profile. The acknowledgment confirms acceptance, not that `RUN` has
-already been reached.
+waits asynchronously for MCSDK to return to `IDLE`, and then starts the
+requested profile. The acknowledgment confirms acceptance, not that `RUN` has
+been reached.
 
-For low-level backward compatibility, the firmware still parses
-`LOAD,<amps>` and `LOAD,VARIABLE`. The validation GUI no longer sends or
-exposes these commands; `PROFILE,<TOKEN>` and B2 both replace any legacy load
-state.
+The firmware also accepts `LOAD,<amps>` (0.05--0.25 A) and `LOAD,VARIABLE`,
+answered by `ACK,LOAD`. The validation GUI does not use them; a
+`PROFILE,<TOKEN>` command or B2 replaces the load mode they set.
 
 Both firmware projects drive `PA5 / DAC1_OUT2` on Morpho `CN7-32`. Connect it
 through 1 kΩ to TB-200S `ADJ`, connect board and controller grounds, and fit
 4.7 µF from ADJ to GND (`+` on ADJ for a polarized capacitor). Use the
 controller's 0--10 V external-input mode, never connect its `+10V` terminal
-to the STM32, and see the root README for the full pin audit and calibration
-warning. Only 0.1667--0.8333 V is requested; no 0--10 V amplifier is used.
+to the STM32, and see `docs/source/cablage.rst` for the DAC pin table and
+calibration warning. Only 0.1667--0.8333 V is requested; no 0--10 V amplifier
+is used.
 Because the buffered STM32G473 DAC is guaranteed only from 0.2 V, measure and
 qualify the nominal 0.1667 V / 0.05 A launch point on the actual hardware.
 
@@ -102,7 +100,7 @@ stops the motor, disables B2, and puts motor control into a fault state.
 > (`M1_BUS_PROTECTION=false`): monitor bus voltage during rapid deceleration
 > and validate energy absorption or braking.
 
-## Current embedded model
+## Embedded model
 
 `AI_Model/metadata.json` and `NanoEdgeAI.h` describe this export:
 
@@ -119,10 +117,8 @@ stops the motor, disables B2, and puts motor control into a fault state.
 | Estimated Flash | 892 bytes |
 | Export build date | September 3, 2026 |
 
-These figures come from the NanoEdge export. Alone, they are not an independent
-measurement on separate validation data. Previous R² `0.8069` and SMAPE
-`1.55 %` values cited in this README had no versioned calculation script, so
-they are no longer presented as acceptance criteria.
+These figures come from the NanoEdge export; they are not an independent
+measurement on separate validation data.
 
 The model directory contains:
 
@@ -173,8 +169,7 @@ attempts a safety `STOP` before disconnecting or closing.
 
 The dashboard presents separate serial, data, and motor indicators, five KPI
 cards, a read-only TB-200S load gauge, and synchronized temperature, error, and
-load plots. It records `load_setpoint_a` in its validation CSV and still
-accepts a legacy two-field temperature line.
+load plots. It records `load_setpoint_a` in its validation CSV.
 
 Check the contract with a connected board:
 
@@ -232,8 +227,11 @@ The eleven signals are ordered as follows:
 
 For each signal, the vector contains the instantaneous value and its four
 EWMAs, or `11 x 5 = 55` values. The recurrence reproduces
-`pandas.Series.ewm(span=..., adjust=False)`. Nonfinite feature values are
-replaced by zero in both implementations.
+`pandas.Series.ewm(span=..., adjust=False)`. Signals are computed in float32;
+the EWMA states are kept in double precision, because with spans up to 47400
+the float32 increment `alpha * (x - mean)` falls below the resolution of large
+signals such as `speed_power`. Outputs are converted to float32. Nonfinite
+feature values are replaced by zero in both implementations.
 
 The 44 EWMA states are saved after each sample in two alternating snapshots
 in SRAM section `.noinit`. A signature, version, sequence number, and CRC32
@@ -254,7 +252,7 @@ items together in `AI_Model`:
 Empty `artifacts/` first to avoid mixing parameters from two models. Keep
 `feature_order.txt`, which defines the order imposed by the firmware.
 
-The new export must satisfy:
+A replacement export must satisfy:
 
 - an STM32G4 Cortex-M4 target compatible with the board;
 - hard-float ABI and VFPv4-D16;
@@ -292,8 +290,8 @@ Check the export structure:
 .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
 ```
 
-This check passes with the versioned export: ID, dimensions, ABI, symbols,
-feature order, and Ridge artifacts are consistent.
+It checks the library ID, dimensions, ABI, symbols, feature order, and Ridge
+artifacts.
 
 Check limits in the dashboard, both firmware projects, and Workbench/CubeMX
 files:
@@ -309,20 +307,15 @@ B2's 25 A `Iq`, 28 A total threshold, 2000–4000 rpm range, direct draws,
 PA5/DAC1_OUT2 setup, profile command handlers, raw telemetry field, and analog
 current range.
 
-Compare simulated float32 preprocessing with pandas:
+Compare the simulated embedded preprocessing with pandas:
 
 ```powershell
 .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_preprocess_parity.py
 ```
 
-State rechecked on September 21, 2026: the first seven logs pass, but
-`daq_log_20260827_080523.csv` reaches a scaled relative error of `0.000512959`
-on `speed_power_ewma_6600` at row 60913, against a `0.0005` limit. The full
-test currently fails. Assess this small float32 drift before changing the
-tolerance or implementation.
+The check passes on all eight logs of `datalogging/logs` with a maximum scaled
+relative error of about `3.3e-7`, against a `1e-6` limit.
 
-All four current Debug/Release targets produce their ELF files under
-STM32CubeIDE 2.1.1, and all changed C sources pass ARM GCC 14.3 syntax
-compilation with warnings enabled. The serial check, TB-200S voltage/current
-calibration, and qualification at 4500 rpm/30 A require a board on a secured
-test bench. No continuous integration pipeline is provided in the repository.
+Debug and Release configurations build with STM32CubeIDE 2.1.1. The serial
+check, TB-200S voltage/current calibration, and qualification at 4500 rpm/30 A
+require a board on a secured test bench.

@@ -1,7 +1,8 @@
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
-/* 1 : inference embarquee et sortie D6T;prediction. 0 : Serial Emulator 55D. */
+/* 1 : inference embarquee, sortie D6T;prediction;consigne TB-200S.
+ * 0 : Serial Emulator, sortie des 55 features. */
 #ifndef APP_NEAI_MODEL_ENABLED
 #define APP_NEAI_MODEL_ENABLED  1U
 #endif

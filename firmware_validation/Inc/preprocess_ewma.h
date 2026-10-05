@@ -19,10 +19,11 @@ typedef struct
   float motor_iq_a;
 } PreprocessEwmaInput_t;
 
+/* Etat en double : en float32, les increments alpha * (x - m) des longs spans sont perdus. */
 typedef struct
 {
-  float mean[PREPROCESS_EWMA_SIGNAL_COUNT][PREPROCESS_EWMA_SPAN_COUNT];
-  float old_weight[PREPROCESS_EWMA_SIGNAL_COUNT][PREPROCESS_EWMA_SPAN_COUNT];
+  double mean[PREPROCESS_EWMA_SIGNAL_COUNT][PREPROCESS_EWMA_SPAN_COUNT];
+  double old_weight[PREPROCESS_EWMA_SIGNAL_COUNT][PREPROCESS_EWMA_SPAN_COUNT];
   bool initialized[PREPROCESS_EWMA_SIGNAL_COUNT][PREPROCESS_EWMA_SPAN_COUNT];
 } PreprocessEwmaContext_t;
 

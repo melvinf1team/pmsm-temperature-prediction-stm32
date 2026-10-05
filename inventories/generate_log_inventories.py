@@ -9,6 +9,7 @@ run again.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 from datetime import datetime, timedelta
@@ -27,11 +28,12 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 
 
-ROOT = Path(__file__).resolve().parent
-RAW_DIR = ROOT / "datalogging" / "logs"
-PROCESSED_DIR = ROOT / "pretraitement" / "logs_processed_ewma"
-RAW_WORKBOOK = ROOT / "inventaire_donnees_brutes.xlsx"
-PROCESSED_WORKBOOK = ROOT / "inventaire_donnees_pretraitees_ewma.xlsx"
+INVENTORY_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = INVENTORY_DIR.parent
+RAW_DIR = PROJECT_ROOT / "datalogging" / "logs"
+PROCESSED_DIR = PROJECT_ROOT / "pretraitement" / "logs_processed_ewma"
+RAW_WORKBOOK = INVENTORY_DIR / "inventaire_donnees_brutes.xlsx"
+PROCESSED_WORKBOOK = INVENTORY_DIR / "inventaire_donnees_pretraitees_ewma.xlsx"
 
 RAW_COLUMNS = [
     "stm32_time_ms",
@@ -102,7 +104,7 @@ def git_value(*args: str) -> str:
     try:
         result = subprocess.run(
             ["git", *args],
-            cwd=ROOT,
+            cwd=PROJECT_ROOT,
             check=True,
             capture_output=True,
             text=True,
@@ -112,8 +114,13 @@ def git_value(*args: str) -> str:
         return "Non disponible"
 
 
+def workbook_link(path: Path) -> str:
+    """Return a hyperlink relative to the folder containing the workbooks."""
+    return Path(os.path.relpath(path, INVENTORY_DIR)).as_posix()
+
+
 def git_file_info(path: Path) -> tuple[str, str]:
-    relative = path.relative_to(ROOT).as_posix()
+    relative = path.relative_to(PROJECT_ROOT).as_posix()
     value = git_value(
         "log",
         "-1",
@@ -417,7 +424,7 @@ def analyse_raw_files() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "session_id": session_id,
             "file_name": path.name,
             "path": path,
-            "relative_path": path.relative_to(ROOT).as_posix(),
+            "relative_path": path.relative_to(PROJECT_ROOT).as_posix(),
             "nominal_start": nominal_start,
             "nominal_end": nominal_end,
             "duration_s": duration_s,
@@ -541,7 +548,7 @@ def analyse_processed_files(
                 **raw,
                 "file_name": path.name,
                 "path": path,
-                "relative_path": path.relative_to(ROOT).as_posix(),
+                "relative_path": path.relative_to(PROJECT_ROOT).as_posix(),
                 "raw_name": raw["file_name"],
                 "raw_path": raw["path"],
                 "raw_rows": raw["rows"],
@@ -964,10 +971,10 @@ def populate_raw_inventory(
         ]
         for column, value in enumerate(values, 1):
             sheet.cell(index, column, value)
-        sheet.cell(index, 2).hyperlink = record["relative_path"]
+        sheet.cell(index, 2).hyperlink = workbook_link(record["path"])
         sheet.cell(index, 2).style = "Hyperlink"
-        processed_path = f"pretraitement/logs_processed_ewma/{record['processed_name']}"
-        sheet.cell(index, 38).hyperlink = processed_path
+        processed_path = PROCESSED_DIR / record["processed_name"]
+        sheet.cell(index, 38).hyperlink = workbook_link(processed_path)
         sheet.cell(index, 38).style = "Hyperlink"
 
     add_excel_table(sheet, "InventaireBrut", header_row, header_row + len(records), len(headers))
@@ -1280,7 +1287,7 @@ def populate_methodology(
         ["Frein fixe", "Valeur extraite du préfixe 0.05/0.10/0.15 du nom prétraité.", "Annotation de nom ; absence de télémétrie frein dans les CSV."],
         ["Frein mixte", "Nom prétraité sans préfixe + plusieurs paliers d'Iq moteur.", "Inférence à confirmer. motor_iq_a n'est pas le courant de frein."],
         ["Plage thermique", "Minimum et maximum calculés séparément pour D6T et DS18B20.", "D6T = cible IR ; DS18B20 = feature externe."],
-        ["Périmètre", "Uniquement datalogging/logs et logs_processed_ewma.", "datalogging/raw_data (legacy, sans stm32_time_ms) est hors périmètre demandé."],
+        ["Périmètre", "Uniquement datalogging/logs et logs_processed_ewma.", "datalogging/raw_data (sans stm32_time_ms) n'est pas inventorié."],
         ["Champs jaunes", "Réservés aux informations et validations humaines.", "Conservés si le générateur est relancé sur le classeur existant."],
     ]
     if kind == "processed":
@@ -1457,9 +1464,9 @@ def populate_processed_inventory(
         ]
         for column, value in enumerate(values, 1):
             sheet.cell(index, column, value)
-        sheet.cell(index, 2).hyperlink = record["relative_path"]
+        sheet.cell(index, 2).hyperlink = workbook_link(record["path"])
         sheet.cell(index, 2).style = "Hyperlink"
-        sheet.cell(index, 3).hyperlink = record["raw_path"].relative_to(ROOT).as_posix()
+        sheet.cell(index, 3).hyperlink = workbook_link(record["raw_path"])
         sheet.cell(index, 3).style = "Hyperlink"
 
     add_excel_table(sheet, "InventairePretraite", header_row, header_row + len(records), len(headers))

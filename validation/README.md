@@ -27,9 +27,9 @@ Example:
 31.400000;30.872314;0.137000
 ```
 
-The GUI remains backward-compatible with legacy two-field frames. The third
-field is the commanded TB-200S current, not a measured current and not one of
-the 55 model inputs.
+The third field is the commanded TB-200S current, not a measured current and
+not one of the 55 model inputs. Two-field frames (`D6T;prediction`) are also
+accepted; their load is recorded as `NaN`.
 
 In this firmware, B2 starts a motor profile with `Iq` limited to 25 A; the
 `Id/Iq` command magnitude and shutdown threshold on measured magnitude are
@@ -131,12 +131,12 @@ cumulative_MAE = sum(absolute_errors) / sample_count
 
 MAE remains in degrees Celsius. Visual thresholds are:
 
-| Absolute error | Class | Color |
+| Absolute error | Label | Color |
 |---|---|---|
-| `< 0.5 °C` | Excellent | Green |
-| `0.5 °C to < 1.0 °C` | Good | Blue |
-| `1.0 °C to 1.5 °C` | Monitor | Orange |
-| `> 1.5 °C` | High error | Red |
+| `< 0.5 °C` | EXCELLENT | Green |
+| `0.5 °C to < 1.0 °C` | BON | Blue |
+| `1.0 °C to 1.5 °C` | ATTENTION | Orange |
+| `> 1.5 °C` | ÉLEVÉ | Red |
 
 Non-ASCII, nonnumeric, nonfinite frames, and frames with neither two nor three
 fields are ignored and counted as invalid. `ACK` and `ERR` control lines are
@@ -157,7 +157,7 @@ elapsed_s;d6t_temp_c;predicted_temp_c;signed_error_c;absolute_error_c;cumulative
 ```
 
 Numbers are saved at their calculation precision, with six decimal places.
-Legacy two-field telemetry writes `NaN` in `load_setpoint_a`.
+A two-field frame writes `NaN` in `load_setpoint_a`.
 The **Export CSV** button creates a copy elsewhere.
 **Reset** clears the displayed data and resets MAE to zero
 without interrupting automatic recording for the current connection.

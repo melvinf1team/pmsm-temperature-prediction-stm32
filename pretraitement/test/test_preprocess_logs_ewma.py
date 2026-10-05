@@ -1,13 +1,19 @@
-"""Regression tests for raw-log schema evolution in the EWMA pipeline."""
+"""Tests for the EWMA preprocessing output."""
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from pretraitement import preprocess_logs_ewma as preprocess
 
@@ -49,7 +55,7 @@ class LoadSetpointPreprocessingTests(unittest.TestCase):
 
             return pd.read_csv(output_dir / input_file.name, sep=";")
 
-    def test_default_output_keeps_historical_target_plus_55_contract(self):
+    def test_default_output_is_target_plus_55_features(self):
         frame = pd.DataFrame(
             {
                 **BASE_ROWS,
@@ -58,7 +64,7 @@ class LoadSetpointPreprocessingTests(unittest.TestCase):
         )
 
         result = self.process(frame)
-        legacy_result = self.process(pd.DataFrame(BASE_ROWS))
+        result_without_load = self.process(pd.DataFrame(BASE_ROWS))
 
         self.assertEqual(
             list(result.columns),
@@ -66,7 +72,7 @@ class LoadSetpointPreprocessingTests(unittest.TestCase):
             + preprocess.model_feature_columns(preprocess.REFERENCE_SPANS),
         )
         self.assertNotIn(preprocess.LOAD_SETPOINT_COLUMN, result.columns)
-        pd.testing.assert_frame_equal(result, legacy_result)
+        pd.testing.assert_frame_equal(result, result_without_load)
 
     def test_opt_in_preserves_raw_load_without_ewma(self):
         frame = pd.DataFrame(
@@ -97,12 +103,12 @@ class LoadSetpointPreprocessingTests(unittest.TestCase):
             preprocess.model_feature_columns(preprocess.REFERENCE_SPANS),
         )
 
-    def test_legacy_log_gets_unknown_load_with_same_output_schema(self):
-        legacy_result = self.process(
+    def test_missing_load_column_gives_unknown_load_with_same_schema(self):
+        result_without_load = self.process(
             pd.DataFrame(BASE_ROWS),
             include_load_setpoint=True,
         )
-        new_result = self.process(
+        result_with_load = self.process(
             pd.DataFrame(
                 {
                     **BASE_ROWS,
@@ -112,8 +118,8 @@ class LoadSetpointPreprocessingTests(unittest.TestCase):
             include_load_setpoint=True,
         )
 
-        self.assertEqual(list(legacy_result.columns), list(new_result.columns))
-        self.assertTrue(legacy_result[preprocess.LOAD_SETPOINT_COLUMN].isna().all())
+        self.assertEqual(list(result_without_load.columns), list(result_with_load.columns))
+        self.assertTrue(result_without_load[preprocess.LOAD_SETPOINT_COLUMN].isna().all())
 
     def test_invalid_load_is_unknown_instead_of_zero(self):
         frame = pd.DataFrame(
@@ -127,6 +133,29 @@ class LoadSetpointPreprocessingTests(unittest.TestCase):
 
         self.assertAlmostEqual(result.loc[0, preprocess.LOAD_SETPOINT_COLUMN], 0.05)
         self.assertTrue(result.loc[1:, preprocess.LOAD_SETPOINT_COLUMN].isna().all())
+
+    def test_rows_with_invalid_target_are_dropped_after_ewma(self):
+        frame = pd.DataFrame(
+            {
+                **BASE_ROWS,
+                preprocess.TARGET_COLUMN: [24.0, "NaN", ""],
+            }
+        )
+
+        result = self.process(frame)
+        reference = self.process(pd.DataFrame(BASE_ROWS))
+
+        self.assertEqual(len(result), 1)
+        pd.testing.assert_frame_equal(result, reference.iloc[[0]])
+
+    def test_load_setpoint_option_is_a_toggle(self):
+        self.assertTrue(preprocess.parse_args(["--include-load-setpoint"]).include_load_setpoint)
+        self.assertFalse(preprocess.parse_args(["--no-include-load-setpoint"]).include_load_setpoint)
+
+        with unittest.mock.patch.object(preprocess, "INCLUDE_LOAD_SETPOINT", True):
+            self.assertTrue(preprocess.parse_args([]).include_load_setpoint)
+        with unittest.mock.patch.object(preprocess, "INCLUDE_LOAD_SETPOINT", False):
+            self.assertFalse(preprocess.parse_args([]).include_load_setpoint)
 
 
 if __name__ == "__main__":

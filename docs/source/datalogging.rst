@@ -52,8 +52,8 @@ Motor configuration
 The `MotorProfile` class describes the settings sent to the board: speed,
 speed unit, `Iq` limit, hard-stop threshold, acceleration, DATA period,
 DS18B20 period, and TB-200S load mode and setpoint. Built-in and user-saved
-profiles are loaded when the dashboard starts. Older JSON profiles without
-the load fields are read as a fixed 0.05 A profile.
+profiles are loaded when the dashboard starts. A profile without load fields
+uses a fixed 0.05 A command.
 
 The built-in `Custom` profile starts with 600 rpm, a 2 A
 `Iq` limit, a 6 A hard stop, 5 electrical Hz/s, a 100 ms `DATA` period,
@@ -124,18 +124,18 @@ format if firmware adds diagnostic columns. It flushes the file buffer at
 least every ten rows or every second, and once more when the session closes
 cleanly.
 
-The stable raw schema now contains nine columns; `load_setpoint_a` is the
-instantaneous command reported by the firmware, not a current feedback
-measurement:
+The raw schema has nine columns; `load_setpoint_a` is the instantaneous
+command reported by the firmware, not a current feedback measurement:
 
 .. code-block:: text
 
    stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_rpm;motor_id_a;motor_iq_a;load_setpoint_a
 
-If a firmware header lacks the new field, the dashboard still creates the
-column. It records the requested value for a fixed motor profile, where that
-value is known, and writes `NaN` for variable load or acquisition-only mode
-because the instantaneous command cannot be reconstructed safely.
+If `#CSV_HEADER` does not announce `load_setpoint_a`, the dashboard still
+writes the column. It records the requested value for a fixed motor profile,
+where that value is known, and writes `NaN` for variable load or
+acquisition-only mode because the instantaneous command cannot be
+reconstructed.
 
 Execution model
 ---------------
@@ -143,7 +143,9 @@ Execution model
 Tkinter and graphical updates stay on the main thread. One thread reads the
 serial port; separate threads handle startup and shutdown. `queue.Queue`
 objects carry GUI events and acknowledgments without direct concurrent access
-to widgets.
+to widgets. Writes to the serial port and its closure share a lock. Pressing
+the **STOP** button during startup cancels the remaining startup commands
+before `STOP` is sent, so `STOP` is always the last command of the session.
 
 The chart keeps at most 1500 points per series and refreshes every 250 ms.
 Missing Matplotlib does not prevent acquisition; only the chart is unavailable.

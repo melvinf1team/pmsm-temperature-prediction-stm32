@@ -54,20 +54,18 @@ In both firmware projects, the first press of B2 starts this profile:
 * startup and transitions use a ramp of 500 electrical Hz/s, or
   15,000 rpm/s with two pole pairs;
 * the PI `Iq` output is limited to 25 A, while the `Id/Iq` command
-  magnitude and shutdown threshold on measured magnitude are limited to 28 A.
+  magnitude and shutdown threshold on measured magnitude are limited to 28 A;
 * the TB-200S command is forced to 0.05 A for motor launch, then changes
-  pseudorandomly between 0.05 and 0.25 A every 2 to 5 seconds;
+  pseudorandomly between 0.05 and 0.25 A every 2 to 5 seconds.
 
 The pseudorandom generator is seeded with the time of the B2 press. The new
 setpoint is processed in the main loop, not in the interrupt. A second press
 stops the motor and disables the profile. Startup polarization stays at 14 A.
-Pressing B2 always selects the fully variable profile. It overrides any
-earlier serial load/profile selection and varies both speed and TB-200S load.
+B2 overrides any earlier serial load/profile selection.
 The 500 electrical Hz/s profile ramp applies to B2 in both firmware projects
 and to the four ``PROFILE`` commands in the validation firmware. Motor starts
 configured by the acquisition dashboard remain capped at 50 electrical Hz/s.
-A new acquisition UART configuration disables the B2 profile and takes
-control immediately.
+A `CFG` command disables the B2 profile and takes control immediately.
 
 The 0.05 A launch value also applies to UART-controlled starts. A fixed
 request above 0.05 A is applied only after MCSDK reports RUN. Variable load
@@ -159,7 +157,7 @@ Before preprocessing, check at least:
 * that `load_setpoint_a` starts at 0.05 A and stays inside 0.05--0.25 A;
 * that `stm32_time_ms` increases mostly monotonically;
 * the test's sampling rate and duration;
-* `NaN` or empty lines in the D6T target;
+* `NaN` or empty D6T targets (preprocessing drops these rows);
 * unit consistency and obvious saturation.
 
 NanoEdge AI Studio import
@@ -169,10 +167,10 @@ After preprocessing, the CSV file begins with `d6t_temp_c`. Use this first
 column as the extrapolation target. The other columns are instantaneous,
 derived, and EWMA-smoothed features.
 
-By default, the processed file has no header and omits `load_setpoint_a`, so
-the target-plus-55 model contract is unchanged. Use `--header` to inspect it,
-or `--include-load-setpoint` to append the unfiltered command for
-traceability. Do not feed that optional 56th value to the current model. Then
+By default, the processed file has no header and contains only the target
+and the 55 model features. Use `--header` to inspect it, or
+`--include-load-setpoint` to append the unfiltered command for traceability.
+Do not feed that optional 56th value to the embedded model. Then
 compare the model-feature order with
 `firmware_validation/AI_Model/feature_order.txt` before replacing the model.
 
@@ -209,8 +207,7 @@ owns the active profile, disconnecting or closing attempts a safety `STOP`.
 
 Telemetry remains independent of this control choice:
 
-* model enabled: `d6t_temp_c;predicted_temp_c;load_setpoint_a` (the GUI also
-  accepts the legacy two-field form);
+* model enabled: `d6t_temp_c;predicted_temp_c;load_setpoint_a`;
 * model disabled: 55 numeric values for the Serial Emulator.
 
 Select the mode with `APP_NEAI_MODEL_ENABLED` in `Inc/app_config.h`. Perform a

@@ -216,7 +216,7 @@ def parse_control_response(raw_line: bytes | str) -> tuple[str, str | None]:
 
 
 def parse_validation_line(raw_line: bytes | str) -> tuple[float, float, float | None]:
-    """Parse legacy two-field or load-aware three-field validation telemetry."""
+    """Parse a ``D6T;prediction[;load]`` validation telemetry line."""
     if isinstance(raw_line, bytes):
         try:
             line = raw_line.decode("ascii")

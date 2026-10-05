@@ -24,11 +24,10 @@ With `1U`, the firmware initializes `AI_Model/libneai.a` and calls
 
    <d6t_temp_c>;<predicted_temp_c>;<load_setpoint_a>
 
-The third field is the instantaneous TB-200S command in amperes. It does not
-enter the current 55-axis regression. The PC GUI remains able to read legacy
-two-field firmware streams.
+The third field is the instantaneous TB-200S command in amperes; it is not a
+model input.
 
-The current model is a Ridge regression exported by NanoEdge AI Studio 5.2,
+The embedded model is a Ridge regression exported by NanoEdge AI Studio 5.2,
 with ID `6a99400cd097fef61cf265dc`. It targets Cortex-M4 hard-float and
 expects one sample of 55 axes. `AI_Model/metadata.json` reports:
 
@@ -105,7 +104,7 @@ Validation sequence
 -------------------
 
 1. Check the model files and contract without hardware.
-2. Compare simulated float32 calculations with the pandas reference.
+2. Compare the simulated embedded calculations with the pandas reference.
 3. Build in Serial Emulator mode and inspect all 55 fields on the board.
 4. Build in model mode and inspect both temperatures plus the load command.
 5. Record an independent session with the graphical interface.
@@ -125,30 +124,23 @@ Commands with a connected board:
    .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
    .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
 
-Verified repository state
--------------------------
+Verification status
+-------------------
 
-`validate_neai_export.py` and `validate_motor_limits.py` pass in the current
-state. The validation-interface, dashboard, and preprocessing schema test
-suites also pass. All four current Debug/Release targets produce ELF files in
-STM32CubeIDE 2.1.1, and all changed C sources pass ARM GCC 14.3 syntax
-compilation with warnings enabled. Target-hardware tests remain to be run for
-this revision.
-
-The full `validate_preprocess_parity.py` check currently exceeds its
-tolerance on `daq_log_20260827_080523.csv`: the scaled relative error reaches
-`0.000512959` for `speed_power_ewma_6600` at row 60913, against a limit of
-`0.0005`. The seven preceding logs pass. This float32 drift needs assessment
-before changing the threshold or algorithm; the full test is therefore not
-considered passing in its current state.
+`validate_neai_export.py`, `validate_motor_limits.py`, and
+`validate_preprocess_parity.py` pass, as do the validation-interface,
+dashboard, and preprocessing unit tests. The parity check reaches a maximum
+scaled relative error of about `3.3e-7` against a `1e-6` limit. Both firmware
+projects build in Debug and Release with STM32CubeIDE 2.1.1. Tests on the
+target hardware remain to be run.
 
 Live graphical interface
 ------------------------
 
 `validation/test/temperature_validation_gui.py` provides a dedicated view for
 model-enabled mode. It reads `D6T;prediction;load` lines at 115200 baud,
-accepts the legacy two-field form, and displays both temperatures to one
-decimal place. Its command rail contains five visual cards: `Collecte seule`,
+also accepts two-field `D6T;prediction` lines, and displays both temperatures
+to one decimal place. Its command rail contains five cards: `Collecte seule`,
 `Profil stable`, `Charge variable`, `Vitesse variable`, and `Tout variable`.
 Each card includes a compact speed/load signature and keeps selection, pending
 command, and active-profile states visually distinct.
@@ -173,12 +165,13 @@ collection-only session sends no command. If the GUI launched the profile, it
 attempts a safety `STOP` before disconnecting or closing.
 
 The dashboard header separates serial-link, telemetry, and motor states. Five
-KPI cards show D6T temperature, AI prediction, signed instantaneous error,
-session MAE, and the TB-200S setpoint on a read-only gauge. Below them, three
+KPI cards show D6T temperature, AI prediction, instantaneous error, session
+MAE, and the TB-200S setpoint on a read-only gauge. Below them, three
 synchronized 90-second plots show temperature, absolute error, and load. The
 layout automatically reorganizes the KPI cards on narrower windows.
 
-The instantaneous error is the absolute value of `prediction - D6T`. The
+The instantaneous error card shows the absolute value of `prediction - D6T`,
+with the signed value as detail. The
 displayed cumulative error is the session MAE, or the running mean of absolute
 errors. Both are in °C and use the same display thresholds: green below
 0.5 °C, blue from 0.5 to below 1.0 °C, orange from 1.0 to 1.5 °C, and red
@@ -186,10 +179,10 @@ above 1.5 °C.
 
 The chart shows the latest 90 seconds. Session readings are automatically
 written to `validation/validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv` and
-include `load_setpoint_a` as the final column. Legacy two-field samples store
+include `load_setpoint_a` as the final column. Two-field samples store
 `NaN` for that column. Files can be exported elsewhere at full precision.
-`requirements.txt` already
-lists `pyserial` and `matplotlib`; Tkinter ships with Python on Windows.
+`requirements.txt` lists `pyserial` and `matplotlib`; Tkinter ships with
+Python on Windows.
 
 On Windows, a transient `ClearCommError` is retried at most 100 times with
 150 ms between attempts, giving about 15 seconds excluding serial operation
@@ -207,19 +200,18 @@ Replace these items in `firmware_validation/AI_Model`:
 * `metadata.json`;
 * the traceability JSON files in `artifacts`.
 
-Empty `artifacts` before copying to remove the old algorithm's parameters.
-Keep `feature_order.txt`: it defines the firmware's required order of
+Empty `artifacts` before copying so that parameters from two models are not
+mixed. Keep `feature_order.txt`: it defines the firmware's required order of
 55 features.
 
-The new export must target an STM32G4 Cortex-M4 with a hard-float ABI, keep
-`NEAI_INPUT_SIGNAL_LENGTH == 1` and `NEAI_INPUT_AXIS_NUMBER == 55`, and expose
-`neai_extrapolation_init` and `neai_extrapolation`. After replacement, perform
-a full clean build before flashing the board again.
+The replacement export must target an STM32G4 Cortex-M4 with a hard-float
+ABI, keep `NEAI_INPUT_SIGNAL_LENGTH == 1` and `NEAI_INPUT_AXIS_NUMBER == 55`,
+and expose `neai_extrapolation_init` and `neai_extrapolation`. After
+replacement, perform a full clean build before flashing the board again.
 
 .. code-block:: powershell
 
    .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
 
-Previous independent validation values must be accompanied by the CSV file,
-training/test split, and calculation script. Without this reproducible
-artifact in the repository, they are not an automated acceptance criterion.
+Independent validation metrics must be archived with the CSV files,
+training/test split, and calculation script that produced them.

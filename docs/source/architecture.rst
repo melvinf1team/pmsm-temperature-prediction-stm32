@@ -70,7 +70,7 @@ standalone data logging. The feature period is fixed at 100 ms (10 Hz) in
 
 * `0U`: 55 numeric values for the Serial Emulator;
 * `1U`: `d6t_temp_c;predicted_temp_c;load_setpoint_a` for the validation
-  interface; the PC parser remains compatible with the former two fields.
+  interface.
 
 The validation logger also owns USART1 reception. Its deliberately small
 control protocol accepts `PROFILE,<TOKEN>`, where the token is `STABLE`,
@@ -97,8 +97,8 @@ when writing the file.
 
 `load_setpoint_a` is deliberately outside the 55-axis model contract. It is
 the commanded brake current and is retained in the raw data for experiment
-traceability. Offline preprocessing ignores it by default; the optional
-`--include-load-setpoint` switch appends it after all 55 axes without EWMA.
+traceability. Offline preprocessing omits it by default; `INCLUDE_LOAD_SETPOINT`
+or `--include-load-setpoint` keeps it after all 55 axes without EWMA.
 
 Feature construction
 --------------------
@@ -120,20 +120,20 @@ EWMAs: :math:`11 \times (1 + 4) = 55` features. The D6T target has no EWMA.
 EWMA sampling rate
 ------------------
 
-The historical spans `1320`, `3360`, `6360`, and `9480` correspond to a
-reference logging rate of 2 Hz. To preserve the same time constants when the
-DATA period changes, preprocessing applies:
+The reference spans `1320`, `3360`, `6360`, and `9480` correspond to a
+logging rate of 2 Hz. To preserve the same time constants at another DATA
+period, preprocessing applies:
 
 .. math::
 
-   span_{\mathrm{new}} = span_{2Hz} \times \frac{f_{\mathrm{acquisition}}}{2}
+   span = span_{2Hz} \times \frac{f_{\mathrm{acquisition}}}{2}
 
 A 10 Hz log therefore uses spans `6600`, `16800`, `31800`, and `47400`.
 
 The Python script derives :math:`f_{\mathrm{acquisition}}` from the median of
 strictly positive differences in `stm32_time_ms`. The validation firmware
-uses the 10 Hz spans directly. The parity test checks order and recurrence
-between the two implementations.
+uses the 10 Hz spans directly and keeps the EWMA states in double precision.
+The parity test checks order and recurrence between the two implementations.
 
 Architecture limitations
 ------------------------
@@ -143,5 +143,5 @@ Architecture limitations
   hard-float ABI, and the NanoEdge API remain compatible.
 * Python rescaling assumes the timestamps represent the sampling rate; an
   incorrect forced frequency changes the EWMAs' temporal memory.
-* Replacing missing values with zero may conceal an absent D6T measurement;
-  check this before training.
+* Replacing invalid feature values with zero may conceal a missing sensor
+  reading. Rows with an invalid D6T target are dropped from the output.

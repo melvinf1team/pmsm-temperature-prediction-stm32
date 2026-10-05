@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 import queue
 import sys
+import threading
 from pathlib import Path
 from unittest import mock
 
@@ -45,7 +46,7 @@ class RawCsvSchemaTests(unittest.TestCase):
             "NaN",
         )
 
-    def test_legacy_firmware_fallback_is_safe(self) -> None:
+    def test_load_fallback_when_header_lacks_load_column(self) -> None:
         app = object.__new__(MotorDatalogGui)
         app.active_acquisition_mode = ACQUISITION_MODE_MOTOR
         app.active_load_mode = LOAD_MODE_FIXED
@@ -57,29 +58,34 @@ class RawCsvSchemaTests(unittest.TestCase):
 
 
 class StartupSequenceTests(unittest.TestCase):
-    def test_load_is_applied_between_cfg_and_start(self) -> None:
+    CONFIG = {
+        "acquisition_mode": ACQUISITION_MODE_MOTOR,
+        "target_rpm": 1200.0,
+        "iq_limit": 2.0,
+        "hard_limit": 6.0,
+        "accel": 5.0,
+        "datalog_ms": 100,
+        "ds18b20_ms": 1000,
+        "load_mode": LOAD_MODE_FIXED,
+        "load_setpoint_a": 0.15,
+    }
+
+    def make_app(self):
         app = object.__new__(MotorDatalogGui)
         app.ack_queue = queue.Queue()
         app.gui_queue = queue.Queue()
+        app.launch_cancel_event = threading.Event()
+        return app
+
+    def test_load_is_applied_between_cfg_and_start(self) -> None:
+        app = self.make_app()
         commands: list[str] = []
         acknowledgements: list[str] = []
         app.send_command = lambda command, char_delay=0.0: commands.append(command)
         app.wait_for_ack = lambda name, **_kwargs: acknowledgements.append(name) or True
 
-        config = {
-            "acquisition_mode": ACQUISITION_MODE_MOTOR,
-            "target_rpm": 1200.0,
-            "iq_limit": 2.0,
-            "hard_limit": 6.0,
-            "accel": 5.0,
-            "datalog_ms": 100,
-            "ds18b20_ms": 1000,
-            "load_mode": LOAD_MODE_FIXED,
-            "load_setpoint_a": 0.15,
-        }
-
         with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
-            app.launch_sequence_thread(config)
+            app.launch_sequence_thread(self.CONFIG)
 
         self.assertEqual(
             [command.split(",", 1)[0].strip() for command in commands],
@@ -87,6 +93,27 @@ class StartupSequenceTests(unittest.TestCase):
         )
         self.assertEqual(acknowledgements, ["SYNC", "CFG", "LOAD", "START"])
         self.assertEqual(app.gui_queue.get_nowait(), ("launch_success", ACQUISITION_MODE_MOTOR))
+
+    def test_cancelled_startup_sends_no_further_command(self) -> None:
+        app = self.make_app()
+        commands: list[str] = []
+        app.send_command = lambda command, char_delay=0.0: commands.append(command)
+
+        def wait_for_ack(name, **_kwargs):
+            if name == "CFG":
+                app.launch_cancel_event.set()
+            return True
+
+        app.wait_for_ack = wait_for_ack
+
+        with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
+            app.launch_sequence_thread(self.CONFIG)
+
+        self.assertEqual(
+            [command.split(",", 1)[0].strip() for command in commands],
+            ["SYNC", "CFG"],
+        )
+        self.assertTrue(app.gui_queue.empty())
 
 
 if __name__ == "__main__":

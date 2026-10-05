@@ -11,17 +11,21 @@ suitable for NanoEdge AI Studio. By default:
 * output: `pretraitement/logs_processed_ewma`;
 * CSV separator: `;`;
 * header: disabled;
-* timestamp: omitted from output.
-* TB-200S load command: accepted in the raw input but omitted from the
-  model-ready output unless `--include-load-setpoint` is requested.
+* timestamp: omitted from output;
+* TB-200S load command: omitted from output.
+
+The three defaults are set by `WRITE_HEADER`, `INCLUDE_TIME_MS`, and
+`INCLUDE_LOAD_SETPOINT` at the top of the script; the command-line options
+below override them for one run.
 
 NanoEdge AI target
 ------------------
 
 `d6t_temp_c` is the first column of the output file. It is the extrapolation
-target and is never used to build EWMAs. The script does not convert it to a
-number: a `NaN` string or empty cell read with `keep_default_na=False` stays
-unchanged. Check or filter those rows before training.
+target and is never used to build EWMAs. EWMAs are computed over every sample;
+rows whose target is not a finite number (`NaN` string, empty cell, or text)
+are then dropped from the output, and the number of dropped rows is printed.
+Valid target values are written as read.
 
 Explanatory columns
 -------------------
@@ -71,10 +75,9 @@ value and four EWMAs, giving :math:`11 \times 5 = 55` features.
 
 `load_setpoint_a` is a commanded TB-200S current, not a measured motor
 quantity. It is not smoothed and is not one of the 55 axes expected by the
-currently embedded NanoEdge AI model. The default output therefore remains
-strictly backward-compatible. With `--include-load-setpoint`, the command is
-appended after all 55 model features; use this form for traceability or future
-model experiments, not as a drop-in input for the current 55-axis model.
+embedded NanoEdge AI model, so the default output omits it. With
+`--include-load-setpoint`, the command is appended after all 55 model
+features for traceability; do not feed that file to the 55-input model.
 
 The order is deterministic:
 
@@ -134,14 +137,17 @@ Output options
 `--include-time`
    Keeps `stm32_time_ms` immediately after the target.
 
+`--no-include-time`
+   Omits `stm32_time_ms`.
+
 `--include-load-setpoint`
-   Appends the unfiltered `load_setpoint_a` command after the 55 model axes.
-   A legacy input without this column produces an empty/`NaN` value rather
-   than inventing a zero-current command.
+   Keeps the unfiltered TB-200S `load_setpoint_a` command after the 55 model
+   features. An input without this column, such as the logs in
+   `datalogging/logs`, produces an empty value rather than a 0 A command.
 
 `--no-include-load-setpoint`
-   Keeps the historical target-plus-55 schema. This is the default and the
-   form required by the current embedded model.
+   Omits `load_setpoint_a`. Files imported into NanoEdge AI for the embedded
+   model must not contain it.
 
 `--frequency-hz`
    Sets the acquisition rate and therefore the EWMA spans.
@@ -165,14 +171,12 @@ Numeric cleanup
 `stm32_time_ms`, the six explanatory inputs, and `load_setpoint_a` when
 present are converted with `errors="coerce"`. Derived values and EWMAs are
 then computed. Infinite or missing **model features** are replaced with
-`0.0`. The load command is deliberately excluded from this fallback: when it
-is included in the output, invalid, infinite, or historically absent values
-remain empty/`NaN` so they cannot be mistaken for a measured 0 A command.
+`0.0`. The load command is excluded from this fallback: when it is included
+in the output, invalid, infinite, or absent values remain empty/`NaN` so they
+cannot be mistaken for a 0 A command.
 
-The target is deliberately excluded from numeric conversion. With the
-current read options, invalid text markers in it are therefore not replaced
-by `fillna(0.0)`. This preserves evidence of a missing D6T measurement but
-requires an explicit check before import.
+The target is not replaced by `0.0`: rows with an invalid target are removed,
+as described in the NanoEdge AI target section.
 
 Reproducibility and precautions
 -------------------------------
@@ -181,7 +185,7 @@ The output file has the same name as the input file. Another run in the same
 directory therefore overwrites the previous result. To preserve a dataset:
 
 1. keep the raw CSV files and YAML configuration used;
-2. record any forced frequency and the header setting;
+2. record any forced frequency and the header, timestamp, and load settings;
 3. check the number and order of columns;
 4. compare the order with the 55 lines in
    `firmware_validation/AI_Model/feature_order.txt`;

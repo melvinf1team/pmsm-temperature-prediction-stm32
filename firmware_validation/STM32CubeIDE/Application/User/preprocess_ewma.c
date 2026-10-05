@@ -83,8 +83,8 @@ bool PreprocessEwma_Process(
          span_index < PREPROCESS_EWMA_SPAN_COUNT;
          span_index++)
     {
-      float alpha = 2.0f / ((float)preprocess_ewma_spans[span_index] + 1.0f);
-      float old_weight_factor = 1.0f - alpha;
+      double alpha = 2.0 / ((double)preprocess_ewma_spans[span_index] + 1.0);
+      double old_weight_factor = 1.0 - alpha;
 
       if (context->initialized[signal_index][span_index])
       {
@@ -92,29 +92,29 @@ bool PreprocessEwma_Process(
 
         if (value_is_valid)
         {
-          float mean = context->mean[signal_index][span_index];
-          float old_weight = context->old_weight[signal_index][span_index];
+          double mean = context->mean[signal_index][span_index];
+          double old_weight = context->old_weight[signal_index][span_index];
 
-          if (mean != value)
+          if (mean != (double)value)
           {
             context->mean[signal_index][span_index] =
-              ((old_weight * mean) + (alpha * value)) /
+              ((old_weight * mean) + (alpha * (double)value)) /
               (old_weight + alpha);
           }
 
-          context->old_weight[signal_index][span_index] = 1.0f;
+          context->old_weight[signal_index][span_index] = 1.0;
         }
       }
       else if (value_is_valid)
       {
-        context->mean[signal_index][span_index] = value;
-        context->old_weight[signal_index][span_index] = 1.0f;
+        context->mean[signal_index][span_index] = (double)value;
+        context->old_weight[signal_index][span_index] = 1.0;
         context->initialized[signal_index][span_index] = true;
       }
 
       output[output_index++] =
         context->initialized[signal_index][span_index]
-          ? context->mean[signal_index][span_index]
+          ? (float)context->mean[signal_index][span_index]
           : 0.0f;
     }
   }

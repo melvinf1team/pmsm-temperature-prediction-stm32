@@ -5,9 +5,8 @@ B-G473E-ZEST1S with an STDES-LVHP01 power board, running a simple motor
 sequence, receiving UART measurements, recording CSV, and displaying live
 values. The final CSV is written to ``datalogging/logs`` and keeps the STM32
 columns needed for NanoEdge AI preprocessing plus the TB-200S load setpoint,
-without a PC timestamp. Default
-paths can be overridden by command-line options, YAML, or environment
-variables through ConfigArgParse.
+without a PC timestamp. Default paths can be overridden by command-line
+options, YAML, or environment variables through ConfigArgParse.
 
 The expected firmware serial protocol is line-oriented text::
 
@@ -81,8 +80,6 @@ LOAD_MODE_FIXED = "Fixed"
 LOAD_MODE_VARIABLE = "Variable"
 LOAD_MODES = (LOAD_MODE_FIXED, LOAD_MODE_VARIABLE)
 CUSTOM_PROFILE_NAME = "Custom"
-# Keep the former built-in name reserved in existing profile files.
-LEGACY_CUSTOM_PROFILE_NAME = "Personnalisé"
 
 # Columns written to the final CSV. Additional board columns may be displayed
 # live, but only preprocessing inputs and the requested load are retained.
@@ -391,6 +388,7 @@ class MotorDatalogGui(tk.Tk):
         self.stop_thread = None
 
         self.stop_event = threading.Event()
+        self.launch_cancel_event = threading.Event()
         self.gui_queue = queue.Queue()
         self.ack_queue = queue.Queue()
 
@@ -1153,7 +1151,7 @@ class MotorDatalogGui(tk.Tk):
                         continue
 
                     name = str(item.get("name", "")).strip()
-                    if not name or name in {CUSTOM_PROFILE_NAME, LEGACY_CUSTOM_PROFILE_NAME}:
+                    if not name or name == CUSTOM_PROFILE_NAME:
                         self.profile_load_errors.append(f"Profile #{index} skipped: empty or reserved name.")
                         continue
 
@@ -1254,7 +1252,7 @@ class MotorDatalogGui(tk.Tk):
         return value
 
     def load_setpoint_fallback(self):
-        """Return a best-effort load value for legacy firmware telemetry."""
+        """Return the load value logged when the CSV header lacks ``load_setpoint_a``."""
         if self.active_acquisition_mode != ACQUISITION_MODE_MOTOR:
             return "NaN"
         if self.active_load_mode == LOAD_MODE_FIXED:
@@ -1486,7 +1484,7 @@ class MotorDatalogGui(tk.Tk):
         if not name:
             messagebox.showerror("Invalid name", "The profile name cannot be empty.")
             return
-        if name in {CUSTOM_PROFILE_NAME, LEGACY_CUSTOM_PROFILE_NAME}:
+        if name == CUSTOM_PROFILE_NAME:
             messagebox.showerror("Invalid name", f"The name '{name}' is reserved.")
             return
         if name in BUILTIN_PROFILE_NAMES:
@@ -2081,6 +2079,7 @@ class MotorDatalogGui(tk.Tk):
         self.clear_ack_queue()
 
         self.stop_event.clear()
+        self.launch_cancel_event.clear()
         self.reader_thread = threading.Thread(target=self.serial_reader_loop, daemon=True)
         self.reader_thread.start()
 
@@ -2110,16 +2109,24 @@ class MotorDatalogGui(tk.Tk):
         Args:
             cfg: Validated configuration returned by ``parse_config``.
         """
+        cancel = self.launch_cancel_event
+
+        def send(command, char_delay):
+            if cancel.is_set():
+                raise RuntimeError("Startup cancelled.")
+            self.send_command(command, char_delay=char_delay)
+
         try:
             idle_mode = cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE
 
             self.clear_ack_queue()
-            self.send_command("SYNC\n", char_delay=0.002)
+            send("SYNC\n", char_delay=0.002)
             try:
                 sync_ok = self.wait_for_ack(
                     "SYNC",
                     timeout=2.0,
                     ignored_errors={"ERR,UNKNOWN_CMD", "ERR,BAD_CFG", "ERR,NO_VALID_CFG"},
+                    cancel_event=cancel,
                 )
                 if not sync_ok:
                     next_command = "ACQ_START" if idle_mode else "CFG"
@@ -2133,8 +2140,8 @@ class MotorDatalogGui(tk.Tk):
             if idle_mode:
                 acq_cmd = f"ACQ_START,{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n"
                 self.clear_ack_queue()
-                self.send_command(acq_cmd, char_delay=0.002)
-                self.wait_for_ack("ACQ_START", timeout=5.0)
+                send(acq_cmd, char_delay=0.002)
+                self.wait_for_ack("ACQ_START", timeout=5.0, cancel_event=cancel)
             else:
                 cfg_cmd = (
                     f"CFG,{cfg['target_rpm']:.3f},{cfg['iq_limit']:.3f},{cfg['hard_limit']:.3f},"
@@ -2142,8 +2149,8 @@ class MotorDatalogGui(tk.Tk):
                 )
 
                 self.clear_ack_queue()
-                self.send_command(cfg_cmd, char_delay=0.003)
-                self.wait_for_ack("CFG", timeout=5.0)
+                send(cfg_cmd, char_delay=0.003)
+                self.wait_for_ack("CFG", timeout=5.0, cancel_event=cancel)
 
                 time.sleep(0.1)
 
@@ -2152,17 +2159,19 @@ class MotorDatalogGui(tk.Tk):
                     cfg["load_setpoint_a"],
                 )
                 self.clear_ack_queue()
-                self.send_command(load_cmd, char_delay=0.002)
-                self.wait_for_ack("LOAD", timeout=5.0)
+                send(load_cmd, char_delay=0.002)
+                self.wait_for_ack("LOAD", timeout=5.0, cancel_event=cancel)
 
                 time.sleep(0.1)
 
                 self.clear_ack_queue()
-                self.send_command("START\n", char_delay=0.002)
-                self.wait_for_ack("START", timeout=5.0)
+                send("START\n", char_delay=0.002)
+                self.wait_for_ack("START", timeout=5.0, cancel_event=cancel)
 
             self.gui_queue.put(("launch_success", cfg["acquisition_mode"]))
         except Exception as exc:
+            if cancel.is_set():
+                return
             self.gui_queue.put(("launch_failed", str(exc)))
 
     def stop_run(self):
@@ -2182,6 +2191,12 @@ class MotorDatalogGui(tk.Tk):
 
     def stop_sequence_thread(self):
         """Send ``STOP`` and close resources after an ACK or timeout."""
+        # STOP must be the last command sent, even if startup is still in progress.
+        self.launch_cancel_event.set()
+        launch_thread = self.launch_thread
+        if launch_thread is not None and launch_thread.is_alive():
+            launch_thread.join(timeout=2.0)
+
         try:
             self.clear_ack_queue()
             self.send_command("STOP\n", char_delay=0.002)
@@ -2211,15 +2226,18 @@ class MotorDatalogGui(tk.Tk):
         self.csv_output_columns = []
         self.csv_pending_rows = 0
 
-        if self.serial_obj:
+        with self.serial_lock:
+            serial_obj = self.serial_obj
+            self.serial_obj = None
+
+        if serial_obj is not None:
             try:
-                if self.serial_obj.is_open:
-                    self.serial_obj.close()
+                if serial_obj.is_open:
+                    serial_obj.close()
                 self.log("Serial port closed.")
             except Exception as exc:
                 self.log(f"Could not close serial port: {exc}")
 
-        self.serial_obj = None
         self.is_running = False
         self.is_launching = False
         self.is_stopping = False
@@ -2242,21 +2260,22 @@ class MotorDatalogGui(tk.Tk):
         Raises:
             RuntimeError: If no open serial port is available.
         """
-        if self.serial_obj is None or not self.serial_obj.is_open:
-            raise RuntimeError("Serial port is not open.")
-
         display = command.replace("\r", "\\r").replace("\n", "\\n")
-        self.gui_queue.put(("log", f"TX → {display}"))
 
         with self.serial_lock:
+            serial_obj = self.serial_obj
+            if serial_obj is None or not serial_obj.is_open:
+                raise RuntimeError("Serial port is not open.")
+
+            self.gui_queue.put(("log", f"TX → {display}"))
             if char_delay > 0.0:
                 for ch in command:
-                    self.serial_obj.write(ch.encode("ascii"))
-                    self.serial_obj.flush()
+                    serial_obj.write(ch.encode("ascii"))
+                    serial_obj.flush()
                     time.sleep(char_delay)
             else:
-                self.serial_obj.write(command.encode("ascii"))
-                self.serial_obj.flush()
+                serial_obj.write(command.encode("ascii"))
+                serial_obj.flush()
 
     def clear_ack_queue(self):
         """Clear all pending ACK/ERR responses."""
@@ -2266,33 +2285,37 @@ class MotorDatalogGui(tk.Tk):
         except queue.Empty:
             pass
 
-    def wait_for_ack(self, name, timeout=5.0, ignored_errors=None):
+    def wait_for_ack(self, name, timeout=5.0, ignored_errors=None, cancel_event=None):
         """Wait for an ``ACK,<name>`` response or a firmware error.
 
         Args:
             name: Command name expected after ``ACK,``.
             timeout: Maximum wait time in seconds.
             ignored_errors: Optional set of nonblocking ``ERR,...`` responses.
+            cancel_event: Optional event that aborts the wait when set.
 
         Returns:
             bool: ``True`` for the expected ACK; ``False`` for an ignored error.
 
         Raises:
             TimeoutError: If no usable response arrives before the timeout.
-            RuntimeError: If firmware returns an error that is not ignored.
+            RuntimeError: If firmware returns an error that is not ignored, or
+                if ``cancel_event`` is set.
         """
         if ignored_errors is None:
             ignored_errors = set()
         expected = f"ACK,{name}"
         deadline = time.monotonic() + timeout
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("Startup cancelled.")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(f"Timed out waiting for {expected}")
             try:
-                line = self.ack_queue.get(timeout=remaining)
+                line = self.ack_queue.get(timeout=min(remaining, 0.1))
             except queue.Empty:
-                raise TimeoutError(f"Timed out waiting for {expected}")
+                continue
             if line == expected:
                 return True
             if line.startswith("ERR,"):
@@ -2308,10 +2331,11 @@ class MotorDatalogGui(tk.Tk):
         """
         buffer = b""
         while not self.stop_event.is_set():
+            serial_obj = self.serial_obj
             try:
-                if self.serial_obj is None:
+                if serial_obj is None:
                     break
-                data = self.serial_obj.read(512)
+                data = serial_obj.read(512)
             except Exception as exc:
                 if not self.stop_event.is_set():
                     self.gui_queue.put(("log", f"Serial read error: {exc}"))
