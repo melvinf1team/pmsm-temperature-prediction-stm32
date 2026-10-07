@@ -60,6 +60,8 @@
 #define APP_BUTTON_ACCEL_ELEC_HZ_S          500.0f
 #define APP_BUTTON_DEBOUNCE_MS              250U
 #define APP_START_RETRY_PERIOD_MS           100U
+/* Couvre STOPPERMANENCY_MS (400 ms) après un arrêt moteur. */
+#define APP_START_WAIT_IDLE_MS              1000U
 
 /* TB-200S : mode 0-10 V pour 0-3 A, soit V_ADJ = I_LOAD * 10 / 3.
  * Le DAC 12 bits est référencé à la VDDA nominale de 3,3 V. */
@@ -105,6 +107,7 @@ typedef enum
 } AppMotorControlState_t;
 
 static AppMotorControlState_t app_mc_state = APP_MC_IDLE;
+static const char *app_mc_fault_reason = "NONE";
 
 static uint32_t app_mc_boot_ms = 0U;
 static uint32_t app_mc_start_ms = 0U;
@@ -138,6 +141,12 @@ static float app_hard_stop_current_a = APP_DEFAULT_HARD_STOP_CURRENT_A;
 static float app_accel_elec_hz_s = APP_DEFAULT_ACCEL_ELEC_HZ_S;
 
 static void AppMotorControl_ApplySpeedReference(void);
+
+static void AppMotorControl_SetFault(const char *reason)
+{
+  app_mc_fault_reason = reason;
+  app_mc_state = APP_MC_FAULT;
+}
 
 static bool AppMotorControl_IsFiniteFloat(float value)
 {
@@ -193,7 +202,7 @@ static uint32_t AppMotorControl_ButtonRandomRange(uint32_t minimum,
   return minimum + (random_value % range);
 }
 
-static uint32_t AppMotorControl_LoadToDacCode(float load_a)
+uint32_t AppMotorControl_LoadToDacCode(float load_a)
 {
   float adj_voltage_v = load_a *
     (APP_TB200S_FULL_SCALE_V / APP_TB200S_FULL_SCALE_A);
@@ -356,6 +365,35 @@ bool AppMotorControl_SetLoadVariable(void)
 float AppMotorControl_GetLoadSetpointA(void)
 {
   return app_tb200s_load_setpoint_a;
+}
+
+bool AppMotorControl_RestoreLoadOutput(void)
+{
+  return AppMotorControl_ApplyLoadSetpoint(app_tb200s_load_setpoint_a);
+}
+
+const char *AppMotorControl_GetStateName(void)
+{
+  switch (app_mc_state)
+  {
+    case APP_MC_IDLE:
+      return "IDLE";
+    case APP_MC_WAIT_AUTOSTART:
+      return "WAIT_AUTOSTART";
+    case APP_MC_STARTING:
+      return "STARTING";
+    case APP_MC_RUNNING:
+      return "RUNNING";
+    case APP_MC_FAULT:
+      return "FAULT";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char *AppMotorControl_GetFaultReason(void)
+{
+  return app_mc_fault_reason;
 }
 
 static void AppMotorControl_ScheduleNextButtonSpeedChange(uint32_t now)
@@ -643,25 +681,43 @@ void AppMotorControl_Init(void)
 #endif
 }
 
+/* MCSDK ne quitte FAULT_OVER (après acquittement) ou STOP que dans sa tâche
+ * moyenne fréquence, exécutée sous SysTick : on attend donc IDLE. */
+static bool AppMotorControl_WaitForMcIdle(uint32_t timeout_ms)
+{
+  uint32_t start = HAL_GetTick();
+
+  for (;;)
+  {
+    MCI_State_t state = MC_GetSTMStateMotor1();
+
+    if (MC_GetCurrentFaultsMotor1() != MC_NO_FAULTS)
+    {
+      return false;
+    }
+    if (state == IDLE)
+    {
+      return true;
+    }
+    if (state == FAULT_OVER)
+    {
+      (void)MC_AcknowledgeFaultsMotor1();
+    }
+    if ((HAL_GetTick() - start) >= timeout_ms)
+    {
+      return false;
+    }
+    HAL_Delay(1U);
+  }
+}
+
 bool AppMotorControl_Start(void)
 {
-  MCI_State_t state = MC_GetSTMStateMotor1();
-
-  if (state == FAULT_OVER)
+  if (!AppMotorControl_WaitForMcIdle(APP_START_WAIT_IDLE_MS))
   {
-    MC_AcknowledgeFaultsMotor1();
-  }
-
-  if (MC_GetCurrentFaultsMotor1() != MC_NO_FAULTS)
-  {
-    app_mc_state = APP_MC_FAULT;
-    return false;
-  }
-
-  state = MC_GetSTMStateMotor1();
-
-  if (state != IDLE)
-  {
+    AppMotorControl_SetFault((MC_GetCurrentFaultsMotor1() != MC_NO_FAULTS)
+                             ? "MCSDK_FAULT"
+                             : "MCSDK_NOT_IDLE");
     return false;
   }
 
@@ -669,7 +725,7 @@ bool AppMotorControl_Start(void)
    * Une consigne fixe supérieure n'est restaurée qu'après confirmation RUN. */
   if (!AppMotorControl_PrepareLoadForMotorStart())
   {
-    app_mc_state = APP_MC_FAULT;
+    AppMotorControl_SetFault("LOAD_DAC");
     return false;
   }
 
@@ -685,6 +741,7 @@ bool AppMotorControl_Start(void)
   if (MC_StartWithPolarizationMotor1() == MC_SUCCESS)
   {
     app_motor_start_requested = false;
+    app_mc_fault_reason = "NONE";
     app_mc_state = APP_MC_STARTING;
     app_mc_start_ms = HAL_GetTick();
     AppMotorControl_ResetSpeedPi();
@@ -693,7 +750,7 @@ bool AppMotorControl_Start(void)
     return true;
   }
 
-  app_mc_state = APP_MC_FAULT;
+  AppMotorControl_SetFault("START_REJECTED");
   return false;
 }
 
@@ -855,7 +912,7 @@ void AppMotorControl_Task(void)
   {
     MC_StopMotor1();
     AppMotorControl_OnMotorStopped();
-    app_mc_state = APP_MC_FAULT;
+    AppMotorControl_SetFault("MCSDK_FAULT");
     return;
   }
 
@@ -881,7 +938,7 @@ void AppMotorControl_Task(void)
         {
           MC_StopMotor1();
           AppMotorControl_OnMotorStopped();
-          app_mc_state = APP_MC_FAULT;
+          AppMotorControl_SetFault("LOAD_DAC");
           break;
         }
         app_mc_overcurrent_since_ms = 0U;
@@ -890,13 +947,13 @@ void AppMotorControl_Task(void)
       else if ((mc_state == FAULT_NOW) || (mc_state == FAULT_OVER))
       {
         AppMotorControl_OnMotorStopped();
-        app_mc_state = APP_MC_FAULT;
+        AppMotorControl_SetFault("MCSDK_FAULT");
       }
       else if ((now - app_mc_start_ms) > APP_STARTUP_TIMEOUT_MS)
       {
         MC_StopMotor1();
         AppMotorControl_OnMotorStopped();
-        app_mc_state = APP_MC_FAULT;
+        AppMotorControl_SetFault("STARTUP_TIMEOUT");
       }
       break;
 
@@ -907,7 +964,7 @@ void AppMotorControl_Task(void)
       {
         MC_StopMotor1();
         AppMotorControl_OnMotorStopped();
-        app_mc_state = APP_MC_FAULT;
+        AppMotorControl_SetFault("LOAD_DAC");
         return;
       }
       AppMotorControl_UpdateIqLimitRamp(now);
@@ -925,7 +982,7 @@ void AppMotorControl_Task(void)
         AppMotorControl_StopButtonProfile();
         MC_StopMotor1();
         AppMotorControl_OnMotorStopped();
-        app_mc_state = APP_MC_FAULT;
+        AppMotorControl_SetFault("NONFINITE_CURRENT");
         return;
       }
 
@@ -942,7 +999,7 @@ void AppMotorControl_Task(void)
           {
             MC_StopMotor1();
             AppMotorControl_OnMotorStopped();
-            app_mc_state = APP_MC_FAULT;
+            AppMotorControl_SetFault("HARD_OVERCURRENT");
           }
         }
         else
@@ -966,7 +1023,7 @@ void AppMotorControl_Task(void)
           AppMotorControl_StopButtonProfile();
           MC_StopMotor1();
           AppMotorControl_OnMotorStopped();
-          app_mc_state = APP_MC_FAULT;
+          AppMotorControl_SetFault("NONFINITE_SPEED");
           return;
         }
 
@@ -991,7 +1048,7 @@ void AppMotorControl_Task(void)
           {
             MC_StopMotor1();
             AppMotorControl_OnMotorStopped();
-            app_mc_state = APP_MC_FAULT;
+            AppMotorControl_SetFault("OVERSPEED");
           }
         }
         else

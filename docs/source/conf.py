@@ -6,6 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "datalogging"))
 sys.path.insert(0, str(PROJECT_ROOT / "pretraitement"))
 sys.path.insert(0, str(PROJECT_ROOT / "validation" / "test"))
+sys.path.insert(0, str(PROJECT_ROOT / "tests" / "bench"))
 
 project = "PMSM Temperature Prediction STM32"
 copyright = "2026, STMicroelectronics, Melvin Pellegrino"

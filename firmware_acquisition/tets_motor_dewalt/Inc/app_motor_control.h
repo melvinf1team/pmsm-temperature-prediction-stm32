@@ -2,6 +2,7 @@
 #define APP_MOTOR_CONTROL_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Bornes applicatives communes au contrôle moteur et au protocole série. */
 #define APP_MOTOR_MAX_TARGET_SPEED_RPM       4500.0f
@@ -28,5 +29,11 @@ bool AppMotorControl_IsRunning(void);
 bool AppMotorControl_SetLoadFixed(float load_a);
 bool AppMotorControl_SetLoadVariable(void);
 float AppMotorControl_GetLoadSetpointA(void);
+uint32_t AppMotorControl_LoadToDacCode(float load_a);
+bool AppMotorControl_RestoreLoadOutput(void);
+
+const char *AppMotorControl_GetStateName(void);
+/* Cause du dernier passage en FAULT ; "NONE" depuis le dernier démarrage réussi. */
+const char *AppMotorControl_GetFaultReason(void);
 
 #endif /* APP_MOTOR_CONTROL_H */

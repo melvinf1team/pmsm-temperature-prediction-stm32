@@ -7,9 +7,9 @@ import threading
 from pathlib import Path
 from unittest import mock
 
-TEST_DIR = Path(__file__).resolve().parent
-if str(TEST_DIR) not in sys.path:
-    sys.path.insert(0, str(TEST_DIR))
+DATALOGGING_DIR = Path(__file__).resolve().parents[2] / "datalogging"
+if str(DATALOGGING_DIR) not in sys.path:
+    sys.path.insert(0, str(DATALOGGING_DIR))
 
 from motor_datalog_gui_dashboard import (
     LOAD_MODE_FIXED,

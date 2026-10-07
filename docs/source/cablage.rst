@@ -58,7 +58,9 @@ with multiple motor expansion boards.
 
 The expected I2C address is `0x0A`. The firmware reads command `0x4C` and
 checks the frame's PEC. The logged pixel is selected by
-`D6TIR_SELECTED_PIXEL_INDEX` in `d6t_ir.c`. If the sensor is absent or no
+`D6TIR_SELECTED_PIXEL_INDEX` in the `d6t_ir.c` file of each firmware; choose
+it with the live map of `tests/bench/d6t_calibration.py` (see
+:ref:`d6t-calibration`). If the sensor is absent or no
 valid measurement has yet been received, the CSV value is `NaN`.
 
 DS18B20 sensor
@@ -207,6 +209,9 @@ Checks before applying power
   at the 0.05 A command before enabling the brake output.
 * Check that the motor and power board are mechanically secure.
 * Power the logic first and confirm that the COM port appears.
+* Run `python .\tests\bench\check_wiring.py --port COMx` with the motor
+  stopped and fix every `FAIL` line; add `--motor` to check the U/V/W phases
+  and the brake response (see :doc:`utilisation`).
 * Check boot messages and sensor readings before starting a motor sequence.
 
 An absent D6T produces `NaN`. After a transient failure, the DS18B20 may keep

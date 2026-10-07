@@ -32,7 +32,9 @@ Validation-specific components are mainly in:
 | `Inc/preprocess_ewma.h` | Preprocessing period and dimensions |
 | `AI_Model/feature_order.txt` | Required order of 55 axes |
 | `AI_Model/` | Model library, header, metadata, and artifacts |
-| `tests/` | Off-target checks and serial contract test |
+
+Off-target checks are in `../tests/consistency`; the serial contract test and
+the D6T pixel calibration tool are in `../tests/bench` (see `../tests/README.md`).
 
 `Drivers`, `MCSDK_v6.4.2-Full`, `Src`, and parts of `Inc` come from STM32
 tools. Review any CubeMX/Workbench regeneration before integrating it.
@@ -174,7 +176,7 @@ load plots. It records `load_setpoint_a` in its validation CSV.
 Check the contract with a connected board:
 
 ```powershell
-.\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
+.\.venv\Scripts\python.exe .\tests\bench\check_nanoedge_serial.py --port COM5 --mode model
 ```
 
 The corresponding graphical interface is described in
@@ -200,7 +202,7 @@ In NanoEdge AI Studio, open **Validation > Serial Emulator**, select the COM
 port and 115200 baud. No `START` command is needed.
 
 ```powershell
-.\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
+.\.venv\Scripts\python.exe .\tests\bench\check_nanoedge_serial.py --port COM5 --mode emulator
 ```
 
 ## Contract for the 55 features
@@ -287,7 +289,7 @@ After changing the mode or model:
 Check the export structure:
 
 ```powershell
-.\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
+.\.venv\Scripts\python.exe .\tests\consistency\validate_neai_export.py
 ```
 
 It checks the library ID, dimensions, ABI, symbols, feature order, and Ridge
@@ -297,7 +299,7 @@ Check limits in the dashboard, both firmware projects, and Workbench/CubeMX
 files:
 
 ```powershell
-.\.venv\Scripts\python.exe .\firmware_validation\tests\validate_motor_limits.py
+.\.venv\Scripts\python.exe .\tests\consistency\validate_motor_limits.py
 ```
 
 This check covers the global 4500 rpm and 30 A ceilings, 14 A polarization,
@@ -310,7 +312,7 @@ current range.
 Compare the simulated embedded preprocessing with pandas:
 
 ```powershell
-.\.venv\Scripts\python.exe .\firmware_validation\tests\validate_preprocess_parity.py
+.\.venv\Scripts\python.exe .\tests\consistency\validate_preprocess_parity.py
 ```
 
 The check passes on all eight logs of `datalogging/logs` with a maximum scaled

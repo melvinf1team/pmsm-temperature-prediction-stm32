@@ -167,7 +167,7 @@ without interrupting automatic recording for the current connection.
 The unit tests need neither a board nor a graphical window:
 
 ```powershell
-.\.venv\Scripts\python.exe .\validation\test\test_temperature_validation_gui.py
+.\.venv\Scripts\python.exe .\tests\unit\test_temperature_validation_gui.py
 ```
 
 They cover profile-command validation, control acknowledgments, two- and
@@ -179,5 +179,5 @@ model's statistical performance.
 Run the hardware protocol check from the repository root:
 
 ```powershell
-.\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
+.\.venv\Scripts\python.exe .\tests\bench\check_nanoedge_serial.py --port COM5 --mode model
 ```

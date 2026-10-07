@@ -15,7 +15,10 @@ Responsibilities:
 * the dashboard manages the serial session, display, and raw CSV file;
 * preprocessing turns measurements into a training dataset;
 * the validation firmware reproduces the 55 features and, depending on its
-  configuration, calls the NanoEdge AI library.
+  configuration, calls the NanoEdge AI library;
+* `tests` holds the bench tools (`bench/`: wiring check, D6T pixel
+  calibration, NanoEdge serial check), the consistency checks, and the unit
+  tests.
 
 .. code-block:: text
 
@@ -52,7 +55,11 @@ Application modules are in
   variable load operation;
 * `app_datalog.c` schedules the sensors and feeds a nonblocking UART
   transmit queue;
-* `d6t_ir.c` and `ds18b20.c` isolate sensor protocols.
+* `app_wiring_diag.c` answers `DIAG` and `STATUS` for
+  `tests/bench/check_wiring.py`;
+* `d6t_ir.c` and `ds18b20.c` isolate sensor protocols; `d6t_ir.c` also keeps
+  the last full D6T frame for `D6T_FRAME`, used by
+  `tests/bench/d6t_calibration.py`.
 
 The dashboard keeps Tkinter on the main thread. Serial reads and startup and
 shutdown sequences use threads that communicate with the interface through

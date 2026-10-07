@@ -221,7 +221,8 @@ def validate_firmware_root(root: Path) -> None:
 
     if root == ACQUISITION_ROOT:
         assert "AppMotorControl_ServiceStartRequest" in source
-        assert "if (state != IDLE)" in source
+        assert "AppMotorControl_WaitForMcIdle(APP_START_WAIT_IDLE_MS)" in source
+        assert "(void)MC_AcknowledgeFaultsMotor1();" in source
         assert "iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500" in source
         serial_source = (
             root / "STM32CubeIDE" / "Application" / "User" / "app_serial_control.c"

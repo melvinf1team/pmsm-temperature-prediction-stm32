@@ -7,13 +7,87 @@ Recommended sequence
 1. Switch off power and inspect the setup described in :doc:`cablage`.
 2. Build and flash the acquisition firmware from STM32CubeIDE.
 3. Power the logic, connect the sensors, and identify the COM port.
-4. Start `datalogging/motor_datalog_gui_dashboard.py`.
-5. Select the port, 115200 baud, and session mode.
-6. In motor mode, choose or create a profile; in acquisition-only mode, enter
+4. Run `tests/bench/check_wiring.py` (see `Wiring check`_) and fix
+   every `FAIL` line.
+5. On a new setup, or after moving the D6T, choose the logged pixel with
+   `tests/bench/d6t_calibration.py` (see :ref:`d6t-calibration`).
+6. Start `datalogging/motor_datalog_gui_dashboard.py`.
+7. Select the port, 115200 baud, and session mode.
+8. In motor mode, choose or create a profile; in acquisition-only mode, enter
    only the periods. Select a fixed TB-200S load or `Variable`.
-7. Check the CSV path, then start the session.
-8. Stop with the dashboard button, which sends `STOP` before closing resources.
-9. Inspect the raw CSV file before running preprocessing.
+9. Check the CSV path, then start the session.
+10. Stop with the dashboard button, which sends `STOP` before closing resources.
+11. Inspect the raw CSV file before running preprocessing.
+
+Wiring check
+------------
+
+With the acquisition firmware flashed and the dashboard closed:
+
+.. code-block:: powershell
+
+   python .\tests\bench\check_wiring.py --port COM5
+   python .\tests\bench\check_wiring.py --port COM5 --motor
+
+The script first checks that `firmware_acquisition` answers `SYNC` and
+recognizes the validation firmware or a silent port. With the motor stopped,
+it sends `DIAG` (see :doc:`firmware`), records 3 seconds of `ACQ_START`, and
+prints `OK`, `WARN`, `FAIL`, or `SKIP` for each module with its probable causes
+and the fix to apply.
+
+.. csv-table:: Faults identified with the motor stopped
+   :header: "Module", "Detected cases"
+   :widths: 25, 75
+
+   "D6T (CN10-27/CN10-24)", "Missing 4.7 kOhm pull-up or 3V3 rail; SCL/SDA swapped or shorted; wire on a neighbouring Morpho pin; unpowered D6T clamping the lines low; frames rejected (PEC)"
+   "DS18B20 (CN7-1)", "No presence pulse; sensor answering on another pin; VDD not supplied (parasite power); missing external pull-up; corrupted data or 85 degC power-on value"
+   "TB-200S command (CN7-32)", "Nothing connected (wire, SB91, R1); R1/C1 network on CN7-31 or CN7-34; C1 missing; ADJ shorted to GND; external voltage on ADJ (local link still fitted)"
+   "Power stage", "Bus voltage below 8 V; latched MCSDK faults"
+
+`--motor` asks the operator to confirm (`yes` or `oui`, or use `--yes`), then runs the
+motor at 1500 rpm with a 6 A `Iq` limit and a 10 A hard stop (`--speed`,
+`--iq-limit`, `--hard-limit`, and `--accel` change these values). If the
+motor does not start, `STATUS` gives the firmware stop reason and the MCSDK
+fault bits, which are translated into causes: disconnected phase, phase
+short, undervoltage, blocked rotor. Once the motor runs, the script checks the
+d/q telemetry, asks whether the rotation direction is correct to detect two
+swapped phases, then applies 0.05, 0.25, and 0.05 A to the TB-200S and
+checks that `Iq` rises or the speed drops.
+
+The exit code is `0` without failure, `1` with at least one failure, and `2`
+when the port cannot be opened. Misplaced wires are only searched on the free
+Morpho pins adjacent to the expected ones.
+
+.. _d6t-calibration:
+
+D6T pixel calibration
+---------------------
+
+The D6T-44L-06 measures a 4x4 matrix; both firmwares log one pixel,
+`D6TIR_SELECTED_PIXEL_INDEX` in `d6t_ir.c`, as `d6t_temp_c`. The calibration
+tool shows the 16 pixels live and writes the chosen index into both firmware
+projects:
+
+.. code-block:: powershell
+
+   python .\tests\bench\d6t_calibration.py --port COM5
+   python .\tests\bench\d6t_calibration.py --demo
+
+It needs `firmware_acquisition`, which answers `D6T_FRAME` (see
+:doc:`firmware`), and never sends a motor command: warm the motor with B2
+beforehand, or keep B2 running during the calibration, so that it stands out.
+
+1. Rotate or mirror the view until a warm hand moved in front of the sensor
+   appears at the right place. Indices do not change with the view.
+2. Click the pixel fully inside the motor area, or press **Select hottest**.
+   The side card gives its live value, its 5 s mean and range, its difference
+   from the sensor reference (PTAT), and its rank.
+3. Click **Write pixel N to both firmwares**, confirm, then rebuild and flash
+   `firmware_acquisition` and `firmware_validation`.
+4. Reconnect: the *Firmware* card shows the pixel logged by the flashed board.
+
+A new pixel changes the dataset target: record new logs and retrain the model.
+`tests/README.md` lists every D6T setting in both firmwares.
 
 Operating ranges
 ----------------
@@ -137,6 +211,9 @@ Expected responses and messages:
 
 The dashboard ignores `DATA` lines received before `#CSV_HEADER` to avoid
 writing an inconsistent CSV file.
+
+`check_wiring.py` also uses `DIAG` and `STATUS`, and `d6t_calibration.py`
+uses `D6T_FRAME`; these commands are described in :doc:`firmware`.
 
 `ACQ_START` is used by itself after `SYNC` to record cooling while the motor
 is stopped. In this state, the firmware explicitly reports zero for voltages,

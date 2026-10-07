@@ -15,6 +15,24 @@ Datalogging dashboard
    :show-inheritance:
    :special-members: __init__
 
+Wiring check
+------------
+
+.. automodule:: check_wiring
+   :no-index:
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+D6T pixel calibration
+---------------------
+
+.. automodule:: d6t_calibration
+   :no-index:
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 EWMA preprocessing
 ------------------
 

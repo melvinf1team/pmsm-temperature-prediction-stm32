@@ -113,16 +113,16 @@ Commands without hardware:
 
 .. code-block:: powershell
 
-   .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
-   .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_motor_limits.py
-   .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_preprocess_parity.py
+   .\.venv\Scripts\python.exe .\tests\consistency\validate_neai_export.py
+   .\.venv\Scripts\python.exe .\tests\consistency\validate_motor_limits.py
+   .\.venv\Scripts\python.exe .\tests\consistency\validate_preprocess_parity.py
 
 Commands with a connected board:
 
 .. code-block:: powershell
 
-   .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
-   .\.venv\Scripts\python.exe .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
+   .\.venv\Scripts\python.exe .\tests\bench\check_nanoedge_serial.py --port COM5 --mode model
+   .\.venv\Scripts\python.exe .\tests\bench\check_nanoedge_serial.py --port COM5 --mode emulator
 
 Verification status
 -------------------
@@ -211,7 +211,7 @@ replacement, perform a full clean build before flashing the board again.
 
 .. code-block:: powershell
 
-   .\.venv\Scripts\python.exe .\firmware_validation\tests\validate_neai_export.py
+   .\.venv\Scripts\python.exe .\tests\consistency\validate_neai_export.py
 
 Independent validation metrics must be archived with the CSV files,
 training/test split, and calculation script that produced them.

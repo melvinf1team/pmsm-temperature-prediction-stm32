@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 
-FIRMWARE_ROOT = Path(__file__).resolve().parents[1]
+FIRMWARE_ROOT = Path(__file__).resolve().parents[2] / "firmware_validation"
 MODEL_DIR = FIRMWARE_ROOT / "AI_Model"
 EXPECTED_FEATURE_COUNT = 55
 

@@ -13,11 +13,13 @@ Verification status
 
    "Strict Sphinx build", "Passed", "No warnings with -W --keep-going"
    "NanoEdge export consistency", "Passed", "Valid ID, ABI, symbols, dimensions, and Ridge artifacts"
-   "Dashboard, preprocessing, and validation GUI tests", "Passed", "All unit tests pass"
+   "Dashboard, preprocessing, wiring-check, D6T calibration, and validation GUI tests", "Passed", "All unit tests in tests/unit pass"
    "Motor and TB-200S consistency", "Passed", "Dashboard, firmware, PA5/DAC1, IOC, WBDEF, and Workbench checked"
    "Embedded/pandas parity", "Passed", "Maximum scaled relative error about 3.3e-7 against a 1e-6 limit on all logs"
    "Firmware Debug/Release builds", "Passed", "Both projects build in Debug and Release with STM32CubeIDE 2.1.1"
    "USART1 contract on target", "Not run", "Requires a programmed board and COM port"
+   "Wiring check (DIAG) on target", "Not run", "Diagnosis rules are unit-tested on synthetic answers; thresholds still need confirmation on the bench"
+   "D6T pixel calibration on target", "Not run", "D6T_FRAME and the firmware writer are unit-tested; the live map still needs a session on the bench"
 
 Open points
 -----------
@@ -60,11 +62,13 @@ model ID would make performance an acceptance criterion.
 3. Coverage and automation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Medium priority.** There is no CI or single test command.
+**Medium priority.** There is no CI; `python .\tests\run_all.py` runs every
+check that needs no board.
 `validate_motor_limits.py` checks the constants, DAC pin, protocol markers,
 and generator files. The unit tests cover profile command serialization,
 acknowledgments, startup order and cancellation, two-field telemetry, CSV
-writing, the optional load column, and invalid target rows, but not visual
+writing, the optional load column, invalid target rows, the wiring-check
+diagnosis rules, and the D6T calibration logic, but not visual
 thresholds, all parser cases, dashboard arguments, or the firmware state
 machines on a host. Firmware builds have no command-line procedure.
 

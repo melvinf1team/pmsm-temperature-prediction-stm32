@@ -23,6 +23,10 @@ The main application modules are:
 `app_datalog.c`
    USART ownership, nonblocking TX queue, CSV header, and `DATA` rows.
 
+`app_wiring_diag.c`
+   Wiring diagnostics of the sensor and TB-200S lines (`DIAG`) and motor
+   status report (`STATUS`).
+
 `d6t_ir.c`
    Software I2C reads from the D6T infrared sensor and formatting of
    `d6t_temp_c`.
@@ -75,11 +79,60 @@ stop, at most 50 electrical Hz/s for acceleration, 1 to 10,000 ms for
 `DATA`, and at most 10,000 ms for the DS18B20. A requested DS18B20 period
 below 750 ms is accepted and raised to 750 ms.
 
+Wiring diagnostics
+------------------
+
+`DIAG` stops the motor and logging, clears the received configuration, runs
+`AppWiringDiag_Run`, then answers `ACK,DIAG`. The run lasts a few seconds and
+sends one line per measurement:
+
+.. code-block:: text
+
+   DIAG,BEGIN,version=1
+   DIAG,POWER,app_state=IDLE,fault_reason=NONE,mc_state=0,faults_now=0x0000,faults_occurred=0x0000,vbus_mv=24000,speed_rpm=0,load_ma=50
+   DIAG,PIN,name=PB6,role=SCL,pd=1,pu=1
+   DIAG,SHORT,a=PB6,b=PB9,shorted=0
+   DIAG,I2C,scl=PB6,sda=PB9,ack=1
+   DIAG,I2C_SCAN,devices=0A
+   DIAG,OW,pin=PG6,presence=1
+   DIAG,DS18B20,power=external,conv_ms=600,crc=1,temp_centi=2350
+   DIAG,DAC,adc=1,drive_code=1034,v_drive_mv=833,v_hold_mv=820,v_zero_mv=5,rise_us=230000,v_pu_end_mv=2400,v_pd_end_mv=15
+   DIAG,RC,pin=PA4,rise_us=40
+   DIAG,D6T,read=1,temp_c=24.5
+   DIAG,END
+
+`PIN` reads each line with the internal pull-down then the internal pull-up:
+`pd=1,pu=1` means an external pull-up, `pd=0,pu=1` a floating line, and
+`pd=0,pu=0` a line held low. The free Morpho pins next to CN10-27, CN10-24,
+CN7-1, and CN7-32 are read the same way. Lines found pulled up are added to
+the I2C probe at address `0x0A` in every SCL/SDA order and to the 1-Wire
+presence test, which locates a swapped or misplaced sensor wire.
+
+The PA5 test drives the DAC at the 0.25 A code, reads PA5 back through ADC2
+channel 13, releases the pin, and times its rise through the internal
+pull-up. The R1/C1 network keeps PA5 low for hundreds of milliseconds; an open
+pin rises in microseconds. The same timing is measured on PA4 and PE10 to find
+the network on a neighbouring pin. During this test ADJ can reach about 3 V
+for less than one second; the motor is stopped. The DAC, PG6, and the D6T
+driver are restored at the end.
+
+`STATUS` sends `STATUS,` followed by the same fields as `DIAG,POWER`, then
+`ACK,STATUS`. `fault_reason` gives the cause of the last application fault:
+`MCSDK_FAULT`, `MCSDK_NOT_IDLE`, `LOAD_DAC`, `START_REJECTED`, `STARTUP_TIMEOUT`,
+`NONFINITE_CURRENT`, `HARD_OVERCURRENT`, `NONFINITE_SPEED`, or `OVERSPEED`.
+It returns to `NONE` on the next successful start.
+
+`tests/bench/check_wiring.py` turns these answers into a diagnosis; see
+:doc:`utilisation`.
+
 Motor control
 -------------
 
 `AppMotorControl_Start` applies the runtime configuration, adjusts the speed
-PI controller, and starts the motor through MCSDK with polarization. The
+PI controller, and starts the motor through MCSDK with polarization. It first
+waits up to 1 s for MCSDK to reach `IDLE`, acknowledging latched faults (for
+example an undervoltage recorded before the motor supply was switched on) and
+covering the 400 ms `STOP` permanency, so a serial `START` behaves like B2. The
 `Iq` limit is ramped during RUN to avoid a sudden torque request.
 `AppMotorControl_Task` monitors MCSDK faults, overcurrent, and overspeed.
 
@@ -137,10 +190,27 @@ D6T sensor
 ----------
 
 `d6t_ir.c` uses software I2C on `PB6`/`PB9`, available at `CN10-27` and
-`CN10-24` respectively. The module reads a 35-byte frame, checks its PEC,
-and extracts pixel `D6TIR_SELECTED_PIXEL_INDEX`. It formats the value in
-degrees Celsius to one decimal place. Until a valid reading exists,
-`D6TIR_GetCsvValue` returns `NaN`.
+`CN10-24` respectively. Every 250 ms, the module reads a 35-byte frame (PTAT,
+16 pixels, PEC), checks its PEC, and extracts pixel
+`D6TIR_SELECTED_PIXEL_INDEX`. It formats the value in degrees Celsius to one
+decimal place. Until a valid reading exists, `D6TIR_GetCsvValue` returns
+`NaN`. The same macro, in the same file of `firmware_validation`, selects the
+pixel used by the model; both values must match.
+
+The driver also keeps the last valid frame. `D6T_FRAME` returns it without a
+new I2C transfer and without touching the motor:
+
+.. code-block:: text
+
+   D6T_FRAME
+   D6T_FRAME,ok=1,selected=10,ptat=253,px=241:243:...:250
+   ACK,D6T_FRAME
+
+Values are tenths of a degree; `selected` is the compiled
+`D6TIR_SELECTED_PIXEL_INDEX`, and `ok=0` means that the last read failed.
+`tests/bench/d6t_calibration.py` polls this command to display the
+live map and writes the chosen pixel into both firmwares (see
+:ref:`d6t-calibration`).
 
 DS18B20 sensor
 --------------

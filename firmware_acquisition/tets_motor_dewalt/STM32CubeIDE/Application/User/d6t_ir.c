@@ -13,9 +13,10 @@
 #define D6TIR_I2C_ADDR_7BIT         0x0AU
 #define D6TIR_READ_COMMAND          0x4CU
 #define D6TIR_FRAME_SIZE            35U
-#define D6TIR_OBJECT_COUNT          16U
+#define D6TIR_OBJECT_COUNT          D6TIR_PIXEL_COUNT
 
-/* Pixel instantane logge dans d6t_temp_c : 5 = ligne 2, colonne 2 sur la matrice 4x4. */
+/* Pixel instantane logge dans d6t_temp_c : 10 = ligne 3, colonne 3 sur la matrice 4x4.
+ * Choisir la valeur avec tests/bench/d6t_calibration.py. */
 #define D6TIR_SELECTED_PIXEL_INDEX  10U
 
 #define D6TIR_PERIOD_PRESENT_MS     250U
@@ -25,8 +26,11 @@
 
 static bool d6tir_present = false;
 static bool d6tir_has_value = false;
+static bool d6tir_has_frame = false;
 static uint32_t d6tir_next_read_ms = 0U;
 static char d6tir_csv_value[16] = "NaN";
+static int16_t d6tir_ptat_tenth = 0;
+static int16_t d6tir_pixels_tenth[D6TIR_OBJECT_COUNT];
 
 static void D6TIR_DwtInit(void)
 {
@@ -296,10 +300,14 @@ static void D6TIR_FormatRawTenth(int16_t raw_tenth)
            (long)(value % 10));
 }
 
+static int16_t D6TIR_FrameValue(const uint8_t *frame, uint8_t offset)
+{
+  return (int16_t)((uint16_t)frame[offset] | ((uint16_t)frame[offset + 1U] << 8));
+}
+
 static bool D6TIR_ReadTemperature(void)
 {
   uint8_t frame[D6TIR_FRAME_SIZE];
-  uint8_t offset;
   int16_t raw_tenth;
 
   if (D6TIR_SELECTED_PIXEL_INDEX >= D6TIR_OBJECT_COUNT)
@@ -312,8 +320,14 @@ static bool D6TIR_ReadTemperature(void)
     return false;
   }
 
-  offset = (uint8_t)(2U + (D6TIR_SELECTED_PIXEL_INDEX * 2U));
-  raw_tenth = (int16_t)((uint16_t)frame[offset] | ((uint16_t)frame[offset + 1U] << 8));
+  d6tir_ptat_tenth = D6TIR_FrameValue(frame, 0U);
+  for (uint8_t i = 0U; i < D6TIR_OBJECT_COUNT; i++)
+  {
+    d6tir_pixels_tenth[i] = D6TIR_FrameValue(frame, (uint8_t)(2U + (i * 2U)));
+  }
+  d6tir_has_frame = true;
+
+  raw_tenth = d6tir_pixels_tenth[D6TIR_SELECTED_PIXEL_INDEX];
 
   if ((raw_tenth < -400) || (raw_tenth > 2000))
   {
@@ -381,4 +395,24 @@ const char *D6TIR_GetCsvValue(void)
   }
 
   return d6tir_csv_value;
+}
+
+bool D6TIR_GetFrameTenths(int16_t *ptat_tenth, int16_t pixels_tenth[D6TIR_PIXEL_COUNT])
+{
+  if (!d6tir_present || !d6tir_has_frame || (ptat_tenth == NULL) || (pixels_tenth == NULL))
+  {
+    return false;
+  }
+
+  *ptat_tenth = d6tir_ptat_tenth;
+  for (uint8_t i = 0U; i < D6TIR_OBJECT_COUNT; i++)
+  {
+    pixels_tenth[i] = d6tir_pixels_tenth[i];
+  }
+  return true;
+}
+
+uint8_t D6TIR_GetSelectedPixel(void)
+{
+  return (uint8_t)D6TIR_SELECTED_PIXEL_INDEX;
 }

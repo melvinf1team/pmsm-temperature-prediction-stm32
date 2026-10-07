@@ -19,6 +19,7 @@ USART1 at 115200 baud.
 | `firmware_acquisition/tets_motor_dewalt/` | STM32CubeIDE/MCSDK firmware controlled by the dashboard |
 | `firmware_validation/` | Standalone firmware for 55-feature computation and NanoEdge AI inference |
 | `validation/` | PC interface comparing measured and predicted temperatures |
+| `tests/` | Checks and tools: `bench/` (board needed: wiring check, D6T calibration, NanoEdge serial check), `consistency/`, `unit/`, and `run_all.py` |
 | `inventories/` | Dataset inventory scripts |
 | `docs/` | Detailed Sphinx documentation |
 | `dashboard_config.yaml` | Default dashboard paths |
@@ -102,6 +103,61 @@ pin table and safety checklist, the
 [B-G473E-ZEST1S user manual](https://www.st.com/resource/en/user_manual/um3118-motor-control-discovery-kit-with-stm32g473qe-mcu-stmicroelectronics.pdf),
 a [TB-200S external-control reference (third-party mirror)](https://manuals.plus/ae/1005008626943763),
 and the manual supplied with the TB-200S controller.
+
+## Wiring check
+
+With `firmware_acquisition` flashed and the dashboard closed, run:
+
+```powershell
+python .\tests\bench\check_wiring.py --port COM5
+python .\tests\bench\check_wiring.py --port COM5 --motor
+```
+
+The first command keeps the motor stopped. It sends `DIAG`, then records
+3 seconds of `ACQ_START`, and reports `OK`, `WARN`, or `FAIL` for each module
+with its probable causes:
+
+- **D6T** (CN10-27/CN10-24): missing pull-up or 3V3 rail, SCL/SDA swapped or
+  shorted, wire on a neighbouring Morpho pin, unpowered sensor (lines clamped
+  low), rejected frames;
+- **DS18B20** (CN7-1): no presence pulse, sensor on another pin, VDD not
+  supplied (parasite power), missing external pull-up, corrupted data;
+- **TB-200S command** (CN7-32): nothing connected (wire, SB91, R1), R1/C1
+  network found on CN7-31 or CN7-34, C1 missing, ADJ shorted to GND, external
+  voltage on ADJ;
+- **power stage**: bus voltage and latched MCSDK faults.
+
+`--motor` asks for confirmation (or `--yes`), runs the motor at 1500 rpm with
+a 6 A `Iq` limit, and checks the U/V/W phases: MCSDK faults and firmware stop
+reasons are decoded when the motor does not start, the d/q telemetry is
+checked, the rotation direction is asked to detect swapped phases, and the
+brake response to a 0.05 → 0.25 → 0.05 A step is measured. The exit code is
+`0` without failure, `1` with at least one failure, and `2` when the port
+cannot be opened.
+
+> During `DIAG`, the PA5 test briefly lets ADJ rise to about 3 V (about 1 A
+> brake command for less than one second) while the motor is stopped.
+> Misplaced wires are only searched on the free Morpho pins adjacent to the
+> expected ones. Swapped motor phases are detected only through the direction
+> answer.
+
+## D6T pixel calibration
+
+The D6T-44L-06 measures 16 pixels; both firmwares log one of them as
+`d6t_temp_c`. With `firmware_acquisition` flashed and the motor warmer than
+its surroundings, open the live map:
+
+```powershell
+python .\tests\bench\d6t_calibration.py --port COM5
+python .\tests\bench\d6t_calibration.py --demo
+```
+
+Click the pixel that sees the motor (or **Select hottest**), then
+**Write pixel N to both firmwares**: the tool sets
+`D6TIR_SELECTED_PIXEL_INDEX` in the `d6t_ir.c` file of both projects. Rebuild
+and flash both firmwares afterwards. A new pixel means a new target: record new
+logs and retrain the model. The procedure and the list of D6T settings in the
+firmwares are in [`tests/README.md`](tests/README.md).
 
 ## Acquisition and data logging
 
@@ -209,7 +265,10 @@ The main application modules are:
 - `app_motor_control.c`: MCSDK control, ramps, protections, DAC conversion,
   and fixed/variable TB-200S scheduling;
 - `app_datalog.c`: sensor scheduling and nonblocking CSV transmission;
-- `d6t_ir.c`: I2C reads from the D6T sensor;
+- `app_wiring_diag.c`: wiring diagnostics (`DIAG`) and motor status
+  (`STATUS`);
+- `d6t_ir.c`: I2C reads from the D6T sensor (logged pixel
+  `D6TIR_SELECTED_PIXEL_INDEX`);
 - `ds18b20.c`: 1-Wire reads from the DS18B20 sensor.
 
 The protocol accepts:
@@ -222,7 +281,16 @@ LOAD,VARIABLE
 START
 ACQ_START,<datalog_ms>,<ds18b20_ms>
 STOP
+DIAG
+STATUS
+D6T_FRAME
 ```
+
+`DIAG` stops the motor and logging, probes the sensor and TB-200S lines, then
+answers `DIAG,...` lines followed by `ACK,DIAG`. `STATUS` answers
+`STATUS,app_state=...,fault_reason=...,faults_occurred=0x....,vbus_mv=...`.
+`D6T_FRAME` answers the 16 D6T pixels and PTAT in tenths of a degree
+(`D6T_FRAME,ok=1,selected=10,ptat=253,px=241:...`) without touching the motor.
 
 Application limits are 4500 rpm, 30 A for `Iq`, and 30 A for total current.
 Minimum speed is 100 rpm, and acceleration is capped at 50 electrical Hz/s
@@ -299,24 +367,23 @@ by **Build Project** in STM32CubeIDE.
 
 ## Validation
 
-Checks without hardware:
+Every check that needs no board, in one command (see
+[`tests/README.md`](tests/README.md)):
 
 ```powershell
-python .\firmware_validation\tests\validate_neai_export.py
-python .\firmware_validation\tests\validate_motor_limits.py
-python .\datalogging\test_motor_datalog_gui_dashboard.py
-python .\pretraitement\test\test_preprocess_logs_ewma.py
-python .\validation\test\test_temperature_validation_gui.py
-python .\firmware_validation\tests\validate_preprocess_parity.py
+python .\tests\run_all.py
 ```
 
-All six checks pass.
+It runs the five unit-test files of `tests/unit` and the three consistency
+checks of `tests/consistency` (NanoEdge export, motor limits, embedded/pandas
+parity) in about 10 s and prints one `PASS`/`FAIL` line per script. All eight
+pass.
 
 Check the serial contract with a connected board:
 
 ```powershell
-python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
-python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
+python .\tests\bench\check_nanoedge_serial.py --port COM5 --mode model
+python .\tests\bench\check_nanoedge_serial.py --port COM5 --mode emulator
 ```
 
 Temperature validation interface:

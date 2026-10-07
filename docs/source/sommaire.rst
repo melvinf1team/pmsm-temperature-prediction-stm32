@@ -24,8 +24,16 @@ Main directories
    command over USART1.
 
 `validation/`
-   PC interface for temperature comparison, associated unit tests, and CSV
-   exports of validation sessions.
+   PC interface for temperature comparison and CSV exports of validation
+   sessions.
+
+`tests/`
+   `bench/` holds the tools that talk to the board: the wiring check
+   `check_wiring.py`, the D6T pixel calibration tool `d6t_calibration.py`, and
+   the NanoEdge serial check. `consistency/` cross-checks Python, firmwares,
+   and generated files; `unit/` holds the unit tests; `run_all.py` runs every
+   check that needs no board. `tests/README.md` explains each script and lists
+   the D6T settings in both firmwares.
 
 `inventories/`
    Tools for generating inventories of logs and datasets.

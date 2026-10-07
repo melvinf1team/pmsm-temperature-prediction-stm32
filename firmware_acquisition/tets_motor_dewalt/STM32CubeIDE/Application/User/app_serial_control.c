@@ -3,6 +3,8 @@
 #include "main.h"
 #include "app_motor_control.h"
 #include "app_datalog.h"
+#include "app_wiring_diag.h"
+#include "d6t_ir.h"
 
 #include "stm32g4xx_ll_usart.h"
 
@@ -217,6 +219,24 @@ static char *AppSerial_FindCommand(char *line)
   }
 
   p = strstr(line, "LOAD,");
+  if (p != NULL)
+  {
+    return p;
+  }
+
+  p = strstr(line, "DIAG");
+  if (p != NULL)
+  {
+    return p;
+  }
+
+  p = strstr(line, "STATUS");
+  if (p != NULL)
+  {
+    return p;
+  }
+
+  p = strstr(line, "D6T_FRAME");
   if (p != NULL)
   {
     return p;
@@ -673,6 +693,67 @@ static void AppSerial_HandleStop(void)
   AppSerial_SendAck("STOP");
 }
 
+static void AppSerial_HandleDiag(void)
+{
+  /* Le test de câblage reconfigure les broches capteurs et le DAC : moteur
+   * et logger sont arrêtés, et un nouveau CFG est exigé avant START. */
+  AppMotorControl_Stop();
+  AppDatalog_StopLogging();
+  cfg_received = false;
+
+  HAL_Delay(20);
+
+  AppWiringDiag_Run();
+  AppSerial_SendAck("DIAG");
+}
+
+static void AppSerial_HandleStatus(void)
+{
+  AppWiringDiag_SendStatus();
+  AppSerial_SendAck("STATUS");
+}
+
+/* Trame complète du D6T pour l'outil de calibration, en dixièmes de degré :
+ * D6T_FRAME,ok=1,selected=<pixel loggé>,ptat=<ref>,px=<p0>:<p1>:...:<p15> */
+static void AppSerial_HandleD6tFrame(void)
+{
+  int16_t ptat_tenth = 0;
+  int16_t pixels_tenth[D6TIR_PIXEL_COUNT];
+  char line[192];
+  int written;
+  size_t used;
+  bool ok = D6TIR_GetFrameTenths(&ptat_tenth, pixels_tenth);
+
+  written = snprintf(line,
+                     sizeof(line),
+                     "D6T_FRAME,ok=%u,selected=%u",
+                     ok ? 1U : 0U,
+                     (unsigned)D6TIR_GetSelectedPixel());
+  used = (written > 0) ? (size_t)written : 0U;
+
+  if (ok)
+  {
+    written = snprintf(&line[used], sizeof(line) - used, ",ptat=%d,px=", (int)ptat_tenth);
+    used += (written > 0) ? (size_t)written : 0U;
+    for (uint32_t i = 0U; (i < D6TIR_PIXEL_COUNT) && (used < sizeof(line)); i++)
+    {
+      written = snprintf(&line[used],
+                         sizeof(line) - used,
+                         "%s%d",
+                         (i == 0U) ? "" : ":",
+                         (int)pixels_tenth[i]);
+      used += (written > 0) ? (size_t)written : 0U;
+    }
+  }
+
+  if (used < (sizeof(line) - 3U))
+  {
+    (void)snprintf(&line[used], sizeof(line) - used, "\r\n");
+    AppDatalog_SendText(line);
+  }
+  AppSerial_SendAck("D6T_FRAME");
+}
+
 static void AppSerial_HandleLine(char *line)
 {
   char *cmd;
@@ -717,6 +798,18 @@ static void AppSerial_HandleLine(char *line)
   else if (strcmp(cmd, "STOP") == 0)
   {
     AppSerial_HandleStop();
+  }
+  else if (strcmp(cmd, "DIAG") == 0)
+  {
+    AppSerial_HandleDiag();
+  }
+  else if (strcmp(cmd, "STATUS") == 0)
+  {
+    AppSerial_HandleStatus();
+  }
+  else if (strcmp(cmd, "D6T_FRAME") == 0)
+  {
+    AppSerial_HandleD6tFrame();
   }
   else
   {

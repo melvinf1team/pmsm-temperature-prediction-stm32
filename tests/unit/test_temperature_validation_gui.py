@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-TEST_DIR = Path(__file__).resolve().parent
-if str(TEST_DIR) not in sys.path:
-    sys.path.insert(0, str(TEST_DIR))
+VALIDATION_GUI_DIR = Path(__file__).resolve().parents[2] / "validation" / "test"
+if str(VALIDATION_GUI_DIR) not in sys.path:
+    sys.path.insert(0, str(VALIDATION_GUI_DIR))
 
 from temperature_validation_gui import (
     CsvSessionRecorder,

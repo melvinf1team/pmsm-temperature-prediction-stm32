@@ -93,26 +93,23 @@ replacing a NanoEdge export.
 Checks without hardware
 -----------------------
 
-From the repository root:
+From the repository root, one command runs the five unit-test files of
+`tests/unit` and the three consistency checks of `tests/consistency`:
 
 .. code-block:: powershell
 
-   python .\firmware_validation\tests\validate_preprocess_parity.py
-   python .\firmware_validation\tests\validate_neai_export.py
-   python .\firmware_validation\tests\validate_motor_limits.py
-   python .\datalogging\test_motor_datalog_gui_dashboard.py
-   python .\pretraitement\test\test_preprocess_logs_ewma.py
-   python .\validation\test\test_temperature_validation_gui.py
+   python .\tests\run_all.py
 
-All six commands pass.
+It prints one `PASS`/`FAIL` line per script; all eight pass in about 10 s.
+Every script can also be run alone; `tests/README.md` describes them.
 
 The following UART checks require a programmed board and must match the
 compiled mode:
 
 .. code-block:: powershell
 
-   python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode model
-   python .\firmware_validation\tests\check_nanoedge_serial.py --port COM5 --mode emulator
+   python .\tests\bench\check_nanoedge_serial.py --port COM5 --mode model
+   python .\tests\bench\check_nanoedge_serial.py --port COM5 --mode emulator
 
 Build the local documentation
 -----------------------------

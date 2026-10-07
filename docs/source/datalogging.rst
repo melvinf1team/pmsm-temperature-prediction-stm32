@@ -166,6 +166,7 @@ Troubleshooting
 * `ERR,BAD_LOAD`: select `Fixed` with 0.05--0.25 A or select `Variable`, then
   restart the complete sequence.
 * `DATA` without a CSV file: look for `#CSV_HEADER` in the log first.
-* D6T readings of `NaN`: check power, pull-ups, and the I2C PEC.
+* D6T readings of `NaN`: check power, pull-ups, and the I2C PEC, or run
+  `tests/bench/check_wiring.py` to locate the fault.
 * Abrupt program exit: treat the last buffered block as potentially incomplete
   and start a new file.

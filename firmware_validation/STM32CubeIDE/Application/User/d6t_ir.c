@@ -14,7 +14,8 @@
 #define D6TIR_FRAME_SIZE            35U
 #define D6TIR_OBJECT_COUNT          16U
 
-/* Pixel instantane logge dans d6t_temp_c : 10 = ligne 3, colonne 3 sur la matrice 4x4. */
+/* Pixel instantane logge dans d6t_temp_c : 10 = ligne 3, colonne 3 sur la matrice 4x4.
+ * Choisir la valeur avec tests/bench/d6t_calibration.py. */
 #define D6TIR_SELECTED_PIXEL_INDEX  10U
 
 #define D6TIR_PERIOD_PRESENT_MS     250U
