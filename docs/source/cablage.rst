@@ -15,6 +15,54 @@ Component references, quantities, prices, and supplier links are listed in
   replace manufacturer schematics. The 30 A and 4500 rpm limits require full
   electrical, thermal, and mechanical qualification before use.
 
+.. _power-cable-sizing:
+
+Power cable sizing and insulation
+---------------------------------
+
+.. warning::
+
+   **Undersized cables or poor terminations can overheat and cause a fire.**
+   Select the conductor cross-section and insulation rating for each power
+   circuit before running the bench.
+
+   * **Motor phases U, V, and W:** use power cables and connectors rated for
+     the maximum phase RMS current and startup/transient duty. The firmware's
+     Iq limit is not a cable current rating.
+   * **18 V DC supply to STDES-LVHP01:** size both the positive and return
+     cables and their terminals for the design DC current. The listed supply
+     is rated 18 V / 33.3 A. Low voltage does not prevent cable overheating
+     at high current.
+   * **230 V AC input to the power supply:** use a suitable mains cable,
+     insulation, connectors, protective earth, and strain relief according
+     to the supply manufacturer's instructions. Have a qualified person
+     verify the mains installation. Only the supply's rated DC output goes
+     to the ST power board. Never connect 230 V AC directly to an ST board.
+
+   Determine the required cross-section from the cable manufacturer's
+   current-capacity tables, accounting for ambient temperature, bundling,
+   routing, cable length, voltage drop, and insulation temperature rating.
+   Check connector ratings and coordinate fuses or circuit protection with
+   the wiring. Software current limits do not replace circuit protection.
+   Do not use thin sensor jumper wires or solderless breadboards for the
+   motor phases or DC power feed.
+
+   Secure and correctly terminate every connection. Disconnect power before
+   checking or tightening it. Stop the bench if cables or connectors show
+   abnormal heating, discoloration, or insulation damage. Record the chosen
+   cable references, cross-sections, lengths, and ratings in :doc:`bom`.
+
+There is no single cable cross-section specified here because the installed
+cable type, length, routing, and thermal conditions have not been recorded.
+Use the `LAPP current-rating and dimensioning guidance
+<https://products.lappgroup.com/online-catalogue/characteristics-and-technologies/electrical-characteristics/current-rating.html>`__
+and `Eland Cables sizing guidance
+<https://www.elandcables.com/the-cable-lab/faqs/faq-how-are-cable-sizes-selected>`__
+with the selected cable's datasheet. Refer to the
+`STDES-LVHP01 data brief
+<https://www.st.com/resource/en/data_brief/stdes-lvhp01.pdf>`__
+and board manual for the power-stage ratings and connections.
+
 D6T infrared sensor
 -------------------
 
@@ -210,6 +258,9 @@ dashboard: only one PC process can own the COM port.
 Checks before applying power
 ----------------------------
 
+* Verify the U/V/W cables, both DC supply conductors, mains insulation,
+  connector ratings, terminations, and circuit protection against
+  :ref:`power-cable-sizing`.
 * Verify common ground and the absence of shorts between sensor supplies,
   `3V3`, `5V`, and ground.
 * Confirm the pull-up resistors while the board is unpowered.
