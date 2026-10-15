@@ -44,12 +44,12 @@ Downward transitions at this ramp rate can feed energy back and raise bus
 voltage. Monitor that voltage and validate supply absorption or braking
 before running the complete profile.
 
-The TB-200S control is limited to 0.05--0.25 A and uses only about
-0.1667--0.8333 V from PA5/DAC1_OUT2. The lowest command is below the
-STM32G473 buffered-DAC guaranteed 0.2 V linear range. Measure the ADJ voltage
-and actual brake-controller output at both endpoints, and calibrate or revise
-the interface if 0.05 A accuracy is required. The logged value is a command,
-not independent current feedback.
+The TB-200S control is limited to 0.05--0.25 A. The nominal 0--10 V / 0--3 A
+transfer gave about half the commanded current, so both firmwares use a bench
+calibration (0.3892--1.1683 V on PA5/DAC1_OUT2), fitted on 31 readings over
+0.05--0.225 A with a maximum deviation of 0.003 A. The TB-200S output
+saturates at about 0.24 A, so a 0.25 A command gives 0.24 A. The logged value is a command, not
+independent current feedback.
 
 2. Reproducibility of performance
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -65,8 +65,10 @@ model ID would make performance an acceptance criterion.
 **Medium priority.** There is no CI; `python .\tests\run_all.py` runs every
 check that needs no board.
 `validate_motor_limits.py` checks the constants, DAC pin, protocol markers,
-and generator files. The unit tests cover profile command serialization,
-acknowledgments, startup order and cancellation, two-field telemetry, CSV
+and generator files, and that the dashboard presets match both firmwares and
+the validation GUI. The unit tests cover profile command serialization,
+acknowledgments, startup order and cancellation, preset and collect-only
+startup, two-field telemetry, CSV
 writing, the optional load column, invalid target rows, the wiring-check
 diagnosis rules, and the D6T calibration logic, but not visual
 thresholds, all parser cases, dashboard arguments, or the firmware state

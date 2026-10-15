@@ -12,9 +12,11 @@ Recommended sequence
 5. On a new setup, or after moving the D6T, choose the logged pixel with
    `tests/bench/d6t_calibration.py` (see :ref:`d6t-calibration`).
 6. Start `datalogging/motor_datalog_gui_dashboard.py`.
-7. Select the port, 115200 baud, and session mode.
-8. In motor mode, choose or create a profile; in acquisition-only mode, enter
-   only the periods. Select a fixed TB-200S load or `Variable`.
+7. Select the port and 115200 baud.
+8. Pick a test profile: `Collect only` (motor stopped), one of the four
+   firmware presets (`Stable`, `Variable load`, `Variable speed`,
+   `All variable`), or `Custom`, where you choose or create a saved profile
+   with a fixed TB-200S load or `Variable`.
 9. Check the CSV path, then start the session.
 10. Stop with the dashboard button, which sends `STOP` before closing resources.
 11. Inspect the raw CSV file before running preprocessing.
@@ -136,8 +138,8 @@ The pseudorandom generator is seeded with the time of the B2 press. The new
 setpoint is processed in the main loop, not in the interrupt. A second press
 stops the motor and disables the profile. Startup polarization stays at 14 A.
 B2 overrides any earlier serial load/profile selection.
-The 500 electrical Hz/s profile ramp applies to B2 in both firmware projects
-and to the four ``PROFILE`` commands in the validation firmware. Motor starts
+The 500 electrical Hz/s profile ramp applies to B2 and to the four
+``PROFILE`` presets in both firmware projects. `Custom` motor starts
 configured by the acquisition dashboard remain capped at 50 electrical Hz/s.
 A `CFG` command disables the B2 profile and takes control immediately.
 
@@ -192,6 +194,7 @@ Commands sent by the dashboard:
    LOAD,<load_setpoint_a>
    LOAD,VARIABLE
    START
+   PROFILE,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>,<datalog_ms>,<ds18b20_ms>
    ACQ_START,<datalog_ms>,<ds18b20_ms>
    STOP
 
@@ -203,10 +206,12 @@ Expected responses and messages:
    ACK,CFG
    ACK,LOAD
    ACK,START
+   ACK,PROFILE,<TOKEN>
    ACK,ACQ_START
    ACK,STOP
    ERR,<reason>
    #CSV_HEADER,<columns>
+   #PROFILE,START,<TOKEN>,<settings>
    DATA,<values>
 
 The dashboard ignores `DATA` lines received before `#CSV_HEADER` to avoid
@@ -218,6 +223,11 @@ uses `D6T_FRAME`; these commands are described in :doc:`firmware`.
 `ACQ_START` is used by itself after `SYNC` to record cooling while the motor
 is stopped. In this state, the firmware explicitly reports zero for voltages,
 currents, and speed instead of reusing the last MCSDK sample held before stop.
+
+`PROFILE` is also used by itself after `SYNC`: it restarts the logger with the
+given periods and arms one of the four presets, so no `CFG`, `LOAD`, or
+`START` is needed. The firmware answers `ACK,PROFILE,<TOKEN>` once the preset
+is armed, then `#PROFILE,START,<TOKEN>,...` when MCSDK accepts the start.
 
 Stop and recovery after errors
 ------------------------------

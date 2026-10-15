@@ -89,10 +89,8 @@ through 1 kΩ to TB-200S `ADJ`, connect board and controller grounds, and fit
 4.7 µF from ADJ to GND (`+` on ADJ for a polarized capacitor). Use the
 controller's 0--10 V external-input mode, never connect its `+10V` terminal
 to the STM32, and see `docs/source/cablage.rst` for the DAC pin table and
-calibration warning. Only 0.1667--0.8333 V is requested; no 0--10 V amplifier
-is used.
-Because the buffered STM32G473 DAC is guaranteed only from 0.2 V, measure and
-qualify the nominal 0.1667 V / 0.05 A launch point on the actual hardware.
+the TB-200S calibration. With the bench calibration, 0.05--0.25 A maps to
+0.3892--1.1683 V on PA5; no 0--10 V amplifier is used.
 
 A nonfinite (`NaN` or infinite) MCSDK current or speed reading immediately
 stops the motor, disables B2, and puts motor control into a fault state.

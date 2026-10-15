@@ -1,0 +1,100 @@
+TB-200S calibration report
+==========================
+Date: 2026-10-14 11:45:06
+Port: COM6
+Status: complete (33/34 valid readings)
+Calibration under test (firmware_acquisition/tets_motor_dewalt/STM32CubeIDE/Application/User/app_motor_control.c): 0.3892 V -> 0.050 A, 1.1683 V -> 0.250 A
+Settings: speed 1500 rpm, Iq limit 6.0 A, hard limit 10.0 A, accel 50 Hz_e/s, step 0.025 A, cycles 2, settle 8.0 s, window 2.0 s, warm-up 120 s
+Instruments: TB-200S display, multimeter on PA5/ADJ
+Notes: TB-200S validation
+
+Pre-checks
+----------
+  Bus voltage: 18.0 V
+  TB-200S wiring (DIAG): OK - R1/C1 network detected on PA5 (pin held low by the ADJ load).
+  Flashed calibration: DAC code 1450 at 0.25 A, source 1450 (match)
+  PA5 ADC readback at that code: 1165 mV (computed 1168 mV)
+  Motor stopped, command 0.050 A: display 0.040 A
+
+Readings
+--------
+  # cyc dir   cmd A  code  PA5 V echo A  disp A   amm A PA5m V ADJm V   rpm  Iq A  note
+  1   1 up    0.050   483  0.389  0.050   0.040       -  0.388  0.379  1526  0.27  
+  2   1 up    0.075   604  0.487  0.075   0.060       -  0.485  0.473  1532  0.69  
+  3   1 up    0.100   725  0.584  0.100   0.090       -  0.582  0.568  1544  0.98  
+  4   1 up    0.125   846  0.682  0.125   0.110       -  0.679  0.663  1532  1.73  
+  5   1 up    0.150   966  0.778  0.150   0.140       -  0.776  0.757  1585  1.39  
+  6   1 up    0.175  1087  0.876  0.175   0.160       -  0.873  0.852  1576  2.05  
+  7   1 up    0.200  1208  0.973  0.050       -       -      -      -     0  0.00  motor stopped
+  8   1 up    0.200  1208  0.973  0.200   0.190       -  0.970  0.947  1466  2.86  
+  9   1 up    0.225  1329  1.071  0.225   0.210       -  1.067  1.042  1414  4.26  
+ 10   1 up    0.250  1450  1.168  0.250   0.240       -  1.164  1.137  1531  3.76  
+ 11   1 down  0.225  1329  1.071  0.225   0.210       -      -      -  1458  4.78  
+ 12   1 down  0.200  1208  0.973  0.200   0.190       -      -      -  1639  2.44  
+ 13   1 down  0.175  1087  0.876  0.175   0.160       -      -      -  1436  3.09  
+ 14   1 down  0.150   966  0.778  0.150   0.140       -      -      -  1626  1.24  
+ 15   1 down  0.125   846  0.682  0.125   0.110       -      -      -  1437  0.97  
+ 16   1 down  0.100   725  0.584  0.100   0.090       -      -      -  1475  2.01  
+ 17   1 down  0.075   604  0.487  0.075   0.060       -      -      -  1443  0.29  
+ 18   1 down  0.050   483  0.389  0.050   0.040       -      -      -  1445  0.66  
+ 19   2 up    0.075   604  0.487  0.075   0.060       -      -      -  1456  0.63  
+ 20   2 up    0.100   725  0.584  0.100   0.090       -      -      -  1513  1.62  
+ 21   2 up    0.125   846  0.682  0.125   0.110       -      -      -  1567  1.23  
+ 22   2 up    0.150   966  0.778  0.150   0.140       -      -      -  1529  1.29  
+ 23   2 up    0.175  1087  0.876  0.175   0.160       -      -      -  1457  3.02  
+ 24   2 up    0.200  1208  0.973  0.200   0.190       -      -      -  1603  3.54  
+ 25   2 up    0.225  1329  1.071  0.225   0.210       -      -      -  1516  2.80  
+ 26   2 up    0.250  1450  1.168  0.250   0.240       -      -      -  1633  5.04  
+ 27   2 down  0.225  1329  1.071  0.225   0.210       -      -      -  1501  2.82  
+ 28   2 down  0.200  1208  0.973  0.200   0.190       -      -      -  1488  4.17  
+ 29   2 down  0.175  1087  0.876  0.175   0.160       -      -      -  1549  2.40  
+ 30   2 down  0.150   966  0.778  0.150   0.140       -      -      -  1552  2.55  
+ 31   2 down  0.125   846  0.682  0.125   0.110       -      -      -  1467  2.49  
+ 32   2 down  0.100   725  0.584  0.100   0.090       -      -      -  1542  1.57  
+ 33   2 down  0.075   604  0.487  0.075   0.060       -      -      -  1451  0.56  
+ 34   2 down  0.050   483  0.389  0.050   0.040       -      -      -  1488  0.16  
+PA5 V: computed from the flashed DAC code. PA5m/ADJm: measured. ~: the value alternated (mean shown).
+
+Analysis
+--------
+Reference for the fit: display (tolerance 0.010 A)
+Error of the calibration under test (reading - command):
+  display : n=33, bias -0.012 A, RMS 0.013 A, max 0.015 A
+Measured TB-200S transfer (readings above 0.005 A against the computed PA5 voltage):
+  display : I = 0.2562 A/V x (V_PA5 - 0.2419 V), R2 0.9983, residuals RMS 0.003 A / max 0.003 A (33 readings), quadratic RMS 0.002 A
+Hysteresis, down - up: c1 0.050 A +0.000, c1 0.075 A +0.000, c1 0.100 A +0.000, c1 0.125 A +0.000, c1 0.150 A +0.000, c1 0.175 A +0.000, c1 0.200 A +0.000, c1 0.225 A +0.000, c2 0.075 A +0.000, c2 0.100 A +0.000, c2 0.125 A +0.000, c2 0.150 A +0.000, c2 0.175 A +0.000, c2 0.200 A +0.000, c2 0.225 A +0.000
+Repeatability, max - min between cycles: 0.050 A down 0.000, 0.075 A down 0.000, 0.075 A up 0.000, 0.100 A down 0.000, 0.100 A up 0.000, 0.125 A down 0.000, 0.125 A up 0.000, 0.150 A down 0.000, 0.150 A up 0.000, 0.175 A down 0.000, 0.175 A up 0.000, 0.200 A down 0.000, 0.200 A up 0.000, 0.225 A down 0.000, 0.225 A up 0.000, 0.250 A up 0.000
+PA5 measured / computed: 0.9964
+ADJ / PA5: 0.9762
+Reading at 0.05 A, running - stopped: +0.000 A
+Motor Iq by command: 0.050 A 0.36, 0.075 A 0.54, 0.100 A 1.54, 0.125 A 1.61, 0.150 A 1.62, 0.175 A 2.64, 0.200 A 3.25, 0.225 A 3.66, 0.250 A 4.40
+
+Verdict
+-------
+[FIX ] Current calibration: the display is up to 0.015 A away from the command (bias -0.012 A, tolerance 0.010 A).
+[FIX ] Apply the proposed constants below (expected error after update: max 0.003 A, RMS 0.003 A).
+[ OK ] The transfer is linear (residuals within 0.003 A).
+[ OK ] Hysteresis (down sweep - up sweep): up to 0.000 A.
+[ OK ] Repeatability between cycles: up to 0.000 A.
+[ OK ] PA5 matches the computed DAC voltage (-0.4 %).
+[ OK ] ADJ follows PA5 (98 %): the ADJ input does not load the 1 kOhm.
+[ OK ] Same reading at 0.05 A with the motor stopped and running.
+[ OK ] Motor Iq rises by +4.03 A from 0.050 to 0.250 A.
+
+Proposed firmware constants (fitted on the display)
+-------------------------------------------------------------
+Same values in both files, then rebuild and flash both projects, and run this script again to verify:
+  firmware_acquisition/tets_motor_dewalt/STM32CubeIDE/Application/User/app_motor_control.c
+  firmware_validation/STM32CubeIDE/Application/User/app_motor_control.c
+
+#define APP_TB200S_CAL_LOW_V                0.4371f
+#define APP_TB200S_CAL_LOW_A                0.05f
+#define APP_TB200S_CAL_HIGH_V               1.2176f
+#define APP_TB200S_CAL_HIGH_A               0.25f
+
+PA5 at 0.05 A: 0.3892 V -> 0.4371 V; at 0.25 A: 1.1683 V -> 1.2176 V
+Expected error after the update: RMS 0.003 A, max 0.003 A
+
+Events
+------
+- Motor stopped at step 7 (0.200 A): app_state=IDLE, fault_reason=NONE

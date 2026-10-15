@@ -49,10 +49,11 @@ Application modules are in
 `firmware_acquisition/tets_motor_dewalt/STM32CubeIDE/Application/User`:
 
 * `app_serial_control.c` uses interrupt-driven reception and a character
-  queue to parse ASCII commands;
-* `app_motor_control.c` applies MCSDK ramps, limits, and shutdowns, converts
-  the 0.05--0.25 A TB-200S command to a DAC value, and schedules fixed or
-  variable load operation;
+  queue to parse ASCII commands, including the `PROFILE,<TOKEN>` presets
+  shared with the validation firmware;
+* `app_motor_control.c` applies MCSDK ramps, limits, and shutdowns, runs the
+  B2 and `PROFILE` presets, converts the 0.05--0.25 A TB-200S command to a DAC
+  value, and schedules fixed or variable load operation;
 * `app_datalog.c` schedules the sensors and feeds a nonblocking UART
   transmit queue;
 * `app_wiring_diag.c` answers `DIAG` and `STATUS` for

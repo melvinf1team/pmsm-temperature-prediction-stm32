@@ -14,6 +14,23 @@
 #define APP_TB200S_MIN_LOAD_A                 0.05f
 #define APP_TB200S_MAX_LOAD_A                 0.25f
 
+/* Profils prédéfinis, identiques à ceux du firmware de validation. */
+typedef enum
+{
+  APP_MOTOR_PROFILE_STABLE = 0,
+  APP_MOTOR_PROFILE_VARIABLE_LOAD,
+  APP_MOTOR_PROFILE_VARIABLE_SPEED,
+  APP_MOTOR_PROFILE_VARIABLE_ALL,
+  APP_MOTOR_PROFILE_COUNT
+} AppMotorProfile_t;
+
+typedef enum
+{
+  APP_MOTOR_PROFILE_START_ACCEPTED = 0,
+  APP_MOTOR_PROFILE_START_INVALID,
+  APP_MOTOR_PROFILE_START_LOAD_ERROR
+} AppMotorProfileStartResult_t;
+
 void AppMotorControl_Init(void);
 void AppMotorControl_Task(void);
 
@@ -25,6 +42,11 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 bool AppMotorControl_Start(void);
 void AppMotorControl_Stop(void);
 bool AppMotorControl_IsRunning(void);
+
+/* Arme puis lance le profil de façon non bloquante. Si le moteur tourne déjà,
+ * il est d'abord arrêté et le redémarrage attend que le MCSDK revienne IDLE. */
+AppMotorProfileStartResult_t AppMotorControl_StartProfile(
+  AppMotorProfile_t profile);
 
 bool AppMotorControl_SetLoadFixed(float load_a);
 bool AppMotorControl_SetLoadVariable(void);

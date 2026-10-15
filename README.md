@@ -86,19 +86,32 @@ For a polarized 4.7 µF capacitor, connect `+` to ADJ and `-` to GND. The TB-200
 verify the exact controller revision and check that no hazardous potential
 exists before joining it to the board ground. Remove the TB-200S factory link
 used by its local adjustment before driving ADJ, select the **0–10 V external
-input**, and never connect its `+10V` terminal to the STM32. The firmware
-assumes the nominal 0–10 V → 0–3 A transfer:
+input**, and never connect its `+10V` terminal to the STM32. The nominal
+0–10 V → 0–3 A transfer (`V = I × 10 / 3`) is **not** met on the bench: the
+measured TB-200S response is 0.2567 A/V above a 0.194 V threshold, and its
+output saturates at about 0.24 A. The
+firmware therefore uses a calibration line (PA5 voltage → current displayed by
+the TB-200S), defined by `APP_TB200S_CAL_LOW_V/_A` and
+`APP_TB200S_CAL_HIGH_V/_A` in both `app_motor_control.c` files:
 
 ```text
-V_ADJ = load_setpoint_a × 10 / 3
-0.05 A -> 0.1667 V
-0.25 A -> 0.8333 V
+V_PA5 = CAL_LOW_V + (load_setpoint_a - CAL_LOW_A) × (CAL_HIGH_V - CAL_LOW_V) / (CAL_HIGH_A - CAL_LOW_A)
+0.05 A -> 0.3892 V
+0.25 A -> 1.1683 V
 ```
+
+The line is a least-squares fit of 31 readings from `calibrate_tb200s.py`
+(2 up/down cycles over 0.05–0.225 A, maximum deviation 0.003 A, no
+hysteresis). A 0.25 A command reads 0.24 A, like 0.225 A: the TB-200S output
+saturates there, so these readings are excluded. To recalibrate, run the guided bench procedure
+`python tests/bench/calibrate_tb200s.py --port COM5` (see
+[`tests/README.md`](tests/README.md)): it steps the load with the motor
+running, asks for the TB-200S and ammeter readings, and writes a report with
+the new `#define` lines to enter identically in both firmware projects.
 
 No 0–10 V amplifier is used. DAC3/DAC4 are reserved for the motor
 overcurrent comparators. The STM32G473 buffered DAC is guaranteed linear only
-from 0.2 V, so the nominal 0.05 A point must be measured and qualified on the
-bench. See [`docs/source/cablage.rst`](docs/source/cablage.rst) for the DAC
+from 0.2 V; the calibrated 0.05 A point (about 0.42 V) stays above it. See [`docs/source/cablage.rst`](docs/source/cablage.rst) for the DAC
 pin table and safety checklist, the
 [B-G473E-ZEST1S user manual](https://www.st.com/resource/en/user_manual/um3118-motor-control-discovery-kit-with-stm32g473qe-mcu-stmicroelectronics.pdf),
 a [TB-200S external-control reference (third-party mirror)](https://manuals.plus/ae/1005008626943763),
@@ -135,7 +148,7 @@ brake response to a 0.05 → 0.25 → 0.05 A step is measured. The exit code is
 `0` without failure, `1` with at least one failure, and `2` when the port
 cannot be opened.
 
-> During `DIAG`, the PA5 test briefly lets ADJ rise to about 3 V (about 1 A
+> During `DIAG`, the PA5 test briefly lets ADJ rise to about 3 V (under 1 A
 > brake command for less than one second) while the motor is stopped.
 > Misplaced wires are only searched on the free Morpho pins adjacent to the
 > expected ones. Swapped motor phases are detected only through the direction
@@ -167,16 +180,31 @@ Start the dashboard:
 python .\datalogging\motor_datalog_gui_dashboard.py
 ```
 
-Two modes are available:
+Pick a **test profile** among six quick-select tiles, the same as in the
+validation GUI plus `Custom`, then press **START**:
 
-- **Motor + logging**: `SYNC`, `CFG`, `LOAD`, then `START`;
-- **Logging only (motor stopped)**: `SYNC`, then `ACQ_START`, useful for
-  recording a cooling phase.
+| Profile | Speed | TB-200S command | UART sequence |
+|---|---|---|---|
+| `Collect only` (default) | Motor forced off | 0.05 A | `SYNC`, `ACQ_START` |
+| `Stable` | 2500 rpm | Fixed 0.10 A | `SYNC`, `PROFILE,STABLE,…` |
+| `Variable load` | 2500 rpm | Pseudorandom 0.05–0.25 A every 2–5 s | `SYNC`, `PROFILE,VARIABLE_LOAD,…` |
+| `Variable speed` | Pseudorandom 2000–4000 rpm every 2–5 s | Fixed 0.10 A | `SYNC`, `PROFILE,VARIABLE_SPEED,…` |
+| `All variable` | Pseudorandom 2000–4000 rpm every 2–5 s | Pseudorandom 0.05–0.25 A every 2–5 s | `SYNC`, `PROFILE,VARIABLE_ALL,…` |
+| `Custom` | Edited by the user | Fixed 0.05–0.25 A or `Variable` | `SYNC`, `CFG`, `LOAD`, `START` |
 
-In both cases, `STOP` ends the session cleanly. Motor profiles are loaded from
-`datalogging/motor_profiles.json`. Each motor profile selects either a fixed
-0.05–0.25 A brake command or `Variable` (pseudorandom command every
-2–5 seconds).
+The four presets run inside the acquisition firmware with the B2 ramp and
+current limits (500 electrical Hz/s, `Iq` 25 A, total 28 A); the panel under
+the tiles lists their exact parameters. `Collect only` is useful for recording
+a cooling phase. With `Custom`, the panel becomes an editor: load a saved
+profile from `datalogging/motor_profiles.json`, edit it (it becomes unsaved
+`Custom`), then **Save as…** or **Delete**. Presets require the acquisition
+firmware with `PROFILE` support; an older firmware is reported at startup.
+
+In every case, `STOP` ends the session cleanly. During a session the settings
+are locked, the active tile shows `LIVE`, and the **Session** card displays
+elapsed time, logged rows, and data rate (it warns when `DATA` stops). The UART
+log hides `DATA` frames unless **Show DATA frames** is ticked. After a session
+written to an auto-named file, a new timestamped name is proposed.
 
 The raw CSV uses semicolons and contains nine columns:
 
@@ -279,12 +307,19 @@ CFG,<target_rpm>,<iq_limit_a>,<hard_limit_a>,<accel_elec_hz_s>,<datalog_ms>,<ds1
 LOAD,<load_setpoint_a>
 LOAD,VARIABLE
 START
+PROFILE,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>[,<datalog_ms>,<ds18b20_ms>]
 ACQ_START,<datalog_ms>,<ds18b20_ms>
 STOP
 DIAG
 STATUS
 D6T_FRAME
 ```
+
+`PROFILE` stops the motor and logger, applies the optional periods, restarts
+logging, and arms the same preset as the validation firmware; it answers
+`ACK,PROFILE,<TOKEN>`, then `#PROFILE,START,<TOKEN>,...` when MCSDK accepts the
+start. A preset replaces any earlier `CFG`/`LOAD`, so a later `START` requires a
+new `CFG`.
 
 `DIAG` stops the motor and logging, probes the sensor and TB-200S lines, then
 answers `DIAG,...` lines followed by `ACK,DIAG`. `STATUS` answers
@@ -293,8 +328,8 @@ answers `DIAG,...` lines followed by `ACK,DIAG`. `STATUS` answers
 (`D6T_FRAME,ok=1,selected=10,ptat=253,px=241:...`) without touching the motor.
 
 Application limits are 4500 rpm, 30 A for `Iq`, and 30 A for total current.
-Minimum speed is 100 rpm, and acceleration is capped at 50 electrical Hz/s
-in both dashboard and firmware.
+Minimum speed is 100 rpm, and `CFG` acceleration is capped at 50 electrical
+Hz/s in both dashboard and firmware.
 
 B2 starts a standalone profile in which both speed and TB-200S load vary,
 regardless of any earlier `LOAD` command:
@@ -308,8 +343,8 @@ regardless of any earlier `LOAD` command:
 - load: 0.05 A at launch, then pseudorandom 0.05–0.25 A every 2–5 seconds.
 
 A second press stops the motor. A `CFG` received over UART disables the B2
-profile and takes control; dashboard-configured starts stay capped at
-50 electrical Hz/s.
+profile and takes control; `Custom` dashboard starts stay capped at
+50 electrical Hz/s, while `PROFILE` presets use the B2 ramp and limits.
 
 UART starts also launch with a 0.05 A load command: a higher fixed setpoint is
 applied once MCSDK reaches `RUN`, and variable mode makes its first draw

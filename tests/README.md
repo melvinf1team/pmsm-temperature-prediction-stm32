@@ -10,13 +10,15 @@ tests/
 ├── run_all.py        One command for every check that needs no board
 ├── bench/            Tools that talk to the board
 │   ├── check_wiring.py           Wiring diagnosis (firmware_acquisition)
+│   ├── calibrate_tb200s.py       Guided TB-200S load calibration (firmware_acquisition)
 │   ├── d6t_calibration.py        Live D6T map and pixel choice (firmware_acquisition)
 │   └── check_nanoedge_serial.py  UART contract of firmware_validation
 ├── consistency/      Cross-checks between Python, firmwares, and generated files
-│   ├── validate_motor_limits.py       Motor, B2, and TB-200S limits everywhere
+│   ├── validate_motor_limits.py       Motor, B2, PROFILE preset, and TB-200S limits everywhere
 │   ├── validate_neai_export.py        NanoEdge AI export structure
 │   └── validate_preprocess_parity.py  Embedded EWMA features against pandas
 └── unit/             Unit tests of the Python tools (no board, no window)
+    ├── test_calibrate_tb200s.py
     ├── test_check_wiring.py
     ├── test_d6t_calibration.py
     ├── test_motor_datalog_gui_dashboard.py
@@ -31,6 +33,7 @@ tests/
 | Check everything that needs no board | `python .\tests\run_all.py` |
 | Check the bench wiring | `python .\tests\bench\check_wiring.py --port COM5` |
 | Also check the motor phases and the brake | `python .\tests\bench\check_wiring.py --port COM5 --motor` |
+| Calibrate the TB-200S command | `python .\tests\bench\calibrate_tb200s.py --port COM5` |
 | Choose the D6T pixel logged as `d6t_temp_c` | `python .\tests\bench\d6t_calibration.py --port COM5` |
 | Try the D6T tool without a board | `python .\tests\bench\d6t_calibration.py --demo` |
 | Check the validation firmware stream | `python .\tests\bench\check_nanoedge_serial.py --port COM5 --mode model` |
@@ -38,7 +41,7 @@ tests/
 
 ## Checks without a board
 
-`run_all.py` runs the five unit-test files and the three consistency checks,
+`run_all.py` runs the six unit-test files and the three consistency checks,
 each in its own process, and prints one `PASS`/`FAIL` line per script with
 its duration. The output of a failing script is printed below its line;
 `--verbose` prints it for every script. The exit code is `0` when everything
@@ -49,7 +52,7 @@ passes.
   ...
   consistency/validate_preprocess_parity.py   PASS    4.0 s
 
-8/8 passed in 10 s.
+9/9 passed in 15 s.
 ```
 
 `validate_preprocess_parity.py` replays all logs of `datalogging/logs` through
@@ -184,6 +187,51 @@ phases and the brake response. Useful options: `--speed`, `--iq-limit`,
 `--no-direction-prompt`. Exit code: `0` without failure, `1` with a failure,
 `2` when the port cannot be opened. See `docs/source/utilisation.rst` for the
 detected cases.
+
+## TB-200S calibration
+
+```powershell
+python .\tests\bench\calibrate_tb200s.py --port COM5
+```
+
+The script uses `firmware_acquisition` as flashed, without any firmware
+change. It guides the operator through the whole procedure and asks for the
+values read on the bench:
+
+1. Checklist (TB-200S input mode, PA5/ADJ wiring, brake coupling), then the
+   instruments available: a DC ammeter in series with the brake coil
+   (recommended: 1 mA resolution against 0.01 A on the TB-200S display) and a
+   multimeter for the PA5/ADJ voltages (optional).
+2. `DIAG` with the motor stopped: bus voltage, TB-200S wiring, and the DAC code
+   used by the flashed firmware at 0.25 A, compared with the
+   `APP_TB200S_CAL_*` constants of the source. A mismatch means the board was
+   not flashed with the current source.
+3. Reading at 0.05 A with the motor stopped, kept to detect PWM noise on ADJ.
+4. Motor start (1500 rpm by default; the firmware applies the load only in
+   RUN), warm-up at 0.15 A, then up/down sweeps of 0.05-0.25 A. At each step,
+   the script waits for the brake to settle, shows the firmware setpoint, the
+   DAC code, the computed PA5 voltage, the speed and Iq, then asks for the
+   TB-200S display, the ammeter, and during the first up sweep the PA5 and ADJ
+   voltages. Type `0.15/0.16` when the display alternates, `r` to wait and read
+   again, `s` to skip the step, `q` to stop and write the report. A motor fault
+   is reported and the step can be redone after a restart.
+5. Analysis and report: error of the flashed calibration, least-squares
+   TB-200S transfer, output saturation at the top of the range (excluded from
+   the fit), linearity, hysteresis, repeatability, display accuracy
+   against the ammeter, DAC gain, ADJ input loading, motor noise, brake
+   response in Iq, verdicts, and the proposed `#define` lines.
+
+The report (`.txt`) and every reading (`.csv`) are written to
+`tests/bench/calibration_reports/`. Useful options: `--cycles` (default 2),
+`--step` (default 0.025 A), `--settle` (default 8 s), `--warmup` (default
+120 s, `0` to skip), `--skip-diag`, `--cal LOW_V LOW_A HIGH_V HIGH_A` when
+the flashed constants differ from the source, and `--speed`, `--iq-limit`,
+`--hard-limit`, `--accel`, `--yes` as in `check_wiring.py`. Exit code: `0`
+when every step was done, `1` otherwise, `2` when the port cannot be opened.
+
+Apply the proposed constants identically in both `app_motor_control.c` files,
+rebuild and flash both projects, then run the script again: the verdict
+confirms the new calibration.
 
 ## NanoEdge AI serial contract
 

@@ -63,11 +63,18 @@
 /* Couvre STOPPERMANENCY_MS (400 ms) après un arrêt moteur. */
 #define APP_START_WAIT_IDLE_MS              1000U
 
-/* TB-200S : mode 0-10 V pour 0-3 A, soit V_ADJ = I_LOAD * 10 / 3.
- * Le DAC 12 bits est référencé à la VDDA nominale de 3,3 V. */
+/* Profils série PROFILE,<TOKEN>, identiques au firmware de validation. */
+#define APP_PROFILE_FIXED_SPEED_RPM         2500.0f
+#define APP_PROFILE_FIXED_LOAD_A               0.10f
+
+/* TB-200S : droite d'étalonnage banc (tension PA5 -> courant affiché TB-200S),
+ * calibrate_tb200s.py du 2026-10-14 : 0,2567 A/V, seuil 0,194 V, écart max 0,003 A.
+ * Le TB-200S sature vers 0,24 A : le point 0,25 A est exclu de l'ajustement. */
 #define APP_TB200S_DAC_VREF_V               3.3f
-#define APP_TB200S_FULL_SCALE_V              10.0f
-#define APP_TB200S_FULL_SCALE_A              3.0f
+#define APP_TB200S_CAL_LOW_V                0.3892f
+#define APP_TB200S_CAL_LOW_A                0.05f
+#define APP_TB200S_CAL_HIGH_V               1.1683f
+#define APP_TB200S_CAL_HIGH_A               0.25f
 #define APP_TB200S_DAC_MAX_CODE              4095U
 #define APP_TB200S_MIN_CHANGE_PERIOD_MS      2000U
 #define APP_TB200S_MAX_CHANGE_PERIOD_MS      5000U
@@ -123,9 +130,12 @@ static volatile uint32_t app_button_last_irq_ms = 0U;
 static bool app_motor_start_requested = false;
 static uint32_t app_motor_next_start_attempt_ms = 0U;
 static bool app_button_profile_active = false;
+static bool app_button_speed_variable = false;
 static bool app_button_speed_change_scheduled = false;
 static uint32_t app_button_next_speed_change_ms = 0U;
 static uint32_t app_button_random_state = 0x6D2B79F5U;
+/* Trace UART émise quand le MCSDK accepte le démarrage du profil armé. */
+static const char *app_profile_start_text = NULL;
 
 static AppTb200sLoadMode_t app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
 static float app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
@@ -204,9 +214,11 @@ static uint32_t AppMotorControl_ButtonRandomRange(uint32_t minimum,
 
 uint32_t AppMotorControl_LoadToDacCode(float load_a)
 {
-  float adj_voltage_v = load_a *
-    (APP_TB200S_FULL_SCALE_V / APP_TB200S_FULL_SCALE_A);
-  float code = (adj_voltage_v / APP_TB200S_DAC_VREF_V) *
+  float dac_voltage_v = APP_TB200S_CAL_LOW_V +
+    ((load_a - APP_TB200S_CAL_LOW_A) *
+     ((APP_TB200S_CAL_HIGH_V - APP_TB200S_CAL_LOW_V) /
+      (APP_TB200S_CAL_HIGH_A - APP_TB200S_CAL_LOW_A)));
+  float code = (dac_voltage_v / APP_TB200S_DAC_VREF_V) *
     (float)APP_TB200S_DAC_MAX_CODE;
 
   if (code <= 0.0f)
@@ -429,37 +441,87 @@ static void AppMotorControl_SetButtonProfileConfig(float target_speed_rpm)
   app_hard_stop_current_a = APP_BUTTON_HARD_STOP_CURRENT_A;
 }
 
-static void AppMotorControl_StartButtonProfile(uint32_t now)
+static const char *AppMotorControl_GetProfileStartText(AppMotorProfile_t profile)
+{
+  switch (profile)
+  {
+    case APP_MOTOR_PROFILE_STABLE:
+      return "#PROFILE,START,STABLE,rpm=2500,load_a=0.10,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+    case APP_MOTOR_PROFILE_VARIABLE_LOAD:
+      return "#PROFILE,START,VARIABLE_LOAD,rpm=2500,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+    case APP_MOTOR_PROFILE_VARIABLE_SPEED:
+      return "#PROFILE,START,VARIABLE_SPEED,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.10,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+    case APP_MOTOR_PROFILE_VARIABLE_ALL:
+    default:
+      return "#PROFILE,START,VARIABLE_ALL,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+  }
+}
+
+static bool AppMotorControl_ConfigureProfile(AppMotorProfile_t profile,
+                                             uint32_t now)
 {
   float initial_speed_rpm;
+  bool variable_speed;
+  bool variable_load;
+
+  if ((uint32_t)profile >= (uint32_t)APP_MOTOR_PROFILE_COUNT)
+  {
+    return false;
+  }
+
+  variable_speed = (profile == APP_MOTOR_PROFILE_VARIABLE_SPEED) ||
+                   (profile == APP_MOTOR_PROFILE_VARIABLE_ALL);
+  variable_load = (profile == APP_MOTOR_PROFILE_VARIABLE_LOAD) ||
+                  (profile == APP_MOTOR_PROFILE_VARIABLE_ALL);
 
   AppMotorControl_ReseedRandom(now);
   app_button_profile_active = true;
+  app_button_speed_variable = variable_speed;
   app_button_speed_change_scheduled = false;
   app_button_next_speed_change_ms = 0U;
-  /* B2 est toujours le profil autonome tout-variable. Une ancienne commande
-   * série ne doit donc pas laisser le frein en mode fixe lors d'un lancement
-   * manuel ultérieur. Le dashboard renvoie LOAD avant chacun de ses START. */
-  app_tb200s_load_mode = APP_TB200S_LOAD_VARIABLE;
-  app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
+
+  /* Chaque profil écrase explicitement un ancien LOAD. C'est notamment ce qui
+   * garantit que B2 relance toujours VARIABLE_ALL, quel que soit l'historique
+   * des commandes série. */
+  app_tb200s_load_mode = variable_load
+    ? APP_TB200S_LOAD_VARIABLE
+    : APP_TB200S_LOAD_FIXED;
+  app_tb200s_requested_load_a = variable_load
+    ? APP_TB200S_MIN_LOAD_A
+    : APP_PROFILE_FIXED_LOAD_A;
   app_tb200s_change_scheduled = false;
   app_tb200s_next_change_ms = 0U;
-  (void)AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A);
 
-  initial_speed_rpm = AppMotorControl_SelectNextButtonSpeed();
+  if (!AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A))
+  {
+    app_button_profile_active = false;
+    app_button_speed_variable = false;
+    app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
+    app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
+    return false;
+  }
+
+  initial_speed_rpm = variable_speed
+    ? AppMotorControl_SelectNextButtonSpeed()
+    : APP_PROFILE_FIXED_SPEED_RPM;
   AppMotorControl_SetButtonProfileConfig(initial_speed_rpm);
+  app_profile_start_text = AppMotorControl_GetProfileStartText(profile);
+  return true;
 }
 
 static void AppMotorControl_StopButtonProfile(void)
 {
   app_button_profile_active = false;
+  app_button_speed_variable = false;
   app_button_speed_change_scheduled = false;
   app_button_next_speed_change_ms = 0U;
 }
 
 static void AppMotorControl_ServiceButtonProfile(uint32_t now)
 {
-  if (!app_button_profile_active || (app_mc_state != APP_MC_RUNNING))
+  if (!app_button_profile_active ||
+      !app_button_speed_variable ||
+      (app_mc_state != APP_MC_RUNNING))
   {
     return;
   }
@@ -770,6 +832,46 @@ void AppMotorControl_Stop(void)
   app_mc_overspeed_since_ms = 0U;
 }
 
+AppMotorProfileStartResult_t AppMotorControl_StartProfile(
+  AppMotorProfile_t profile)
+{
+  uint32_t now;
+  MCI_State_t mc_state;
+
+  if ((uint32_t)profile >= (uint32_t)APP_MOTOR_PROFILE_COUNT)
+  {
+    return APP_MOTOR_PROFILE_START_INVALID;
+  }
+
+  /* Une nouvelle sélection remplace proprement le profil précédent. L'arrêt
+   * MCSDK est asynchrone : la requête de départ ci-dessous attend donc IDLE
+   * dans AppMotorControl_ServiceStartRequest(). */
+  mc_state = MC_GetSTMStateMotor1();
+  if (app_motor_start_requested ||
+      app_button_profile_active ||
+      (app_mc_state != APP_MC_IDLE) ||
+      (mc_state != IDLE))
+  {
+    AppMotorControl_Stop();
+  }
+  else
+  {
+    AppMotorControl_StopButtonProfile();
+  }
+
+  now = HAL_GetTick();
+  if (!AppMotorControl_ConfigureProfile(profile, now))
+  {
+    app_motor_start_requested = false;
+    AppMotorControl_OnMotorStopped();
+    return APP_MOTOR_PROFILE_START_LOAD_ERROR;
+  }
+
+  app_motor_start_requested = true;
+  app_motor_next_start_attempt_ms = 0U;
+  return APP_MOTOR_PROFILE_START_ACCEPTED;
+}
+
 bool AppMotorControl_IsRunning(void)
 {
   return (app_mc_state == APP_MC_RUNNING) || (MC_GetSTMStateMotor1() == RUN);
@@ -809,14 +911,12 @@ static bool AppMotorControl_TakeButtonToggleRequest(void)
 
 static void AppMotorControl_HandleButtonToggle(void)
 {
-  uint32_t now;
-
   if (!AppMotorControl_TakeButtonToggleRequest())
   {
     return;
   }
 
-    if (app_button_profile_active ||
+  if (app_button_profile_active ||
       app_motor_start_requested ||
       (app_mc_state == APP_MC_STARTING) ||
       AppMotorControl_IsRunning())
@@ -826,11 +926,14 @@ static void AppMotorControl_HandleButtonToggle(void)
     return;
   }
 
-  now = HAL_GetTick();
-  AppMotorControl_StartButtonProfile(now);
-  app_motor_start_requested = true;
-  app_motor_next_start_attempt_ms = 0U;
-  AppDatalog_SendText("#B2,START_REQUESTED,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
+  /* B2 est volontairement déterministe : il écrase toute ancienne commande
+   * LOAD/PROFILE et lance toujours le profil vitesse + charge variables. */
+  if (AppMotorControl_StartProfile(APP_MOTOR_PROFILE_VARIABLE_ALL) ==
+      APP_MOTOR_PROFILE_START_ACCEPTED)
+  {
+    app_profile_start_text = "#B2,START,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+    AppDatalog_SendText("#B2,START_REQUESTED,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
+  }
 }
 
 static void AppMotorControl_ServiceStartRequest(uint32_t now,
@@ -858,7 +961,10 @@ static void AppMotorControl_ServiceStartRequest(uint32_t now,
 
   if (AppMotorControl_Start())
   {
-    AppDatalog_SendText("#B2,START,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
+    if (app_profile_start_text != NULL)
+    {
+      AppDatalog_SendText(app_profile_start_text);
+    }
   }
   else
   {

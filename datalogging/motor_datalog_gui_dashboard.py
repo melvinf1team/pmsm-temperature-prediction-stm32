@@ -1,12 +1,17 @@
 """PMSM data logging GUI for STM32 thermal prediction.
 
 This module provides a Tkinter application for controlling an STM32
-B-G473E-ZEST1S with an STDES-LVHP01 power board, running a simple motor
-sequence, receiving UART measurements, recording CSV, and displaying live
+B-G473E-ZEST1S with an STDES-LVHP01 power board, running a motor test
+profile, receiving UART measurements, recording CSV, and displaying live
 values. The final CSV is written to ``datalogging/logs`` and keeps the STM32
 columns needed for NanoEdge AI preprocessing plus the TB-200S load setpoint,
 without a PC timestamp. Default paths can be overridden by command-line
 options, YAML, or environment variables through ConfigArgParse.
+
+Six test profiles can be selected quickly, like in the validation GUI:
+``Collect only`` (motor stopped), the four firmware presets ``Stable``,
+``Variable load``, ``Variable speed`` and ``All variable``, and ``Custom``,
+whose settings are edited and saved by the user.
 
 The expected firmware serial protocol is line-oriented text::
 
@@ -15,11 +20,13 @@ The expected firmware serial protocol is line-oriented text::
     LOAD,<amps>
     LOAD,VARIABLE
     START
+    PROFILE,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>,<datalog_ms>,<ds18b20_ms>
     ACQ_START,<datalog_ms>,<ds18b20_ms>
     STOP
     ACK,<command>
     ERR,<reason>
     #CSV_HEADER,<column_1>,<column_2>,...
+    #PROFILE,START,<TOKEN>,...
     DATA,<value_1>,<value_2>,...
 """
 
@@ -28,6 +35,7 @@ import json
 import math
 import os
 import queue
+import re
 import threading
 import time
 from collections import deque
@@ -63,6 +71,9 @@ LOG_TRIM_LINES = 300
 CSV_FLUSH_EVERY_ROWS = 10
 CSV_FLUSH_INTERVAL_S = 1.0
 IQ_WARNING_RATIO = 0.90
+LEFT_PANEL_WIDTH = 460
+LIVE_CARD_MIN_WIDTH = 190
+AUTO_CSV_NAME_PATTERN = re.compile(r"daq_log_\d{8}_\d{6}\.csv")
 MIN_TARGET_SPEED_RPM = 100.0
 MAX_TARGET_SPEED_RPM = 4500.0
 MAX_IQ_LIMIT_A = 30.0
@@ -80,6 +91,41 @@ LOAD_MODE_FIXED = "Fixed"
 LOAD_MODE_VARIABLE = "Variable"
 LOAD_MODES = (LOAD_MODE_FIXED, LOAD_MODE_VARIABLE)
 CUSTOM_PROFILE_NAME = "Custom"
+
+# Quick-select test profiles, aligned with the validation GUI. The four presets
+# run inside the acquisition firmware through PROFILE,<TOKEN>.
+QUICK_PROFILE_COLLECT_ONLY = "Collect only"
+QUICK_PROFILE_STABLE = "Stable"
+QUICK_PROFILE_VARIABLE_LOAD = "Variable load"
+QUICK_PROFILE_VARIABLE_SPEED = "Variable speed"
+QUICK_PROFILE_ALL_VARIABLE = "All variable"
+QUICK_PROFILE_CUSTOM = "Custom"
+QUICK_PROFILE_OPTIONS = (
+    QUICK_PROFILE_COLLECT_ONLY,
+    QUICK_PROFILE_STABLE,
+    QUICK_PROFILE_VARIABLE_LOAD,
+    QUICK_PROFILE_VARIABLE_SPEED,
+    QUICK_PROFILE_ALL_VARIABLE,
+    QUICK_PROFILE_CUSTOM,
+)
+PRESET_PROFILE_TOKENS = {
+    QUICK_PROFILE_STABLE: "STABLE",
+    QUICK_PROFILE_VARIABLE_LOAD: "VARIABLE_LOAD",
+    QUICK_PROFILE_VARIABLE_SPEED: "VARIABLE_SPEED",
+    QUICK_PROFILE_ALL_VARIABLE: "VARIABLE_ALL",
+}
+QUICK_PROFILES_BY_TOKEN = {token: name for name, token in PRESET_PROFILE_TOKENS.items()}
+
+# Preset settings applied by the firmware (APP_PROFILE_* and APP_BUTTON_*).
+PRESET_FIXED_SPEED_RPM = 2500.0
+PRESET_MIN_SPEED_RPM = 2000.0
+PRESET_MAX_SPEED_RPM = 4000.0
+PRESET_FIXED_LOAD_A = 0.10
+PRESET_IQ_LIMIT_A = 25.0
+PRESET_HARD_LIMIT_A = 28.0
+PRESET_ACCEL_ELEC_HZ_S = 500.0
+PRESET_CHANGE_PERIOD_TEXT = "2–5 s"
+STALE_DATA_S = 2.0
 
 # Columns written to the final CSV. Additional board columns may be displayed
 # live, but only preprocessing inputs and the requested load are retained.
@@ -124,7 +170,191 @@ COLORS = {
     "rose": "#FB7185",
     "amber": "#FBBF24",
     "violet": "#C084FC",
+    "border_hover": "#3E4D63",
+    "text_dim": "#5B6878",
 }
+
+
+@dataclass(frozen=True)
+class QuickProfile:
+    """Test profile shown as a quick-select card.
+
+    Attributes:
+        name: Canonical profile name.
+        title: Card title.
+        summary: Short specification shown on the card.
+        description: Sentence shown under the cards when the profile is selected.
+        accent: Card accent color.
+        token: Firmware ``PROFILE`` token, or ``None`` for non-preset profiles.
+        speed_variable: Whether the speed target changes during the run.
+        load_variable: Whether the TB-200S load changes during the run.
+        parameters: ``(label, value)`` rows describing a read-only profile.
+    """
+
+    name: str
+    title: str
+    summary: str
+    description: str
+    accent: str
+    token: Optional[str] = None
+    speed_variable: bool = False
+    load_variable: bool = False
+    parameters: tuple = ()
+
+
+def _format_amps(value):
+    return f"{value:.2f} A"
+
+
+_PRESET_LIMIT_ROWS = (
+    ("Current limits", f"Iq {PRESET_IQ_LIMIT_A:g} A · total {PRESET_HARD_LIMIT_A:g} A"),
+    ("Speed ramp", f"{PRESET_ACCEL_ELEC_HZ_S:g} Hz elec./s"),
+)
+_FIXED_SPEED_ROW = ("Speed", f"{PRESET_FIXED_SPEED_RPM:g} rpm, constant")
+_VARIABLE_SPEED_ROW = (
+    "Speed",
+    f"{PRESET_MIN_SPEED_RPM:g}–{PRESET_MAX_SPEED_RPM:g} rpm, new target every {PRESET_CHANGE_PERIOD_TEXT}",
+)
+_FIXED_LOAD_ROW = (
+    "TB-200S load",
+    f"{_format_amps(PRESET_FIXED_LOAD_A)} once in RUN ({_format_amps(MIN_LOAD_SETPOINT_A)} at start)",
+)
+_VARIABLE_LOAD_ROW = (
+    "TB-200S load",
+    f"{MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A, new value every {PRESET_CHANGE_PERIOD_TEXT}",
+)
+
+QUICK_PROFILES = {
+    QUICK_PROFILE_COLLECT_ONLY: QuickProfile(
+        name=QUICK_PROFILE_COLLECT_ONLY,
+        title="Collect only",
+        summary="Motor off · sensors",
+        description=(
+            "Logs temperatures with the motor forced to stop. No motor command is "
+            "sent; motor columns are logged as zero."
+        ),
+        accent=COLORS["muted"],
+        parameters=(
+            ("Motor", "Forced stop before logging"),
+            ("TB-200S load", f"{_format_amps(MIN_LOAD_SETPOINT_A)} (minimum)"),
+            ("Motor columns", "Logged as zero"),
+            ("UART command", "ACQ_START"),
+        ),
+    ),
+    QUICK_PROFILE_STABLE: QuickProfile(
+        name=QUICK_PROFILE_STABLE,
+        title="Stable",
+        summary=f"{PRESET_FIXED_SPEED_RPM:g} rpm · {PRESET_FIXED_LOAD_A:.2f} A",
+        description=(
+            f"Constant {PRESET_FIXED_SPEED_RPM:g} rpm with a fixed "
+            f"{_format_amps(PRESET_FIXED_LOAD_A)} load, applied once the motor reaches RUN."
+        ),
+        accent=COLORS["lime"],
+        token=PRESET_PROFILE_TOKENS[QUICK_PROFILE_STABLE],
+        parameters=(_FIXED_SPEED_ROW, _FIXED_LOAD_ROW, *_PRESET_LIMIT_ROWS, ("UART command", "PROFILE,STABLE")),
+    ),
+    QUICK_PROFILE_VARIABLE_LOAD: QuickProfile(
+        name=QUICK_PROFILE_VARIABLE_LOAD,
+        title="Variable load",
+        summary=f"{PRESET_FIXED_SPEED_RPM:g} rpm · {MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A",
+        description=(
+            f"Constant {PRESET_FIXED_SPEED_RPM:g} rpm; the TB-200S load changes randomly "
+            f"between {MIN_LOAD_SETPOINT_A:.2f} and {MAX_LOAD_SETPOINT_A:.2f} A every "
+            f"{PRESET_CHANGE_PERIOD_TEXT}."
+        ),
+        accent=COLORS["amber"],
+        token=PRESET_PROFILE_TOKENS[QUICK_PROFILE_VARIABLE_LOAD],
+        load_variable=True,
+        parameters=(
+            _FIXED_SPEED_ROW,
+            _VARIABLE_LOAD_ROW,
+            *_PRESET_LIMIT_ROWS,
+            ("UART command", "PROFILE,VARIABLE_LOAD"),
+        ),
+    ),
+    QUICK_PROFILE_VARIABLE_SPEED: QuickProfile(
+        name=QUICK_PROFILE_VARIABLE_SPEED,
+        title="Variable speed",
+        summary=f"{PRESET_MIN_SPEED_RPM:g}–{PRESET_MAX_SPEED_RPM:g} rpm · {PRESET_FIXED_LOAD_A:.2f} A",
+        description=(
+            f"Random speed target between {PRESET_MIN_SPEED_RPM:g} and "
+            f"{PRESET_MAX_SPEED_RPM:g} rpm every {PRESET_CHANGE_PERIOD_TEXT}, with a fixed "
+            f"{_format_amps(PRESET_FIXED_LOAD_A)} load once in RUN."
+        ),
+        accent=COLORS["cyan"],
+        token=PRESET_PROFILE_TOKENS[QUICK_PROFILE_VARIABLE_SPEED],
+        speed_variable=True,
+        parameters=(
+            _VARIABLE_SPEED_ROW,
+            _FIXED_LOAD_ROW,
+            *_PRESET_LIMIT_ROWS,
+            ("UART command", "PROFILE,VARIABLE_SPEED"),
+        ),
+    ),
+    QUICK_PROFILE_ALL_VARIABLE: QuickProfile(
+        name=QUICK_PROFILE_ALL_VARIABLE,
+        title="All variable",
+        summary=f"Speed + load · {PRESET_CHANGE_PERIOD_TEXT}",
+        description=(
+            f"Speed ({PRESET_MIN_SPEED_RPM:g}–{PRESET_MAX_SPEED_RPM:g} rpm) and load "
+            f"({MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A) both change every "
+            f"{PRESET_CHANGE_PERIOD_TEXT}, exactly like the board button B2."
+        ),
+        accent=COLORS["violet"],
+        token=PRESET_PROFILE_TOKENS[QUICK_PROFILE_ALL_VARIABLE],
+        speed_variable=True,
+        load_variable=True,
+        parameters=(
+            _VARIABLE_SPEED_ROW,
+            _VARIABLE_LOAD_ROW,
+            *_PRESET_LIMIT_ROWS,
+            ("Same as", "Board button B2"),
+            ("UART command", "PROFILE,VARIABLE_ALL"),
+        ),
+    ),
+    QUICK_PROFILE_CUSTOM: QuickProfile(
+        name=QUICK_PROFILE_CUSTOM,
+        title="Custom",
+        summary="Your own settings",
+        description=(
+            "Set speed, current limits, ramp and TB-200S load yourself, then save "
+            "them as a reusable profile."
+        ),
+        accent=COLORS["accent"],
+    ),
+}
+
+
+def normalize_quick_profile(value):
+    """Return the canonical name of a quick-select test profile."""
+    normalized = str(value).strip().casefold()
+    for name in QUICK_PROFILE_OPTIONS:
+        if normalized == name.casefold():
+            return name
+    raise ValueError(f"Unsupported test profile: {value!r}")
+
+
+def build_profile_command(profile, datalog_ms, ds18b20_ms):
+    """Build the firmware ``PROFILE`` command of a preset.
+
+    Returns:
+        str | None: Command line, or ``None`` for ``Collect only`` and ``Custom``,
+        which use ``ACQ_START`` and ``CFG``/``LOAD``/``START`` instead.
+    """
+    token = PRESET_PROFILE_TOKENS.get(normalize_quick_profile(profile))
+    if token is None:
+        return None
+    return f"PROFILE,{token},{int(datalog_ms)},{int(ds18b20_ms)}\n"
+
+
+def preset_load_settings(profile):
+    """Return the TB-200S ``(load_mode, setpoint_a)`` requested by a preset."""
+    name = normalize_quick_profile(profile)
+    if name not in PRESET_PROFILE_TOKENS:
+        raise ValueError(f"{name!r} is not a firmware preset.")
+    if QUICK_PROFILES[name].load_variable:
+        return LOAD_MODE_VARIABLE, MIN_LOAD_SETPOINT_A
+    return LOAD_MODE_FIXED, PRESET_FIXED_LOAD_A
 
 
 @dataclass
@@ -419,7 +649,12 @@ class MotorDatalogGui(tk.Tk):
         self.port_display_to_device = {}
         self.baud_var = tk.StringVar(value=str(BAUD_DEFAULT))
         self.profile_var = tk.StringVar(value=initial_profile)
-        self.acquisition_mode_var = tk.StringVar(value=ACQUISITION_MODE_MOTOR)
+        # Collect only is the safe default: no motor command until a profile is chosen.
+        self.quick_profile_var = tk.StringVar(value=QUICK_PROFILE_COLLECT_ONLY)
+        self.profile_safety_var = tk.StringVar()
+        self.settings_title_var = tk.StringVar()
+        self.profile_tooltip = None
+        self.profile_tooltip_after_id = None
         self.speed_rpm_var = tk.StringVar()
         self.speed_hz_var = tk.StringVar()
         self.pole_pairs_var = tk.StringVar(value=str(POLE_PAIRS_DEFAULT))
@@ -433,8 +668,20 @@ class MotorDatalogGui(tk.Tk):
         self.status_detail_var = tk.StringVar(value="Select a COM port and settings.")
         self.warning_var = tk.StringVar(value="")
         self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
+        self.active_quick_profile = None
         self.active_load_mode = LOAD_MODE_FIXED
         self.active_load_setpoint_a = MIN_LOAD_SETPOINT_A
+        self.motor_start_confirmed = False
+
+        self.session_started_s = None
+        self.session_ended_s = None
+        self.session_rows = 0
+        self.active_datalog_ms = 0
+        self.data_times = deque(maxlen=50)
+        self.session_elapsed_var = tk.StringVar(value="—")
+        self.session_detail_var = tk.StringVar(value="No session yet")
+        self.session_detail_label = None
+        self.show_data_frames_var = tk.BooleanVar(value=False)
 
         self.load_mode_var = tk.StringVar(value=LOAD_MODE_FIXED)
         self.load_setpoint_var = tk.StringVar(value=self.format_float(MIN_LOAD_SETPOINT_A))
@@ -442,12 +689,20 @@ class MotorDatalogGui(tk.Tk):
         self.live_fields = list(DEFAULT_LIVE_FIELDS)
         self.live_vars = {key: tk.StringVar(value=self.default_live_value(key)) for key in self.live_fields}
         self.live_card_frames = {}
+        self.live_card_order = []
+        self.live_columns = 0
         self.live_value_labels = {}
         self.live_frame = None
 
         self.left_canvas = None
+        self.left_scrollbar = None
         self.left_window_id = None
         self.left_scroll_enabled = False
+
+        self.quick_profile_cards = {}
+        self.preset_details_frame = None
+        self.custom_editor_frame = None
+        self.settings_accent = None
 
         self.plot_fields = dict(DEFAULT_PLOT_FIELDS)
         self.plot_enabled_vars = {
@@ -476,10 +731,10 @@ class MotorDatalogGui(tk.Tk):
         self.refresh_ports()
         self.apply_profile(self.profiles[initial_profile])
         self._user_edit_ready = True
-        self.update_acquisition_mode_ui()
-        self.validate_form()
+        self.on_quick_profile_changed()
         self.after(50, self.process_gui_queue)
         self.after(PLOT_REFRESH_MS, self.redraw_plot_periodic)
+        self.after(500, self.refresh_session_stats)
 
     def default_csv_path(self):
         """Build the default CSV path for a new acquisition.
@@ -490,6 +745,10 @@ class MotorDatalogGui(tk.Tk):
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return str(self.paths.log_dir / f"daq_log_{timestamp}.csv")
+
+    def new_csv_path(self):
+        """Suggest a fresh timestamped CSV file name."""
+        self.csv_path_var.set(self.default_csv_path())
 
     @staticmethod
     def csv_path_from_text(value):
@@ -529,15 +788,36 @@ class MotorDatalogGui(tk.Tk):
         style.configure("Unit.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=(font_ui, 9))
         style.configure("Warn.TLabel", background=COLORS["panel"], foreground=COLORS["warning"], font=(font_title, 9))
         style.configure("Status.TLabel", background=COLORS["panel_lift"], foreground=COLORS["text"], font=(font_title, 10))
+        style.configure("StatusDetail.TLabel", background=COLORS["panel_lift"], foreground=COLORS["muted"], font=(font_ui, 9))
+        style.layout(
+            "Dark.Vertical.TScrollbar",
+            [("Vertical.Scrollbar.trough", {"sticky": "ns", "children": [("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})],
+        )
+        style.configure(
+            "Dark.Vertical.TScrollbar",
+            troughcolor=COLORS["bg"],
+            background=COLORS["panel_3"],
+            bordercolor=COLORS["bg"],
+            lightcolor=COLORS["panel_3"],
+            darkcolor=COLORS["panel_3"],
+            gripcount=0,
+            arrowsize=8,
+        )
+        style.map("Dark.Vertical.TScrollbar", background=[("active", COLORS["border_hover"])])
 
         style.configure("TEntry", fieldbackground=COLORS["input"], background=COLORS["input"], foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"], padding=8)
         style.configure("Invalid.TEntry", fieldbackground="#3A1018", background="#3A1018", foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["danger"], lightcolor=COLORS["danger"], darkcolor=COLORS["danger"], padding=8)
         style.configure("TCombobox", fieldbackground=COLORS["input"], background=COLORS["input"], foreground=COLORS["text"], arrowcolor=COLORS["accent"], bordercolor=COLORS["border"], lightcolor=COLORS["border"], darkcolor=COLORS["border"], padding=7)
         style.configure("Invalid.TCombobox", fieldbackground="#3A1018", background="#3A1018", foreground=COLORS["text"], arrowcolor=COLORS["danger"], bordercolor=COLORS["danger"], lightcolor=COLORS["danger"], darkcolor=COLORS["danger"], padding=7)
-        style.map("TCombobox", fieldbackground=[("readonly", COLORS["input"])], foreground=[("readonly", COLORS["text"])])
+        style.map("TCombobox", fieldbackground=[("disabled", COLORS["panel_2"]), ("readonly", COLORS["input"])], foreground=[("disabled", COLORS["muted"]), ("readonly", COLORS["text"])], arrowcolor=[("disabled", COLORS["text_dim"])])
         style.map("Invalid.TCombobox", fieldbackground=[("readonly", "#3A1018")], foreground=[("readonly", COLORS["text"])])
-        style.configure("TCheckbutton", background=COLORS["panel"], foreground=COLORS["text"], font=(font_ui, 9))
-        style.map("TCheckbutton", background=[("active", COLORS["panel"])], foreground=[("active", COLORS["accent"])])
+        style.map("TEntry", fieldbackground=[("disabled", COLORS["panel_2"])], foreground=[("disabled", COLORS["muted"])])
+        style.configure("TCheckbutton", background=COLORS["panel"], foreground=COLORS["text"], font=(font_ui, 9), indicatorbackground=COLORS["input"], indicatorforeground=COLORS["accent"], indicatorcolor=COLORS["input"], bordercolor=COLORS["border"])
+        style.map("TCheckbutton", background=[("active", COLORS["panel"])], foreground=[("active", COLORS["accent"])], indicatorcolor=[("selected", COLORS["accent"]), ("pressed", COLORS["panel_3"])])
+        self.option_add("*TCombobox*Listbox.background", COLORS["panel_2"])
+        self.option_add("*TCombobox*Listbox.foreground", COLORS["text"])
+        self.option_add("*TCombobox*Listbox.selectBackground", COLORS["panel_3"])
+        self.option_add("*TCombobox*Listbox.selectForeground", COLORS["accent"])
 
     def build_ui(self):
         """Build the main structure of the dark graphical interface."""
@@ -548,11 +828,11 @@ class MotorDatalogGui(tk.Tk):
 
         body = tk.Frame(root, bg=COLORS["bg"])
         body.pack(fill=tk.BOTH, expand=True, pady=(16, 0))
-        body.grid_columnconfigure(0, minsize=430, weight=0)
+        body.grid_columnconfigure(0, minsize=LEFT_PANEL_WIDTH, weight=0)
         body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
 
-        left_shell = tk.Frame(body, bg=COLORS["bg"], width=430)
+        left_shell = tk.Frame(body, bg=COLORS["bg"], width=LEFT_PANEL_WIDTH)
         left_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
         left_shell.grid_propagate(False)
         left_shell.grid_rowconfigure(0, weight=1)
@@ -594,6 +874,15 @@ class MotorDatalogGui(tk.Tk):
             relief="flat",
         )
         self.left_canvas.grid(row=0, column=0, sticky="nsew")
+        self.left_scrollbar = ttk.Scrollbar(
+            parent,
+            orient="vertical",
+            command=self.left_canvas.yview,
+            style="Dark.Vertical.TScrollbar",
+        )
+        self.left_scrollbar.grid(row=0, column=1, sticky="ns", padx=(4, 0))
+        self.left_scrollbar.grid_remove()
+        self.left_canvas.configure(yscrollcommand=self.left_scrollbar.set)
 
         left = tk.Frame(self.left_canvas, bg=COLORS["bg"])
         left.grid_columnconfigure(0, weight=1)
@@ -633,9 +922,10 @@ class MotorDatalogGui(tk.Tk):
     def update_left_scroll_state(self):
         """Enable or disable scrolling in the left column.
 
-        Scrolling is enabled only when content height exceeds visible canvas height.
+        Scrolling, and its slim scrollbar, are enabled only when content height
+        exceeds the visible canvas height.
         """
-        if self.left_canvas is None:
+        if self.left_canvas is None or self.left_scrollbar is None:
             return
         bbox = self.left_canvas.bbox("all")
         if bbox is None:
@@ -644,7 +934,10 @@ class MotorDatalogGui(tk.Tk):
         content_height = bbox[3] - bbox[1]
         canvas_height = max(1, self.left_canvas.winfo_height())
         self.left_scroll_enabled = content_height > canvas_height + 2
-        if not self.left_scroll_enabled:
+        if self.left_scroll_enabled:
+            self.left_scrollbar.grid()
+        else:
+            self.left_scrollbar.grid_remove()
             self.left_canvas.yview_moveto(0)
 
     def pointer_is_over_left_panel(self):
@@ -699,7 +992,7 @@ class MotorDatalogGui(tk.Tk):
         accent.grid(row=0, column=0, sticky="nsw")
 
         title_block = tk.Frame(header, bg=COLORS["panel_soft"])
-        title_block.grid(row=0, column=0, sticky="w", padx=(24, 16), pady=18)
+        title_block.grid(row=0, column=0, sticky="w", padx=(24, 16), pady=14)
         ttk.Label(title_block, text="STM32 PMSM Bench", style="Hero.TLabel").pack(anchor="w")
         ttk.Label(title_block, text="Motor control, CSV logging and live monitoring", style="HeroSub.TLabel").pack(anchor="w", pady=(3, 0))
 
@@ -711,7 +1004,7 @@ class MotorDatalogGui(tk.Tk):
         self.status_dot.grid(row=0, column=0, rowspan=2, padx=(14, 9), pady=12)
         self.status_dot_id = self.status_dot.create_oval(4, 4, 16, 16, fill=COLORS["warning"], outline="")
         ttk.Label(status_card, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 18), pady=(10, 0))
-        ttk.Label(status_card, textvariable=self.status_detail_var, style="CardMuted.TLabel", wraplength=260).grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
+        ttk.Label(status_card, textvariable=self.status_detail_var, style="StatusDetail.TLabel", wraplength=260).grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
 
         control_card = tk.Frame(header, bg=COLORS["panel_soft"])
         control_card.grid(row=0, column=2, sticky="e", padx=(0, 16), pady=14)
@@ -735,6 +1028,7 @@ class MotorDatalogGui(tk.Tk):
             fg=COLORS["text"],
             activebackground=accent,
             activeforeground="#061016",
+            disabledforeground=COLORS["muted"],
             relief="flat",
             padx=24,
             pady=16,
@@ -755,6 +1049,7 @@ class MotorDatalogGui(tk.Tk):
             fg=COLORS["text"],
             activebackground=accent or COLORS["accent"],
             activeforeground="#061016",
+            disabledforeground=COLORS["text_dim"],
             relief="flat",
             padx=12,
             pady=9,
@@ -763,17 +1058,28 @@ class MotorDatalogGui(tk.Tk):
             bd=0,
         )
 
-    def card(self, parent, title=None, padx=16, pady=14, accent=None):
-        """Create a dark card without a colored top bar."""
+    def card(self, parent, title=None, padx=16, pady=14, accent=None, title_var=None):
+        """Create a dark card without a colored top bar.
+
+        ``title_var`` makes the title dynamic. The title row and accent marker are
+        exposed as ``outer.title_row`` and ``outer.accent_marker``.
+        """
         outer = tk.Frame(parent, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
-        if title:
+        outer.title_row = None
+        outer.accent_marker = None
+        if title or title_var is not None:
             title_row = tk.Frame(outer, bg=COLORS["panel"])
             title_row.pack(fill=tk.X, padx=padx, pady=(pady, 6))
             if accent:
-                tk.Frame(title_row, bg=accent, width=8, height=8).pack(side=tk.LEFT, padx=(0, 8), pady=(4, 0))
-            ttk.Label(title_row, text=title.upper(), style="CardTitle.TLabel").pack(side=tk.LEFT, anchor="w")
+                outer.accent_marker = tk.Frame(title_row, bg=accent, width=8, height=8)
+                outer.accent_marker.pack(side=tk.LEFT, padx=(0, 8), pady=(4, 0))
+            if title_var is not None:
+                ttk.Label(title_row, textvariable=title_var, style="CardTitle.TLabel").pack(side=tk.LEFT, anchor="w")
+            else:
+                ttk.Label(title_row, text=title.upper(), style="CardTitle.TLabel").pack(side=tk.LEFT, anchor="w")
+            outer.title_row = title_row
         content = tk.Frame(outer, bg=COLORS["panel"])
-        content.pack(fill=tk.BOTH, expand=True, padx=padx, pady=(0 if title else pady, pady))
+        content.pack(fill=tk.BOTH, expand=True, padx=padx, pady=(0 if outer.title_row else pady, pady))
         return outer, content
 
     def form_label(self, parent, text, row, col, padx=(0, 8)):
@@ -810,82 +1116,244 @@ class MotorDatalogGui(tk.Tk):
         right_widget.grid(row=row, column=3, sticky="ew", pady=(0, 6))
 
     def build_left_panel(self, parent):
-        """Build the left configuration rail."""
+        """Build the left rail: connection, test profile, profile settings, logging."""
         parent.grid_columnconfigure(0, weight=1)
-        for row in range(4):
-            parent.grid_rowconfigure(row, weight=0)
+        self.build_connection_card(parent).grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.build_quick_profile_panel(parent).grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        self.build_settings_card(parent).grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        self.build_logging_card(parent).grid(row=3, column=0, sticky="ew", pady=(0, 10))
 
-        conn_card, conn = self.card(parent, "Board connection", padx=14, pady=12, accent=COLORS["cyan"])
-        conn_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+    def build_connection_card(self, parent):
+        """Build the serial-port card."""
+        conn_card, conn = self.card(parent, "Connection", padx=14, pady=12, accent=COLORS["cyan"])
         conn.grid_columnconfigure(0, weight=1)
-        conn.grid_columnconfigure(1, weight=0)
 
-        self.form_label(conn, "Port COM", 0, 0)
-        self.port_combo = ttk.Combobox(conn, textvariable=self.port_var, state="readonly", width=28)
+        self.form_label(conn, "COM port", 0, 0)
+        self.form_label(conn, "Baud", 0, 1)
+        self.port_combo = ttk.Combobox(conn, textvariable=self.port_var, state="readonly", width=24)
         self.combo_widgets["port"] = self.port_combo
-        self.port_combo.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 10))
+        self.port_combo.grid(row=1, column=0, sticky="ew", padx=(0, 8))
         self.port_combo.bind("<<ComboboxSelected>>", self.on_port_selected)
 
-        self.refresh_button = self.small_button(conn, "Scan", self.refresh_ports, COLORS["cyan"])
-        self.refresh_button.grid(row=1, column=1, sticky="ew", pady=(0, 10))
-
-        self.form_label(conn, "Baud rate", 2, 0)
-        self.baud_entry = ttk.Entry(conn, textvariable=self.baud_var)
+        self.baud_entry = ttk.Entry(conn, textvariable=self.baud_var, width=8)
         self.entry_widgets["baud"] = self.baud_entry
-        self.baud_entry.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.baud_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8))
 
-        profile_card, profile = self.card(parent, "Motor profile", padx=14, pady=12, accent=COLORS["lime"])
-        profile_card.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        profile.grid_columnconfigure(0, weight=0)
-        profile.grid_columnconfigure(1, weight=1, minsize=76)
-        profile.grid_columnconfigure(2, weight=0)
-        profile.grid_columnconfigure(3, weight=1, minsize=76)
+        self.refresh_button = self.small_button(conn, "Scan", self.refresh_ports, COLORS["cyan"])
+        self.refresh_button.grid(row=1, column=2, sticky="ew")
+        return conn_card
 
-        self.profile_combo = ttk.Combobox(profile, textvariable=self.profile_var, values=list(self.profiles.keys()), state="readonly")
+    def build_quick_profile_panel(self, parent):
+        """Build the quick-select test-profile tiles and the safety note."""
+        profile_card, content = self.card(parent, "Test profile", padx=14, pady=12, accent=COLORS["lime"])
+        tk.Label(
+            profile_card.title_row,
+            text="Pick one, then press START",
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 8),
+        ).pack(side=tk.RIGHT, pady=(3, 0))
+        content.grid_columnconfigure(0, weight=1, uniform="quick_profile")
+        content.grid_columnconfigure(1, weight=1, uniform="quick_profile")
+
+        for index, name in enumerate(QUICK_PROFILE_OPTIONS):
+            tile = self.build_quick_profile_tile(content, name)
+            tile.grid(
+                row=index // 2,
+                column=index % 2,
+                sticky="ew",
+                padx=(0, 4) if index % 2 == 0 else (4, 0),
+                pady=(0, 8),
+            )
+
+        safety = tk.Frame(content, bg=COLORS["panel_soft"])
+        safety.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.profile_safety_bar = tk.Frame(safety, bg=COLORS["lime"], width=3)
+        self.profile_safety_bar.pack(side=tk.LEFT, fill=tk.Y)
+        self.profile_safety_label = tk.Label(
+            safety,
+            textvariable=self.profile_safety_var,
+            bg=COLORS["panel_soft"],
+            fg=COLORS["lime"],
+            font=("Segoe UI Semibold", 8),
+            justify="left",
+            anchor="w",
+            wraplength=LEFT_PANEL_WIDTH - 72,
+        )
+        self.profile_safety_label.pack(side=tk.LEFT, fill=tk.X, padx=9, pady=6)
+        return profile_card
+
+    def build_quick_profile_tile(self, parent, name):
+        """Create one selectable, keyboard-accessible test-profile tile."""
+        profile = QUICK_PROFILES[name]
+        tile = tk.Frame(
+            parent,
+            bg=COLORS["panel_2"],
+            height=54,
+            cursor="hand2",
+            takefocus=1,
+            highlightthickness=2,
+            highlightbackground=COLORS["border"],
+            highlightcolor=profile.accent,
+        )
+        tile.pack_propagate(False)
+
+        accent_bar = tk.Frame(tile, bg=profile.accent, width=4)
+        accent_bar.pack(side=tk.LEFT, fill=tk.Y)
+        signal = tk.Canvas(tile, width=30, height=30, bg=COLORS["panel_2"], highlightthickness=0)
+        signal.pack(side=tk.LEFT, padx=(8, 6))
+
+        text_block = tk.Frame(tile, bg=COLORS["panel_2"])
+        text_block.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=(7, 5))
+        title = tk.Label(
+            text_block,
+            text=profile.title,
+            bg=COLORS["panel_2"],
+            fg=COLORS["text"],
+            font=("Segoe UI Semibold", 10),
+            anchor="w",
+        )
+        title.pack(fill=tk.X)
+        summary = tk.Label(
+            text_block,
+            text=profile.summary,
+            bg=COLORS["panel_2"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 8),
+            anchor="w",
+        )
+        summary.pack(fill=tk.X, pady=(1, 0))
+
+        badge = tk.Label(tile, text="", bg=COLORS["panel_2"], fg=COLORS["lime"], font=("Segoe UI Semibold", 7))
+        badge.place(relx=1.0, x=-6, y=4, anchor="ne")
+
+        for widget in (tile, accent_bar, signal, text_block, title, summary, badge):
+            widget.bind("<Button-1>", lambda _event, selected=name: self.select_quick_profile(selected))
+            widget.bind("<Enter>", lambda _event, selected=name: self.set_quick_profile_hover(selected, True))
+            widget.bind("<Leave>", lambda _event, selected=name: self.set_quick_profile_hover(selected, False))
+        for sequence in ("<Return>", "<space>"):
+            tile.bind(sequence, lambda _event, selected=name: self.select_quick_profile(selected))
+        for sequence, step in (("<Left>", -1), ("<Right>", 1), ("<Up>", -2), ("<Down>", 2)):
+            tile.bind(sequence, lambda _event, current=name, delta=step: self.move_quick_profile_selection(current, delta))
+
+        self.quick_profile_cards[name] = {
+            "tile": tile,
+            "signal": signal,
+            "text_block": text_block,
+            "title": title,
+            "summary": summary,
+            "badge": badge,
+            "hover": False,
+        }
+        self.draw_quick_profile_signal(signal, name, COLORS["panel_2"], profile.accent)
+        return tile
+
+    @staticmethod
+    def draw_quick_profile_signal(canvas, name, background, color):
+        """Draw the speed (top) and load (bottom) pattern of a test profile."""
+        profile = QUICK_PROFILES[name]
+        canvas.configure(bg=background)
+        canvas.delete("all")
+        if name == QUICK_PROFILE_COLLECT_ONLY:
+            canvas.create_line(3, 10, 27, 10, fill=color, width=2, dash=(2, 3))
+            canvas.create_line(3, 21, 27, 21, fill=color, width=2, dash=(2, 3))
+            return
+        if name == QUICK_PROFILE_CUSTOM:
+            for y, knob_x in ((10, 19), (21, 10)):
+                canvas.create_line(3, y, 27, y, fill=COLORS["border_hover"], width=2)
+                canvas.create_oval(knob_x - 4, y - 4, knob_x + 4, y + 4, fill=color, outline="")
+            return
+        speed = (3, 12, 9, 5, 15, 13, 21, 6, 27, 10) if profile.speed_variable else (3, 9, 27, 9)
+        load = (3, 22, 8, 17, 14, 25, 20, 18, 27, 22) if profile.load_variable else (3, 21, 27, 21)
+        canvas.create_line(*speed, fill=color, width=2)
+        canvas.create_line(*load, fill=color, width=2)
+
+    def build_settings_card(self, parent):
+        """Build the card showing preset details or the Custom profile editor."""
+        settings_card, content = self.card(
+            parent,
+            padx=14,
+            pady=12,
+            accent=COLORS["lime"],
+            title_var=self.settings_title_var,
+        )
+        self.settings_accent = settings_card.accent_marker
+        content.grid_columnconfigure(0, weight=1)
+
+        self.preset_details_frame = tk.Frame(content, bg=COLORS["panel"])
+        self.preset_details_frame.grid(row=0, column=0, sticky="ew")
+        self.preset_details_frame.grid_columnconfigure(1, weight=1)
+
+        self.custom_editor_frame = tk.Frame(content, bg=COLORS["panel"])
+        self.custom_editor_frame.grid(row=1, column=0, sticky="ew")
+        self.build_custom_editor(self.custom_editor_frame)
+        return settings_card
+
+    def build_custom_editor(self, editor):
+        """Build the editable speed, current-limit, ramp and load fields."""
+        editor.grid_columnconfigure(0, weight=0)
+        editor.grid_columnconfigure(1, weight=1, minsize=76)
+        editor.grid_columnconfigure(2, weight=0)
+        editor.grid_columnconfigure(3, weight=1, minsize=76)
+
+        self.form_label(editor, "Saved profile", 0, 0)
+        profile_row = tk.Frame(editor, bg=COLORS["panel"])
+        profile_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 12))
+        profile_row.grid_columnconfigure(0, weight=1)
+
+        self.profile_combo = ttk.Combobox(profile_row, textvariable=self.profile_var, values=list(self.profiles.keys()), state="readonly")
         self.combo_widgets["profile"] = self.profile_combo
-        self.profile_combo.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 12))
+        self.profile_combo.grid(row=0, column=0, sticky="ew")
         self.profile_combo.bind("<<ComboboxSelected>>", self.on_profile_changed)
 
-        self.speed_rpm_entry = ttk.Entry(profile, textvariable=self.speed_rpm_var, width=8)
+        self.save_profile_button = self.small_button(profile_row, "Save as…", self.save_current_profile, COLORS["lime"])
+        self.save_profile_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.delete_profile_button = self.small_button(profile_row, "Delete", self.delete_current_profile, COLORS["danger"])
+        self.delete_profile_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        self.delete_profile_button.grid_remove()
+
+        self.speed_rpm_entry = ttk.Entry(editor, textvariable=self.speed_rpm_var, width=8)
         self.entry_widgets["speed_rpm"] = self.speed_rpm_entry
-        self.speed_hz_entry = ttk.Entry(profile, textvariable=self.speed_hz_var, width=8)
+        self.speed_hz_entry = ttk.Entry(editor, textvariable=self.speed_hz_var, width=8)
         self.entry_widgets["speed_hz"] = self.speed_hz_entry
-        self.compact_form_row(profile, "rpm", self.speed_rpm_entry, "Elec. Hz", self.speed_hz_entry, 1)
+        self.compact_form_row(editor, "Speed (rpm)", self.speed_rpm_entry, "Elec. (Hz)", self.speed_hz_entry, 2)
 
-        self.pole_entry = ttk.Entry(profile, textvariable=self.pole_pairs_var, width=8)
+        self.pole_entry = ttk.Entry(editor, textvariable=self.pole_pairs_var, width=8)
         self.entry_widgets["pole_pairs"] = self.pole_entry
-        self.accel_entry = ttk.Entry(profile, textvariable=self.accel_var, width=8)
+        self.accel_entry = ttk.Entry(editor, textvariable=self.accel_var, width=8)
         self.entry_widgets["accel"] = self.accel_entry
-        self.compact_form_row(profile, "Pole pairs", self.pole_entry, "Accel.", self.accel_entry, 2)
+        self.compact_form_row(editor, "Pole pairs", self.pole_entry, "Ramp (Hz/s)", self.accel_entry, 3)
 
-        self.iq_entry = ttk.Entry(profile, textvariable=self.iq_limit_var, width=8)
+        self.iq_entry = ttk.Entry(editor, textvariable=self.iq_limit_var, width=8)
         self.entry_widgets["iq_limit"] = self.iq_entry
-        self.hard_entry = ttk.Entry(profile, textvariable=self.hard_limit_var, width=8)
+        self.hard_entry = ttk.Entry(editor, textvariable=self.hard_limit_var, width=8)
         self.entry_widgets["hard_limit"] = self.hard_entry
-        self.compact_form_row(profile, "Iq limit", self.iq_entry, "Hard stop", self.hard_entry, 3)
+        self.compact_form_row(editor, "Iq limit (A)", self.iq_entry, "Hard stop (A)", self.hard_entry, 4)
 
         self.load_mode_combo = ttk.Combobox(
-            profile,
+            editor,
             textvariable=self.load_mode_var,
             values=LOAD_MODES,
             state="readonly",
             width=8,
         )
         self.combo_widgets["load_mode"] = self.load_mode_combo
-        self.load_setpoint_entry = ttk.Entry(profile, textvariable=self.load_setpoint_var, width=8)
+        self.load_setpoint_entry = ttk.Entry(editor, textvariable=self.load_setpoint_var, width=8)
         self.entry_widgets["load_setpoint"] = self.load_setpoint_entry
-        self.compact_form_row(
-            profile,
-            "TB-200S mode",
-            self.load_mode_combo,
-            "Load (A)",
-            self.load_setpoint_entry,
-            4,
-        )
+        self.compact_form_row(editor, "TB-200S", self.load_mode_combo, "Load (A)", self.load_setpoint_entry, 5)
 
-        self.save_profile_button = self.small_button(profile, "Save profile", self.save_current_profile, COLORS["lime"])
-        self.save_profile_button.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(6, 0))
-        self.save_profile_button.grid_remove()
+        ttk.Label(
+            editor,
+            text=(
+                f"Sent as CFG + LOAD + START. Limits: {MIN_TARGET_SPEED_RPM:g}–{MAX_TARGET_SPEED_RPM:g} rpm, "
+                f"≤ {MAX_IQ_LIMIT_A:g} A, ≤ {MAX_ACCEL_ELEC_HZ_S:g} Hz/s, "
+                f"{MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A. "
+                "Editing a value switches to Custom (unsaved)."
+            ),
+            style="CardMuted.TLabel",
+            wraplength=LEFT_PANEL_WIDTH - 64,
+            justify="left",
+        ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
         self.motor_profile_widgets = [
             self.profile_combo,
@@ -899,55 +1367,73 @@ class MotorDatalogGui(tk.Tk):
             self.load_setpoint_entry,
         ]
 
-        csv_card, csv_box = self.card(parent, "CSV output", padx=14, pady=12, accent=COLORS["amber"])
-        csv_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        csv_box.grid_columnconfigure(0, weight=1)
-        csv_box.grid_columnconfigure(1, weight=0)
+    def build_logging_card(self, parent):
+        """Build the CSV output and sampling-period card."""
+        logging_card, box = self.card(parent, "Logging", padx=14, pady=12, accent=COLORS["amber"])
+        box.grid_columnconfigure(0, weight=1)
+        box.grid_columnconfigure(1, weight=1)
 
-        self.form_label(csv_box, "Output file", 0, 0)
-        self.csv_entry = ttk.Entry(csv_box, textvariable=self.csv_path_var)
+        self.form_label(box, "Output CSV", 0, 0)
+        file_row = tk.Frame(box, bg=COLORS["panel"])
+        file_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        file_row.grid_columnconfigure(0, weight=1)
+        self.csv_entry = ttk.Entry(file_row, textvariable=self.csv_path_var)
         self.entry_widgets["csv_path"] = self.csv_entry
-        self.csv_entry.grid(row=1, column=0, sticky="ew", padx=(0, 10))
-        self.small_button(csv_box, "Browse", self.choose_csv_file, COLORS["amber"]).grid(row=1, column=1, sticky="ew")
+        self.csv_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.csv_new_button = self.small_button(file_row, "New", self.new_csv_path, COLORS["amber"])
+        self.csv_new_button.grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        self.csv_browse_button = self.small_button(file_row, "Browse", self.choose_csv_file, COLORS["amber"])
+        self.csv_browse_button.grid(row=0, column=2, sticky="ew")
 
-        acq_card, acq = self.card(parent, "Acquisition", padx=14, pady=12, accent=COLORS["violet"])
-        acq_card.grid(row=3, column=0, sticky="ew", pady=(0, 10))
-        for i in range(2):
-            acq.grid_columnconfigure(i, weight=1)
-
-        self.form_label(acq, "Session mode", 0, 0)
-        self.acquisition_mode_combo = ttk.Combobox(
-            acq,
-            textvariable=self.acquisition_mode_var,
-            values=ACQUISITION_MODES,
-            state="readonly",
-        )
-        self.combo_widgets["acquisition_mode"] = self.acquisition_mode_combo
-        self.acquisition_mode_combo.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 10))
-
-        self.datalog_entry = ttk.Entry(acq, textvariable=self.datalog_ms_var)
+        self.datalog_entry = ttk.Entry(box, textvariable=self.datalog_ms_var)
         self.entry_widgets["datalog_ms"] = self.datalog_entry
-        self.form_row(acq, "DATA period (ms)", self.datalog_entry, 2, 0)
+        self.form_row(box, "DATA period (ms)", self.datalog_entry, 2, 0)
 
-        self.ds18b20_entry = ttk.Entry(acq, textvariable=self.ds18b20_ms_var)
+        self.ds18b20_entry = ttk.Entry(box, textvariable=self.ds18b20_ms_var)
         self.entry_widgets["ds18b20_ms"] = self.ds18b20_entry
-        self.form_row(acq, "DS18B20 period (ms)", self.ds18b20_entry, 2, 1)
+        self.form_row(box, "DS18B20 period (ms)", self.ds18b20_entry, 2, 1)
 
-        self.warning_label = ttk.Label(acq, textvariable=self.warning_var, style="Warn.TLabel", wraplength=340)
-        self.warning_label.configure(wraplength=380)
+        self.warning_label = ttk.Label(box, textvariable=self.warning_var, style="Warn.TLabel", wraplength=LEFT_PANEL_WIDTH - 64)
         self.warning_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
-
+        return logging_card
 
     def build_live_cards(self, parent):
-        """Build the live-value cards."""
+        """Build the session card and live-value cards in a responsive grid."""
         self.live_frame = tk.Frame(parent, bg=COLORS["bg"])
         self.live_frame.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        for i in range(4):
-            self.live_frame.grid_columnconfigure(i, weight=1, uniform="live")
 
         self.live_card_frames = {}
+        self.live_card_order = []
+        self.build_session_card()
         for key in self.live_fields:
             self.add_live_card(key)
+        self.live_frame.bind("<Configure>", self.on_live_frame_configure)
+
+    def build_session_card(self):
+        """Build the card showing elapsed time, logged rows, and data rate."""
+        frame = tk.Frame(self.live_frame, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        top = tk.Frame(frame, bg=COLORS["panel"])
+        top.grid(row=0, column=0, sticky="ew", padx=12, pady=(9, 0))
+        top.grid_columnconfigure(0, weight=1)
+        ttk.Label(top, text="SESSION", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
+        self.session_detail_label = tk.Label(
+            top,
+            textvariable=self.session_detail_var,
+            bg=COLORS["panel"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 8),
+        )
+        self.session_detail_label.grid(row=0, column=1, sticky="e", padx=(8, 0))
+
+        value_line = tk.Frame(frame, bg=COLORS["panel"])
+        value_line.grid(row=1, column=0, sticky="ew", padx=12, pady=(2, 12))
+        ttk.Label(value_line, textvariable=self.session_elapsed_var, style="Value.TLabel").pack(side=tk.LEFT)
+
+        self.live_card_frames["__session__"] = frame
+        self.live_card_order.append("__session__")
+        self.layout_live_cards()
 
     def add_live_card(self, key):
         """Dynamically add a live-value card."""
@@ -958,14 +1444,13 @@ class MotorDatalogGui(tk.Tk):
             self.live_vars[key] = tk.StringVar(value=self.default_live_value(key))
             self.live_fields.append(key)
 
-        idx = len(self.live_card_frames)
         title, unit = KNOWN_FIELDS.get(key, (key, ""))
         accent = FIELD_ACCENTS.get(key, COLORS["accent"])
 
         frame = tk.Frame(self.live_frame, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
-        frame.grid(row=idx // 4, column=idx % 4, sticky="ew", padx=6, pady=6)
         frame.grid_columnconfigure(0, weight=1)
         self.live_card_frames[key] = frame
+        self.live_card_order.append(key)
 
         top = tk.Frame(frame, bg=COLORS["panel"])
         top.grid(row=0, column=0, sticky="ew", padx=12, pady=(9, 0))
@@ -979,6 +1464,34 @@ class MotorDatalogGui(tk.Tk):
         value_label.pack(side=tk.LEFT)
         self.live_value_labels[key] = value_label
         ttk.Label(value_line, text=f" {unit}", style="Unit.TLabel").pack(side=tk.LEFT, pady=(9, 0))
+        self.layout_live_cards()
+
+    def on_live_frame_configure(self, event):
+        """Adapt the number of live-card columns to the available width."""
+        columns = max(2, min(5, event.width // LIVE_CARD_MIN_WIDTH))
+        if columns != self.live_columns:
+            self.live_columns = columns
+            self.layout_live_cards()
+
+    def layout_live_cards(self):
+        """Place live cards in a grid aligned with the panels below it."""
+        if self.live_frame is None:
+            return
+        columns = self.live_columns or 5
+        rows = max(1, math.ceil(len(self.live_card_order) / columns))
+        for column in range(6):
+            self.live_frame.grid_columnconfigure(column, weight=0, uniform="")
+        for column in range(columns):
+            self.live_frame.grid_columnconfigure(column, weight=1, uniform="live")
+        for index, key in enumerate(self.live_card_order):
+            row, column = divmod(index, columns)
+            self.live_card_frames[key].grid(
+                row=row,
+                column=column,
+                sticky="nsew",
+                padx=(0 if column == 0 else 5, 0 if column == columns - 1 else 5),
+                pady=(0 if row == 0 else 5, 0 if row == rows - 1 else 5),
+            )
 
     def build_plot_panel(self, parent):
         """Build the live-chart panel."""
@@ -1050,7 +1563,7 @@ class MotorDatalogGui(tk.Tk):
             variable=self.plot_enabled_vars[key],
             command=self.mark_plot_dirty,
         )
-        cb.pack(anchor="w", pady=4)
+        cb.pack(anchor="w", pady=2)
         self.plot_checkbuttons[key] = cb
 
     def register_csv_fields_for_plot(self, columns):
@@ -1081,6 +1594,17 @@ class MotorDatalogGui(tk.Tk):
         log_content.grid_rowconfigure(0, weight=1)
         log_content.grid_columnconfigure(0, weight=1)
 
+        tools = tk.Frame(log_card.title_row, bg=COLORS["panel"])
+        tools.pack(side=tk.RIGHT)
+        ttk.Checkbutton(
+            tools,
+            text="Show DATA frames",
+            variable=self.show_data_frames_var,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        clear_button = self.small_button(tools, "Clear", self.clear_log, COLORS["rose"])
+        clear_button.configure(pady=3)
+        clear_button.pack(side=tk.LEFT)
+
         self.log_text = tk.Text(
             log_content,
             height=7,
@@ -1095,7 +1619,7 @@ class MotorDatalogGui(tk.Tk):
             bd=0,
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(log_content, command=self.log_text.yview)
+        scroll = ttk.Scrollbar(log_content, command=self.log_text.yview, style="Dark.Vertical.TScrollbar")
         scroll.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scroll.set)
 
@@ -1108,7 +1632,7 @@ class MotorDatalogGui(tk.Tk):
         self.speed_rpm_var.trace_add("write", self.on_speed_rpm_changed)
         self.speed_hz_var.trace_add("write", self.on_speed_hz_changed)
         self.pole_pairs_var.trace_add("write", self.on_pole_pairs_changed)
-        self.acquisition_mode_var.trace_add("write", self.on_acquisition_mode_changed)
+        self.quick_profile_var.trace_add("write", self.on_quick_profile_changed)
         self.load_mode_var.trace_add("write", self.on_load_mode_changed)
 
         for var in [
@@ -1316,66 +1840,258 @@ class MotorDatalogGui(tk.Tk):
         return float(profile.speed_value)
 
     def update_save_profile_button(self):
-        """Show or hide the profile-save button.
-
-        The button is visible only for the ``"Custom"`` profile.
-        """
+        """Show Save for unsaved Custom settings, or Delete for a saved profile."""
         if not hasattr(self, "save_profile_button"):
             return
-        if (self.profile_var.get() == CUSTOM_PROFILE_NAME and
-                not self.is_idle_acquisition_mode()):
+        button_state = tk.DISABLED if self.controls_locked() else tk.NORMAL
+        if self.profile_var.get() == CUSTOM_PROFILE_NAME:
+            self.delete_profile_button.grid_remove()
             self.save_profile_button.grid()
+            self.save_profile_button.configure(state=button_state)
         else:
             self.save_profile_button.grid_remove()
+            self.delete_profile_button.grid()
+            self.delete_profile_button.configure(state=button_state)
+
+    def controls_locked(self):
+        """Return whether a session owns the serial port, freezing all settings."""
+        return self.is_running or self.is_launching or self.is_stopping
+
+    def selected_quick_profile(self):
+        """Return the canonical name of the selected test profile."""
+        try:
+            return normalize_quick_profile(self.quick_profile_var.get())
+        except ValueError:
+            return QUICK_PROFILE_COLLECT_ONLY
 
     def is_idle_acquisition_mode(self):
-        """Return whether the requested session only acquires data with the motor stopped."""
-        return self.acquisition_mode_var.get() == ACQUISITION_MODE_IDLE
+        """Return whether the selected profile only logs with the motor stopped."""
+        return self.selected_quick_profile() == QUICK_PROFILE_COLLECT_ONLY
 
-    def update_acquisition_mode_ui(self):
-        """Adapt fields and actions to motor or acquisition-only mode."""
-        if not hasattr(self, "acquisition_mode_combo"):
+    def is_custom_selected(self):
+        """Return whether the user-editable Custom profile is selected."""
+        return self.selected_quick_profile() == QUICK_PROFILE_CUSTOM
+
+    def select_quick_profile(self, name):
+        """Select a test-profile tile, unless a session is in progress."""
+        self.hide_profile_tooltip()
+        if self.controls_locked():
+            return "break"
+        self.quick_profile_var.set(name)
+        tile = self.quick_profile_cards.get(name, {}).get("tile")
+        if tile is not None:
+            tile.focus_set()
+        return "break"
+
+    def move_quick_profile_selection(self, current, step):
+        """Move the selection with the arrow keys across the two-column tile grid."""
+        index = QUICK_PROFILE_OPTIONS.index(current)
+        target = index + step
+        stays_on_row = abs(step) != 1 or target // 2 == index // 2
+        if 0 <= target < len(QUICK_PROFILE_OPTIONS) and stays_on_row:
+            self.select_quick_profile(QUICK_PROFILE_OPTIONS[target])
+        return "break"
+
+    def set_quick_profile_hover(self, name, hovering):
+        """Track pointer hover over a tile: refresh its border and its tooltip."""
+        widgets = self.quick_profile_cards.get(name)
+        if widgets is None or widgets["hover"] == hovering:
+            return
+        widgets["hover"] = hovering
+        self.hide_profile_tooltip()
+        if hovering:
+            self.profile_tooltip_after_id = self.after(450, lambda: self.show_profile_tooltip(name))
+        self.refresh_quick_profile_cards()
+
+    def show_profile_tooltip(self, name):
+        """Show the full description of a test profile under its tile."""
+        self.profile_tooltip_after_id = None
+        widgets = self.quick_profile_cards.get(name)
+        if widgets is None or not widgets["hover"]:
+            return
+        tile = widgets["tile"]
+        tooltip = tk.Toplevel(self)
+        tooltip.wm_overrideredirect(True)
+        tooltip.attributes("-topmost", True)
+        tk.Label(
+            tooltip,
+            text=QUICK_PROFILES[name].description,
+            bg=COLORS["panel_lift"],
+            fg=COLORS["text"],
+            font=("Segoe UI", 9),
+            wraplength=300,
+            justify="left",
+            padx=10,
+            pady=7,
+            highlightthickness=1,
+            highlightbackground=COLORS["border_hover"],
+        ).pack()
+        panel = tile.master
+        tooltip.wm_geometry(f"+{panel.winfo_rootx() + panel.winfo_width() + 18}+{tile.winfo_rooty()}")
+        self.profile_tooltip = tooltip
+
+    def hide_profile_tooltip(self):
+        """Cancel or close the test-profile tooltip."""
+        if self.profile_tooltip_after_id is not None:
+            self.after_cancel(self.profile_tooltip_after_id)
+            self.profile_tooltip_after_id = None
+        if self.profile_tooltip is not None:
+            self.profile_tooltip.destroy()
+            self.profile_tooltip = None
+
+    def refresh_quick_profile_cards(self):
+        """Update tile colors and badges for selection, hover, lock, and live states."""
+        if not self.quick_profile_cards:
             return
 
-        controls_locked = self.is_running or self.is_launching or self.is_stopping
-        idle_mode = self.is_idle_acquisition_mode()
+        selected = self.selected_quick_profile()
+        locked = self.controls_locked()
+        for name, widgets in self.quick_profile_cards.items():
+            profile = QUICK_PROFILES[name]
+            is_selected = name == selected
+            is_active = locked and name == self.active_quick_profile
+            dimmed = locked and not is_selected
+            background = COLORS["panel_3"] if is_selected else COLORS["panel_2"]
+            if is_selected:
+                border = profile.accent
+            elif widgets["hover"] and not locked:
+                border = COLORS["border_hover"]
+            else:
+                border = COLORS["border"]
 
-        self.acquisition_mode_combo.configure(state="disabled" if controls_locked else "readonly")
+            widgets["tile"].configure(
+                bg=background,
+                highlightbackground=border,
+                cursor="arrow" if locked else "hand2",
+                takefocus=0 if locked else 1,
+            )
+            for key in ("text_block", "title", "summary", "badge"):
+                widgets[key].configure(bg=background)
+            widgets["title"].configure(fg=COLORS["text_dim"] if dimmed else COLORS["text"])
+            widgets["summary"].configure(fg=COLORS["text_dim"] if dimmed else COLORS["muted"])
 
+            if is_active and self.is_stopping:
+                widgets["badge"].configure(text="STOPPING", fg=COLORS["muted"])
+            elif is_active and self.is_launching:
+                widgets["badge"].configure(text="STARTING", fg=COLORS["amber"])
+            elif is_active:
+                widgets["badge"].configure(text="● LIVE", fg=COLORS["lime"])
+            else:
+                widgets["badge"].configure(text="")
+
+            self.draw_quick_profile_signal(
+                widgets["signal"],
+                name,
+                background,
+                COLORS["text_dim"] if dimmed else profile.accent,
+            )
+
+    def on_quick_profile_changed(self, *_args):
+        """Refresh description, settings panel, controls, and validation."""
+        name = self.selected_quick_profile()
+        if name == QUICK_PROFILE_COLLECT_ONLY:
+            safety_text = "MOTOR FORCED OFF  ·  ACQ_START stops the motor before logging"
+            safety_color = COLORS["muted"]
+        else:
+            safety_text = (
+                f"SAFE START  ·  TB-200S held at {MIN_LOAD_SETPOINT_A:.2f} A "
+                "until the motor reaches RUN"
+            )
+            safety_color = COLORS["lime"]
+        self.profile_safety_var.set(safety_text)
+        if hasattr(self, "profile_safety_label"):
+            self.profile_safety_label.configure(fg=safety_color)
+            self.profile_safety_bar.configure(bg=safety_color)
+
+        self.update_profile_details()
+        self.update_controls_state()
+        self.validate_form()
+
+    def update_profile_details(self):
+        """Show the read-only parameters of a preset, or the Custom editor."""
+        if self.preset_details_frame is None or self.custom_editor_frame is None:
+            return
+
+        name = self.selected_quick_profile()
+        profile = QUICK_PROFILES[name]
+        if self.settings_accent is not None:
+            self.settings_accent.configure(bg=profile.accent)
+
+        if name == QUICK_PROFILE_CUSTOM:
+            self.settings_title_var.set("CUSTOM SETTINGS")
+            self.preset_details_frame.grid_remove()
+            self.custom_editor_frame.grid()
+        else:
+            if name == QUICK_PROFILE_COLLECT_ONLY:
+                self.settings_title_var.set("COLLECT ONLY  ·  NO MOTOR")
+            else:
+                self.settings_title_var.set(f"{profile.title.upper()}  ·  FIRMWARE PRESET")
+
+            for child in self.preset_details_frame.winfo_children():
+                child.destroy()
+            for row, (label, value) in enumerate(profile.parameters):
+                is_command = label == "UART command"
+                tk.Label(
+                    self.preset_details_frame,
+                    text=label,
+                    bg=COLORS["panel"],
+                    fg=COLORS["muted"],
+                    font=("Segoe UI", 9),
+                    anchor="w",
+                ).grid(row=row, column=0, sticky="nw", padx=(0, 14), pady=3)
+                tk.Label(
+                    self.preset_details_frame,
+                    text=value,
+                    bg=COLORS["panel"],
+                    fg=COLORS["accent"] if is_command else COLORS["text"],
+                    font=("Cascadia Mono", 9) if is_command else ("Segoe UI Semibold", 9),
+                    anchor="w",
+                    justify="left",
+                    wraplength=LEFT_PANEL_WIDTH - 190,
+                ).grid(row=row, column=1, sticky="w", pady=3)
+            self.custom_editor_frame.grid_remove()
+            self.preset_details_frame.grid()
+
+        self.after_idle(self.on_left_content_configure)
+
+    def update_controls_state(self):
+        """Enable only the inputs relevant to the selected profile and session state."""
+        if self.custom_editor_frame is None:
+            return
+
+        locked = self.controls_locked()
+        entry_state = "disabled" if locked else "normal"
+        button_state = tk.DISABLED if locked else tk.NORMAL
+
+        self.port_combo.configure(state="disabled" if locked else "readonly")
+        for widget in (self.baud_entry, self.csv_entry, self.datalog_entry, self.ds18b20_entry):
+            widget.configure(state=entry_state)
+        for button in (self.refresh_button, self.csv_new_button, self.csv_browse_button):
+            button.configure(state=button_state, cursor="arrow" if locked else "hand2")
+
+        editable = self.is_custom_selected() and not locked
+        load_is_variable = self.load_mode_var.get() == LOAD_MODE_VARIABLE
         for widget in self.motor_profile_widgets:
             if widget in {self.profile_combo, self.load_mode_combo}:
-                widget.configure(state="disabled" if (idle_mode or controls_locked) else "readonly")
+                widget.configure(state="readonly" if editable else "disabled")
             elif widget is self.load_setpoint_entry:
-                load_is_variable = self.load_mode_var.get() == LOAD_MODE_VARIABLE
-                widget.configure(
-                    state="disabled"
-                    if (idle_mode or controls_locked or load_is_variable)
-                    else "normal"
-                )
+                widget.configure(state="normal" if editable and not load_is_variable else "disabled")
             else:
-                widget.configure(state="disabled" if (idle_mode or controls_locked) else "normal")
+                widget.configure(state="normal" if editable else "disabled")
+        self.update_save_profile_button()
 
-        if idle_mode:
-            self.save_profile_button.grid_remove()
-            self.start_button.configure(text="START LOGGING")
-        else:
-            self.update_save_profile_button()
-            self.start_button.configure(text="START")
-
-    def on_acquisition_mode_changed(self, *_args):
-        """Handle switching between motor control and stopped-motor acquisition."""
-        self.update_acquisition_mode_ui()
-        self.validate_form()
+        self.start_button.configure(text="START LOGGING" if self.is_idle_acquisition_mode() else "START")
+        self.refresh_quick_profile_cards()
 
     def on_load_mode_changed(self, *_args):
         """Update the load field and profile state after a fixed/variable change."""
-        self.update_acquisition_mode_ui()
-        if not self.is_idle_acquisition_mode():
+        self.update_controls_state()
+        if self.is_custom_selected():
             self.switch_to_custom_due_to_edit()
         self.validate_form()
 
     def switch_to_custom_due_to_edit(self):
-        """Switch to the ``"Custom"`` profile after editing.
+        """Switch the saved-profile selector to unsaved ``"Custom"`` settings.
 
         Skip this switch while applying a profile or automatically updating rpm/Hz,
         to avoid accidental profile changes.
@@ -1392,7 +2108,7 @@ class MotorDatalogGui(tk.Tk):
         Args:
             *_args: Unused arguments supplied by ``trace_add``.
         """
-        if not self.is_idle_acquisition_mode():
+        if self.is_custom_selected():
             self.switch_to_custom_due_to_edit()
         self.validate_form()
 
@@ -1498,12 +2214,6 @@ class MotorDatalogGui(tk.Tk):
             if not overwrite:
                 return
 
-        if not messagebox.askyesno(
-            "Confirm save",
-            f"Save the custom profile as:\n\n{name}\n\nContinue?",
-        ):
-            return
-
         cfg = self.parse_config()
         profile = MotorProfile(
             name=name,
@@ -1525,10 +2235,34 @@ class MotorDatalogGui(tk.Tk):
 
         try:
             self.save_profiles_to_disk()
-            self.log(f"Profile saved: {name}")
-            messagebox.showinfo("Profile saved", f"Profile '{name}' has been saved.")
+            self.log(f"Profile saved: {name} → {self.paths.profile_store_path}")
         except Exception as exc:
             messagebox.showerror("Save error", f"Could not save the profile:\n{exc}")
+
+    def delete_current_profile(self):
+        """Delete the selected saved profile; its values stay in the editor as Custom."""
+        name = self.profile_var.get()
+        if name == CUSTOM_PROFILE_NAME or name in BUILTIN_PROFILE_NAMES or name not in self.profiles:
+            return
+        if not messagebox.askyesno(
+            "Delete profile",
+            f"Delete the saved profile '{name}'?\n\nIts values stay in the editor as Custom settings.",
+            icon=messagebox.WARNING,
+        ):
+            return
+
+        removed = self.profiles.pop(name)
+        try:
+            self.save_profiles_to_disk()
+        except Exception as exc:
+            self.profiles[name] = removed
+            messagebox.showerror("Delete error", f"Could not update the profile file:\n{exc}")
+            return
+
+        self.profile_combo["values"] = list(self.profiles.keys())
+        self.profile_var.set(CUSTOM_PROFILE_NAME)
+        self.update_save_profile_button()
+        self.log(f"Profile deleted: {name}")
 
     def set_status(self, state, detail=""):
         """Update status text and indicator color.
@@ -1539,17 +2273,16 @@ class MotorDatalogGui(tk.Tk):
         """
         self.status_var.set(state)
         self.status_detail_var.set(detail)
+        lowered = state.lower()
         color = COLORS["warning"]
-        if state.lower().startswith(("error", "failed")) or " error" in state.lower() or state.lower().endswith("failed"):
+        if lowered.startswith(("error", "failed")) or " error" in lowered or lowered.endswith("failed"):
             color = COLORS["danger"]
-        elif state.lower().startswith(("ready", "configuration")):
-            color = COLORS["accent_2"]
-        elif state.lower().startswith("starting"):
+        elif "starting" in lowered:
             color = COLORS["warning"]
-        elif state.lower().startswith(("logging", "motor", "acquisition")):
-            color = COLORS["accent_2"]
-        elif state.lower().startswith(("stopping", "stopped")):
+        elif lowered.startswith("stopping") or "stopped" in lowered:
             color = COLORS["muted"]
+        elif lowered.startswith(("ready", "configuration", "logging", "motor", "acquisition")):
+            color = COLORS["accent_2"]
         self.status_dot.itemconfig(self.status_dot_id, fill=color)
 
     def log(self, msg):
@@ -1567,6 +2300,11 @@ class MotorDatalogGui(tk.Tk):
             self.log_line_count -= LOG_TRIM_LINES
 
         self.log_text.see(tk.END)
+
+    def clear_log(self):
+        """Erase the UART log view."""
+        self.log_text.delete("1.0", tk.END)
+        self.log_line_count = 0
 
     def format_port_display(self, port_info):
         """Format a serial port for display in the combobox.
@@ -1693,7 +2431,7 @@ class MotorDatalogGui(tk.Tk):
         finally:
             self._applying_profile = False
 
-        self.update_acquisition_mode_ui()
+        self.update_controls_state()
         self.update_save_profile_button()
         self.validate_form()
 
@@ -1702,14 +2440,18 @@ class MotorDatalogGui(tk.Tk):
 
         Returns:
             dict[str, object]: Configuration ready to open the serial port and send
-            ``CFG`` or ``ACQ_START`` for the selected mode.
+            ``ACQ_START``, ``PROFILE`` or ``CFG``/``LOAD``/``START`` for the
+            selected test profile.
 
         Raises:
             ValueError: If a required value is missing or inconsistent.
         """
-        acquisition_mode = self.acquisition_mode_var.get()
-        if acquisition_mode not in ACQUISITION_MODES:
-            raise ValueError("Invalid acquisition mode.")
+        quick_profile = self.selected_quick_profile()
+        acquisition_mode = (
+            ACQUISITION_MODE_IDLE
+            if quick_profile == QUICK_PROFILE_COLLECT_ONLY
+            else ACQUISITION_MODE_MOTOR
+        )
 
         port = self.get_selected_port_device()
         baud = int(self.baud_var.get().strip())
@@ -1730,6 +2472,7 @@ class MotorDatalogGui(tk.Tk):
 
         config = {
             "acquisition_mode": acquisition_mode,
+            "quick_profile": quick_profile,
             "port": port,
             "baud": baud,
             "datalog_ms": datalog_ms,
@@ -1737,7 +2480,15 @@ class MotorDatalogGui(tk.Tk):
             "csv_path": csv_path,
         }
 
-        if acquisition_mode == ACQUISITION_MODE_MOTOR:
+        if quick_profile in PRESET_PROFILE_TOKENS:
+            load_mode, load_setpoint_a = preset_load_settings(quick_profile)
+            config.update({
+                "profile_token": PRESET_PROFILE_TOKENS[quick_profile],
+                "iq_limit": PRESET_IQ_LIMIT_A,
+                "load_mode": load_mode,
+                "load_setpoint_a": load_setpoint_a,
+            })
+        elif quick_profile == QUICK_PROFILE_CUSTOM:
             target_rpm = float(self.speed_rpm_var.get().replace(",", "."))
             speed_hz = float(self.speed_hz_var.get().replace(",", "."))
             pole_pairs = int(self.pole_pairs_var.get().strip())
@@ -1914,7 +2665,7 @@ class MotorDatalogGui(tk.Tk):
             errors.append("No COM port selected.")
 
         baud = parse_int("baud", self.baud_var, "Baud rate", 0)
-        idle_mode = self.is_idle_acquisition_mode()
+        quick_profile = self.selected_quick_profile()
 
         target_rpm = None
         speed_hz = None
@@ -1925,7 +2676,7 @@ class MotorDatalogGui(tk.Tk):
         load_mode = None
         load_setpoint_a = None
 
-        if not idle_mode:
+        if quick_profile == QUICK_PROFILE_CUSTOM:
             target_rpm = parse_float("speed_rpm", self.speed_rpm_var, "Speed (rpm)", 0)
             speed_hz = parse_float("speed_hz", self.speed_hz_var, "Electrical speed (Hz)", 0)
             pole_pairs = parse_int("pole_pairs", self.pole_pairs_var, "Pole pairs", 0)
@@ -2008,8 +2759,7 @@ class MotorDatalogGui(tk.Tk):
 
         if datalog_ms is not None and datalog_ms < DS18B20_MIN_MS:
             warnings.append(
-                "The DS18B20 cannot provide a new reading in under 750 ms. "
-                "The CSV will use its last valid temperature; motor data will follow the DATA period."
+                "DS18B20 refreshes every ≥ 750 ms; rows in between repeat its last reading."
             )
 
         if ds18b20_ms is not None and ds18b20_ms < DS18B20_MIN_MS:
@@ -2020,19 +2770,28 @@ class MotorDatalogGui(tk.Tk):
         self.warning_var.set("\n".join(warnings))
         is_valid = len(errors) == 0
 
-        if not self.is_running and not self.is_launching and not self.is_stopping:
+        if not self.controls_locked():
             if is_valid:
-                self.start_button.configure(state=tk.NORMAL, bg=COLORS["accent_2"], fg="white")
-                if idle_mode:
-                    self.set_status("Configuration valid", "Ready to log with the motor stopped.")
-                else:
-                    self.set_status("Configuration valid", "Ready to start the motor and logging.")
+                self.start_button.configure(state=tk.NORMAL, bg=COLORS["accent_2"], fg="#062712")
+                self.set_status("Ready", self.ready_status_detail(quick_profile))
             else:
-                self.start_button.configure(state=tk.DISABLED, bg=COLORS["panel_3"], fg=COLORS["muted"])
+                self.start_button.configure(state=tk.DISABLED, bg=COLORS["panel_3"])
                 self.set_status("Configuration error", errors[0])
 
         self.update_iq_warning_color()
         return is_valid
+
+    def ready_status_detail(self, quick_profile):
+        """Describe what START will do for the selected test profile."""
+        profile = QUICK_PROFILES[quick_profile]
+        if quick_profile == QUICK_PROFILE_COLLECT_ONLY:
+            return "Collect only: START logs with the motor stopped."
+        if quick_profile == QUICK_PROFILE_CUSTOM:
+            return (
+                f"Custom ({self.profile_var.get()}): {self.speed_rpm_var.get()} rpm, "
+                f"load {self.load_mode_var.get().lower()}."
+            )
+        return f"{profile.title}: {profile.summary}. START runs the firmware preset."
 
     def start_run(self):
         """Start a motor and acquisition session, or acquire with the motor stopped.
@@ -2087,18 +2846,30 @@ class MotorDatalogGui(tk.Tk):
         self.is_running = False
         self.is_stopping = False
         self.active_acquisition_mode = cfg["acquisition_mode"]
+        self.active_quick_profile = cfg["quick_profile"]
+        self.motor_start_confirmed = False
         if cfg["acquisition_mode"] == ACQUISITION_MODE_MOTOR:
             self.active_load_mode = cfg["load_mode"]
             self.active_load_setpoint_a = cfg["load_setpoint_a"]
 
-        self.start_button.configure(state=tk.DISABLED, bg="#14532D", fg="white")
+        self.session_started_s = time.monotonic()
+        self.session_ended_s = None
+        self.session_rows = 0
+        self.active_datalog_ms = cfg["datalog_ms"]
+        self.data_times.clear()
+        self.refresh_session_stats(reschedule=False)
+
+        self.start_button.configure(state=tk.DISABLED, bg="#14532D")
         self.stop_button.configure(state=tk.NORMAL)
-        self.update_acquisition_mode_ui()
+        self.update_controls_state()
+        profile_title = QUICK_PROFILES[cfg["quick_profile"]].title
         if cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE:
             self.set_status("Starting", "Preparing logging with the motor stopped...")
+        elif "profile_token" in cfg:
+            self.set_status("Starting", f"Synchronizing and arming the {profile_title} preset...")
         else:
             self.set_status("Starting", "Synchronizing and starting the motor...")
-        self.log("Serial port opened.")
+        self.log(f"Serial port opened. Test profile: {profile_title}.")
 
         self.launch_thread = threading.Thread(target=self.launch_sequence_thread, args=(cfg,), daemon=True)
         self.launch_thread.start()
@@ -2118,6 +2889,13 @@ class MotorDatalogGui(tk.Tk):
 
         try:
             idle_mode = cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE
+            profile_token = cfg.get("profile_token")
+            if idle_mode:
+                next_command = "ACQ_START"
+            elif profile_token:
+                next_command = "PROFILE"
+            else:
+                next_command = "CFG"
 
             self.clear_ack_queue()
             send("SYNC\n", char_delay=0.002)
@@ -2129,10 +2907,8 @@ class MotorDatalogGui(tk.Tk):
                     cancel_event=cancel,
                 )
                 if not sync_ok:
-                    next_command = "ACQ_START" if idle_mode else "CFG"
                     self.gui_queue.put(("log", f"Board did not support or accept SYNC; continuing with {next_command}."))
             except TimeoutError:
-                next_command = "ACQ_START" if idle_mode else "CFG"
                 self.gui_queue.put(("log", f"No SYNC response; continuing with {next_command}."))
 
             time.sleep(0.1)
@@ -2142,6 +2918,23 @@ class MotorDatalogGui(tk.Tk):
                 self.clear_ack_queue()
                 send(acq_cmd, char_delay=0.002)
                 self.wait_for_ack("ACQ_START", timeout=5.0, cancel_event=cancel)
+            elif profile_token:
+                profile_cmd = build_profile_command(
+                    cfg["quick_profile"],
+                    cfg["datalog_ms"],
+                    cfg["ds18b20_ms"],
+                )
+                self.clear_ack_queue()
+                send(profile_cmd, char_delay=0.002)
+                try:
+                    self.wait_for_ack(f"PROFILE,{profile_token}", timeout=5.0, cancel_event=cancel)
+                except (TimeoutError, RuntimeError) as exc:
+                    if cancel.is_set():
+                        raise
+                    raise RuntimeError(
+                        f"{exc}\n\nThe board did not accept PROFILE,{profile_token}. Flash the "
+                        "acquisition firmware with PROFILE support, or use the Custom profile."
+                    ) from exc
             else:
                 cfg_cmd = (
                     f"CFG,{cfg['target_rpm']:.3f},{cfg['iq_limit']:.3f},{cfg['hard_limit']:.3f},"
@@ -2184,6 +2977,7 @@ class MotorDatalogGui(tk.Tk):
 
         self.is_stopping = True
         self.stop_button.configure(state=tk.DISABLED)
+        self.refresh_quick_profile_cards()
         self.set_status("Stopping", "Sending STOP...")
         self.log("Stop requested.")
         self.stop_thread = threading.Thread(target=self.stop_sequence_thread, daemon=True)
@@ -2241,13 +3035,31 @@ class MotorDatalogGui(tk.Tk):
         self.is_running = False
         self.is_launching = False
         self.is_stopping = False
+        self.active_quick_profile = None
+        if self.session_started_s is not None and self.session_ended_s is None:
+            self.session_ended_s = time.monotonic()
+        self.refresh_session_stats(reschedule=False)
         self.stop_button.configure(state=tk.DISABLED)
-        self.update_acquisition_mode_ui()
+        self.suggest_next_csv_path()
+        self.update_controls_state()
         self.validate_form()
-        self.set_status("Stopped", "Session complete.")
+        self.set_status("Stopped", f"Session complete · {self.session_rows} rows logged.")
 
         if self.close_requested:
             self.destroy()
+
+    def suggest_next_csv_path(self):
+        """Propose a fresh timestamped CSV once the previous auto-named file exists."""
+        if not self.csv_path:
+            return
+        written = path_from_arg(self.csv_path)
+        try:
+            current = self.csv_path_from_text(self.csv_path_var.get())
+        except ValueError:
+            return
+        if current == written and written.exists() and AUTO_CSV_NAME_PATTERN.fullmatch(written.name):
+            self.new_csv_path()
+            self.log(f"Next session will write to: {self.csv_path_var.get()}")
 
     def send_command(self, command, char_delay=0.0):
         """Send an ASCII command to the STM32 firmware.
@@ -2366,15 +3178,15 @@ class MotorDatalogGui(tk.Tk):
                 elif kind == "log":
                     self.log(payload)
                 elif kind == "launch_success":
+                    if self.is_stopping:
+                        # STOP won the race against the startup acknowledgment.
+                        continue
                     self.is_launching = False
                     self.is_running = True
                     self.is_stopping = False
-                    self.update_acquisition_mode_ui()
-                    if payload == ACQUISITION_MODE_IDLE:
-                        self.set_status("Logging active", "Motor stopped; receiving temperatures and zero motor values.")
-                    else:
-                        self.set_status("Motor running", "Waiting for or receiving log data.")
-                    self.start_button.configure(state=tk.DISABLED, bg="#14532D", fg="white")
+                    self.update_controls_state()
+                    self.show_running_status()
+                    self.start_button.configure(state=tk.DISABLED, bg="#14532D")
                     self.stop_button.configure(state=tk.NORMAL)
                 elif kind == "launch_failed":
                     self.log(f"Startup failed: {payload}")
@@ -2386,6 +3198,8 @@ class MotorDatalogGui(tk.Tk):
                     except Exception:
                         pass
                     self.close_resources()
+                    if not self.close_requested:
+                        self.set_status("Startup failed", str(payload).splitlines()[0])
                 elif kind == "close_resources":
                     self.close_resources()
                 elif kind == "reader_stopped":
@@ -2482,7 +3296,9 @@ class MotorDatalogGui(tk.Tk):
         Args:
             line: Decoded and stripped UART line.
         """
-        self.log(f"RX ← {line}")
+        is_data = line.startswith("DATA,")
+        if not is_data or self.show_data_frames_var.get():
+            self.log(f"RX ← {line}")
 
         if line.startswith("#CSV_HEADER,"):
             columns = self.clean_fields(line.split(",")[1:])
@@ -2491,12 +3307,15 @@ class MotorDatalogGui(tk.Tk):
                 return
             if self.csv_writer is None:
                 self.open_csv_with_header(columns)
-                self.set_status("Logging active", "Receiving DATA rows.")
+                if self.is_running:
+                    self.show_running_status()
+                else:
+                    self.set_status("Logging active", "Receiving DATA rows.")
             elif columns != self.csv_columns:
                 self.log("Different header received and ignored.")
             return
 
-        if line.startswith("DATA,"):
+        if is_data:
             if self.csv_writer is None:
                 self.data_before_header_count += 1
                 if self.data_before_header_count <= 3:
@@ -2518,14 +3337,84 @@ class MotorDatalogGui(tk.Tk):
             self.csv_pending_rows += 1
             self.flush_csv()
 
+            self.session_rows += 1
+            self.data_times.append(time.monotonic())
+            if self.session_rows == 1 and not self.show_data_frames_var.get():
+                self.log("First DATA row written to the CSV (DATA frames hidden in this log).")
+
             self.update_live_values(row)
             self.append_plot_row(row)
             return
 
-        if line.startswith("ACK,") or line.startswith("ERR,") or line.startswith("#"):
-            return
+        if line.startswith("#"):
+            self.handle_firmware_event(line)
 
-        return
+    def handle_firmware_event(self, line):
+        """React to firmware status lines that change what the motor is doing."""
+        if not (self.is_running or self.is_launching):
+            return
+        if line.startswith("#PROFILE,START,"):
+            self.motor_start_confirmed = True
+            if self.is_running:
+                self.show_running_status()
+        elif line.startswith("#B2,STOP"):
+            self.set_status("Motor stopped (B2)", "Board button B2 stopped the motor; logging continues until STOP.")
+        elif line.startswith("#B2,START"):
+            self.set_status("Motor running (B2)", "Board button B2 started the All variable profile.")
+
+    def show_running_status(self):
+        """Describe the running session in the header status card."""
+        if self.active_acquisition_mode == ACQUISITION_MODE_IDLE:
+            self.set_status("Logging active", "Motor stopped; receiving temperatures and zero motor values.")
+            return
+        profile = QUICK_PROFILES.get(self.active_quick_profile)
+        if self.active_quick_profile in PRESET_PROFILE_TOKENS:
+            if self.motor_start_confirmed:
+                self.set_status("Motor running", f"{profile.title} preset · {profile.summary}")
+            else:
+                self.set_status(
+                    "Motor starting",
+                    f"{profile.title} preset armed; TB-200S held at {MIN_LOAD_SETPOINT_A:.2f} A until RUN.",
+                )
+            return
+        self.set_status("Motor running", "Custom profile · receiving log data.")
+
+    def stale_data_threshold_s(self):
+        """Silence after which DATA is reported missing: 2.5 periods, at least 2 s."""
+        return max(STALE_DATA_S, 2.5 * self.active_datalog_ms / 1000.0)
+
+    def refresh_session_stats(self, reschedule=True):
+        """Refresh the session card: elapsed time, rows logged, and data rate."""
+        try:
+            if self.session_started_s is None:
+                self.session_elapsed_var.set("—")
+                detail, color = "No session yet", COLORS["muted"]
+            else:
+                end_s = self.session_ended_s if self.session_ended_s is not None else time.monotonic()
+                elapsed = int(max(0.0, end_s - self.session_started_s))
+                hours, remainder = divmod(elapsed, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                self.session_elapsed_var.set(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
+                rate_hz = 0.0
+                if len(self.data_times) >= 2:
+                    span_s = self.data_times[-1] - self.data_times[0]
+                    if span_s > 0.0:
+                        rate_hz = (len(self.data_times) - 1) / span_s
+                detail = f"{self.session_rows:,} rows · {rate_hz:.1f} Hz"
+                color = COLORS["muted"]
+                if self.is_running and self.session_ended_s is None:
+                    last_data_s = self.data_times[-1] if self.data_times else self.session_started_s
+                    silence_s = time.monotonic() - last_data_s
+                    if silence_s > self.stale_data_threshold_s():
+                        detail = f"No DATA for {silence_s:.0f} s"
+                        color = COLORS["warning"]
+            self.session_detail_var.set(detail)
+            if self.session_detail_label is not None:
+                self.session_detail_label.configure(fg=color)
+        finally:
+            if reschedule:
+                self.after(500, self.refresh_session_stats)
 
     def update_live_values(self, row):
         """Update live cards with values from a DATA row.
@@ -2549,11 +3438,15 @@ class MotorDatalogGui(tk.Tk):
         self.update_iq_warning_color()
 
     def get_iq_limit_safe(self):
-        """Return the configured Iq limit, or ``NaN`` if invalid.
+        """Return the Iq limit of the selected profile, or ``NaN`` if invalid.
+
+        Firmware presets use their fixed limit; Custom uses the edited field.
 
         Returns:
             float: Positive Iq limit, otherwise ``math.nan``.
         """
+        if self.selected_quick_profile() in PRESET_PROFILE_TOKENS:
+            return PRESET_IQ_LIMIT_A
         try:
             value = float(self.iq_limit_var.get().strip().replace(",", "."))
             if math.isfinite(value) and value > 0.0:

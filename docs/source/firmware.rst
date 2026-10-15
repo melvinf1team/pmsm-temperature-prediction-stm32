@@ -74,6 +74,15 @@ arms the logger without requiring a motor configuration.
 seconds. Both forms answer `ACK,LOAD`. The dashboard sends the load command
 after `CFG` and before `START`.
 
+`PROFILE,<TOKEN>[,<datalog_ms>,<ds18b20_ms>]` runs the same four presets as
+the validation firmware (`STABLE`, `VARIABLE_LOAD`, `VARIABLE_SPEED`,
+`VARIABLE_ALL`). It validates the optional periods like `ACQ_START`, stops the
+motor and logger, clears the received `CFG`, restarts logging, and calls
+`AppMotorControl_StartProfile`; it answers `ACK,PROFILE,<TOKEN>`, or
+`ERR,BAD_PROFILE`, `ERR,PROFILE_VALUE_OUT_OF_RANGE`, `ERR,LOAD_DAC_FAILED`.
+`PROFILE` is matched before `LOAD,` because `PROFILE,VARIABLE_LOAD,...`
+contains that substring.
+
 Protocol limits are 100 to 4500 rpm, at most 30 A for `Iq` and the hard
 stop, at most 50 electrical Hz/s for acceleration, 1 to 10,000 ms for
 `DATA`, and at most 10,000 ms for the DS18B20. A requested DS18B20 period
@@ -96,7 +105,7 @@ sends one line per measurement:
    DIAG,I2C_SCAN,devices=0A
    DIAG,OW,pin=PG6,presence=1
    DIAG,DS18B20,power=external,conv_ms=600,crc=1,temp_centi=2350
-   DIAG,DAC,adc=1,drive_code=1034,v_drive_mv=833,v_hold_mv=820,v_zero_mv=5,rise_us=230000,v_pu_end_mv=2400,v_pd_end_mv=15
+   DIAG,DAC,adc=1,drive_code=1450,v_drive_mv=1168,v_hold_mv=1150,v_zero_mv=5,rise_us=230000,v_pu_end_mv=2400,v_pd_end_mv=15
    DIAG,RC,pin=PA4,rise_us=40
    DIAG,D6T,read=1,temp_c=24.5
    DIAG,END
@@ -154,7 +163,12 @@ so the physical button consistently starts the fully variable speed-and-load
 profile. Every stop returns the DAC command to 0.05 A.
 
 The B2 profile is an internal path: it does not raise the 50 electrical
-Hz/s ceiling for configurations received over UART. A `CFG` command
+Hz/s ceiling for configurations received through `CFG`. The serial `PROFILE`
+presets share this path through `AppMotorControl_StartProfile`: `STABLE` and
+`VARIABLE_LOAD` keep 2500 rpm, `VARIABLE_SPEED` and `VARIABLE_ALL` draw speed
+targets like B2, and the load is either fixed at 0.10 A after RUN or variable.
+When MCSDK accepts the start, the firmware sends `#PROFILE,START,<TOKEN>,...`
+(`#B2,START,...` for the button). A `CFG` command
 disables the standalone profile and takes control. During a
 downward transition, overspeed protection follows the setpoint actually
 being ramped by MCSDK while remaining capped at 4500 rpm. It therefore does
@@ -310,7 +324,7 @@ previous serial profile. Speed and load changes add no text to UART,
 preserving the NanoEdge data contract.
 
 Both projects configure `PA5 / DAC1_OUT2` for the TB-200S. The DAC uses its
-external buffered output and the 0--10 V / 0--3 A nominal conversion, while
+external buffered output and the bench-calibrated TB-200S transfer, while
 software restricts commands to 0.05--0.25 A. See :doc:`cablage` for CN7-32,
 the 1 kOhm/4.7 uF network, common ground, and the low-voltage calibration
 warning.

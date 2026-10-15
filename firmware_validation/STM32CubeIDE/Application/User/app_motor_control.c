@@ -64,11 +64,14 @@
 #define APP_PROFILE_FIXED_SPEED_RPM         2500.0f
 #define APP_PROFILE_FIXED_LOAD_A               0.10f
 
-/* TB-200S : mode 0-10 V pour 0-3 A, soit V_ADJ = I_LOAD * 10 / 3.
- * Le DAC 12 bits est référencé à la VDDA nominale de 3,3 V. */
+/* TB-200S : droite d'étalonnage banc (tension PA5 -> courant affiché TB-200S),
+ * calibrate_tb200s.py du 2026-10-14 : 0,2567 A/V, seuil 0,194 V, écart max 0,003 A.
+ * Le TB-200S sature vers 0,24 A : le point 0,25 A est exclu de l'ajustement. */
 #define APP_TB200S_DAC_VREF_V               3.3f
-#define APP_TB200S_FULL_SCALE_V              10.0f
-#define APP_TB200S_FULL_SCALE_A              3.0f
+#define APP_TB200S_CAL_LOW_V                0.3892f
+#define APP_TB200S_CAL_LOW_A                0.05f
+#define APP_TB200S_CAL_HIGH_V               1.1683f
+#define APP_TB200S_CAL_HIGH_A               0.25f
 #define APP_TB200S_DAC_MAX_CODE              4095U
 #define APP_TB200S_MIN_CHANGE_PERIOD_MS      2000U
 #define APP_TB200S_MAX_CHANGE_PERIOD_MS      5000U
@@ -199,9 +202,11 @@ static uint32_t AppMotorControl_ButtonRandomRange(uint32_t minimum,
 
 static uint32_t AppMotorControl_LoadToDacCode(float load_a)
 {
-  float adj_voltage_v = load_a *
-    (APP_TB200S_FULL_SCALE_V / APP_TB200S_FULL_SCALE_A);
-  float code = (adj_voltage_v / APP_TB200S_DAC_VREF_V) *
+  float dac_voltage_v = APP_TB200S_CAL_LOW_V +
+    ((load_a - APP_TB200S_CAL_LOW_A) *
+     ((APP_TB200S_CAL_HIGH_V - APP_TB200S_CAL_LOW_V) /
+      (APP_TB200S_CAL_HIGH_A - APP_TB200S_CAL_LOW_A)));
+  float code = (dac_voltage_v / APP_TB200S_DAC_VREF_V) *
     (float)APP_TB200S_DAC_MAX_CODE;
 
   if (code <= 0.0f)

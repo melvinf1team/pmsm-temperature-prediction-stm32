@@ -5,8 +5,9 @@ Main directories
 ----------------
 
 `datalogging/`
-   Tkinter interface, motor profiles, and raw logs. The entry point is
-   `motor_datalog_gui_dashboard.py`.
+   Tkinter interface with six quick-select test profiles (the validation GUI
+   profiles plus `Custom`), saved custom motor profiles, and raw logs. The
+   entry point is `motor_datalog_gui_dashboard.py`.
 
 `pretraitement/`
    Prepares logs for NanoEdge AI Studio with
@@ -15,6 +16,7 @@ Main directories
 
 `firmware_acquisition/tets_motor_dewalt/`
    STM32CubeIDE/MCSDK project used with the dashboard. It receives PC commands,
+   including the four `PROFILE` presets shared with the validation firmware,
    controls the motor, samples the sensors, and publishes the raw stream.
 
 `firmware_validation/`

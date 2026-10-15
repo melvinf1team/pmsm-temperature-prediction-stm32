@@ -93,15 +93,26 @@ TB-200S load controller
 -----------------------
 
 The TB-200S is driven through its external `ADJ` input. The controller must
-be configured for the **0--10 V external-input mode**, although this project
-uses only about 0.167--0.833 V. The nominal TB-200S transfer used by the
-firmware is 0--10 V for 0--3 A:
+be configured for the **0--10 V external-input mode**. Its nominal transfer
+(0--10 V for 0--3 A, i.e. :math:`V = I \cdot 10/3`) is not met on the bench:
+the measured TB-200S response is 0.2567 A/V above a 0.194 V threshold, so the
+nominal command gave about half the expected current and 0.00 A at 0.05 A.
+The ADJ input does not load the 1 kOhm resistor (ADJ reads 98 % of PA5): the
+difference comes from the TB-200S itself.
+The firmware therefore uses a calibration line between the PA5 voltage and
+the current displayed by the TB-200S:
 
 .. math::
 
-   V_{ADJ} = I_{load}\frac{10\ \mathrm{V}}{3\ \mathrm{A}}
+   V_{PA5} = V_{low} + (I_{load} - I_{low})
+   \frac{V_{high} - V_{low}}{I_{high} - I_{low}}
 
-Consequently, 0.05 A maps to 0.1667 V and 0.25 A maps to 0.8333 V. No
+The points are `APP_TB200S_CAL_LOW_V/_A` and `APP_TB200S_CAL_HIGH_V/_A` in
+both `app_motor_control.c` files: 0.05 A maps to 0.3892 V and 0.25 A to
+1.1683 V. They come from a least-squares fit of 31 readings recorded by
+`tests/bench/calibrate_tb200s.py` (2 up/down cycles over 0.05--0.225 A,
+maximum deviation 0.003 A, no hysteresis). To recalibrate, run this script
+again and enter the `#define` lines of its report in both projects. No
 0--10 V gain stage is fitted.
 
 DAC outputs of the B-G473E-ZEST1S and their use in both CubeMX projects:
@@ -177,10 +188,10 @@ check that no hazardous potential exists before joining it to the board ground.
 .. warning::
 
    The STM32G473 datasheet guarantees the buffered DAC output range only from
-   0.2 V to VREF+ - 0.2 V. The nominal 0.05 A point (0.1667 V) is therefore
-   below the guaranteed linear range even though the requested 12-bit code is
-   valid. Before coupling the brake to the motor, measure PA5 and the actual
-   TB-200S output at 0.05 A and 0.25 A, then qualify or calibrate the setup.
+   0.2 V to VREF+ - 0.2 V; keep every calibrated command inside it. The
+   TB-200S output saturates at about 0.24 A on this bench: a 0.25 A command
+   gives 0.24 A. Check the brake coil resistance (the 24 V output cannot
+   drive more than 24 V / R) and the TB-200S current limit.
    Firmware setpoints are commands, not independent current measurements.
 
 PC UART

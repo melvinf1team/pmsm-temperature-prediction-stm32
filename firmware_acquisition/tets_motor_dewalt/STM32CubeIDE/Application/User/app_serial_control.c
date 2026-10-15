@@ -206,6 +206,13 @@ static char *AppSerial_FindCommand(char *line)
     return p;
   }
 
+  /* Avant "LOAD," : PROFILE,VARIABLE_LOAD,... contient aussi "LOAD,". */
+  p = strstr(line, "PROFILE");
+  if (p != NULL)
+  {
+    return p;
+  }
+
   p = strstr(line, "CFG,");
   if (p != NULL)
   {
@@ -492,6 +499,73 @@ static bool AppSerial_ParseFixedLoad(const char *line, float *load_a)
   return ((*p == '\0') || (*p == '\r') || (*p == '\n'));
 }
 
+typedef struct
+{
+  const char *token;
+  AppMotorProfile_t profile;
+} AppSerialProfileToken_t;
+
+static const AppSerialProfileToken_t app_serial_profile_tokens[] =
+{
+  { "STABLE", APP_MOTOR_PROFILE_STABLE },
+  { "VARIABLE_LOAD", APP_MOTOR_PROFILE_VARIABLE_LOAD },
+  { "VARIABLE_SPEED", APP_MOTOR_PROFILE_VARIABLE_SPEED },
+  { "VARIABLE_ALL", APP_MOTOR_PROFILE_VARIABLE_ALL },
+};
+
+static bool AppSerial_ParseProfile(const char *line,
+                                   AppMotorProfile_t *profile,
+                                   const char **token,
+                                   bool *has_periods,
+                                   uint32_t *datalog_ms,
+                                   uint32_t *ds18b20_ms)
+{
+  char *p = (char *)line;
+  size_t token_len;
+  bool found = false;
+
+  /* Format attendu : PROFILE,<TOKEN>[,<datalog_ms>,<ds18b20_ms>] */
+  if (strncmp(p, "PROFILE,", 8U) != 0)
+  {
+    return false;
+  }
+  p += 8U;
+
+  token_len = strcspn(p, ", \t\r\n");
+  for (size_t i = 0U; i < (sizeof(app_serial_profile_tokens) / sizeof(app_serial_profile_tokens[0])); i++)
+  {
+    if ((strlen(app_serial_profile_tokens[i].token) == token_len) &&
+        (strncmp(p, app_serial_profile_tokens[i].token, token_len) == 0))
+    {
+      *profile = app_serial_profile_tokens[i].profile;
+      *token = app_serial_profile_tokens[i].token;
+      found = true;
+      break;
+    }
+  }
+  if (!found)
+  {
+    return false;
+  }
+  p += token_len;
+
+  *has_periods = false;
+  if (*p == ',')
+  {
+    if (!AppSerial_ExpectComma(&p)) return false;
+    if (!AppSerial_ParseU32(&p, datalog_ms)) return false;
+    if (!AppSerial_ExpectComma(&p)) return false;
+    if (!AppSerial_ParseU32(&p, ds18b20_ms)) return false;
+    *has_periods = true;
+  }
+
+  while ((*p == ' ') || (*p == '\t'))
+  {
+    p++;
+  }
+  return ((*p == '\0') || (*p == '\r') || (*p == '\n'));
+}
+
 /*
  * ================================
  * COMMAND HANDLERS
@@ -693,6 +767,72 @@ static void AppSerial_HandleStop(void)
   AppSerial_SendAck("STOP");
 }
 
+static void AppSerial_HandleProfile(const char *line)
+{
+  AppMotorProfile_t profile;
+  AppMotorProfileStartResult_t result;
+  const char *token = NULL;
+  bool has_periods = false;
+  uint32_t datalog_ms = 0U;
+  uint32_t ds18b20_ms = 0U;
+  char ack[32];
+
+  if (!AppSerial_ParseProfile(line,
+                              &profile,
+                              &token,
+                              &has_periods,
+                              &datalog_ms,
+                              &ds18b20_ms))
+  {
+    AppSerial_SendErr("BAD_PROFILE");
+    return;
+  }
+
+  if (has_periods &&
+      ((datalog_ms < APP_CFG_MIN_DATALOG_MS) ||
+       (datalog_ms > APP_CFG_MAX_DATALOG_MS) ||
+       (ds18b20_ms > APP_CFG_MAX_DS18B20_MS)))
+  {
+    AppSerial_SendErr("PROFILE_VALUE_OUT_OF_RANGE");
+    return;
+  }
+
+  if (has_periods && (ds18b20_ms < APP_CFG_MIN_DS18B20_MS))
+  {
+    ds18b20_ms = APP_CFG_MIN_DS18B20_MS;
+  }
+
+  /* Comme START : moteur et logger repartent d'un état propre. Le profil
+   * impose ses propres consignes ; un START ultérieur exige donc une CFG. */
+  AppMotorControl_Stop();
+  AppDatalog_StopLogging();
+  cfg_received = false;
+
+  HAL_Delay(20);
+
+  if (has_periods)
+  {
+    AppDatalog_SetRuntimePeriods(datalog_ms, ds18b20_ms);
+  }
+  AppDatalog_StartLogging();
+
+  /* Non bloquant : le démarrage MCSDK est servi par AppMotorControl_Task(),
+   * qui émet #PROFILE,START,<TOKEN>,... lorsque le moteur est lancé. */
+  result = AppMotorControl_StartProfile(profile);
+  if (result != APP_MOTOR_PROFILE_START_ACCEPTED)
+  {
+    AppMotorControl_Stop();
+    AppDatalog_StopLogging();
+    AppSerial_SendErr((result == APP_MOTOR_PROFILE_START_LOAD_ERROR)
+                      ? "LOAD_DAC_FAILED"
+                      : "PROFILE_REJECTED");
+    return;
+  }
+
+  (void)snprintf(ack, sizeof(ack), "PROFILE,%s", token);
+  AppSerial_SendAck(ack);
+}
+
 static void AppSerial_HandleDiag(void)
 {
   /* Le test de câblage reconfigure les broches capteurs et le DAC : moteur
@@ -786,6 +926,10 @@ static void AppSerial_HandleLine(char *line)
   else if (strncmp(cmd, "ACQ_START,", 10U) == 0)
   {
     AppSerial_HandleAcqStart(cmd);
+  }
+  else if (strncmp(cmd, "PROFILE", 7U) == 0)
+  {
+    AppSerial_HandleProfile(cmd);
   }
   else if (strncmp(cmd, "LOAD,", 5U) == 0)
   {

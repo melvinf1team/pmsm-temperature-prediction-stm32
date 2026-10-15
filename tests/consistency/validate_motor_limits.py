@@ -1,10 +1,11 @@
-"""Validate motor limits and the B2 profile across firmware and host files."""
+"""Validate motor limits, the B2 profile and PROFILE presets across firmware and host files."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
 import re
+import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
@@ -60,14 +61,29 @@ def wbdef_values(path: Path) -> dict[str, str]:
     }
 
 
-def load_dashboard_module():
-    path = PROJECT_ROOT / "datalogging" / "motor_datalog_gui_dashboard.py"
-    spec = importlib.util.spec_from_file_location("motor_datalog_gui_dashboard", path)
+def tb200s_calibration(app_source: Path) -> tuple[float, ...]:
+    return tuple(
+        numeric_define(app_source, f"APP_TB200S_CAL_{name}")
+        for name in ("LOW_V", "LOW_A", "HIGH_V", "HIGH_A")
+    )
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load {path}")
     module = importlib.util.module_from_spec(spec)
+    # Dataclasses with postponed annotations resolve their module through sys.modules.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def load_dashboard_module():
+    return load_module(
+        "motor_datalog_gui_dashboard",
+        PROJECT_ROOT / "datalogging" / "motor_datalog_gui_dashboard.py",
+    )
 
 
 def validate_firmware_root(root: Path) -> None:
@@ -136,8 +152,14 @@ def validate_firmware_root(root: Path) -> None:
         == EXPECTED_TB200S_MAX_PERIOD_MS
     )
     assert numeric_define(app_source, "APP_TB200S_DAC_VREF_V") == 3.3
-    assert numeric_define(app_source, "APP_TB200S_FULL_SCALE_V") == 10.0
-    assert numeric_define(app_source, "APP_TB200S_FULL_SCALE_A") == 3.0
+    cal_low_v, cal_low_a, cal_high_v, cal_high_a = tb200s_calibration(app_source)
+    assert cal_high_v > cal_low_v and cal_high_a > cal_low_a
+    # The buffered DAC is only guaranteed linear from 0.2 V to VREF+ - 0.2 V.
+    for load_a in (EXPECTED_TB200S_MIN_LOAD_A, EXPECTED_TB200S_MAX_LOAD_A):
+        dac_v = cal_low_v + (load_a - cal_low_a) * (cal_high_v - cal_low_v) / (
+            cal_high_a - cal_low_a
+        )
+        assert 0.2 <= dac_v <= 3.1
 
     source = app_source.read_text(encoding="utf-8")
     assert (
@@ -146,19 +168,34 @@ def validate_firmware_root(root: Path) -> None:
     )
     assert "APP_BUTTON_MIN_SPEED_STEP_RPM" not in source
     assert "APP_BUTTON_MAX_SPEED_STEP_RPM" not in source
-    if root == ACQUISITION_ROOT:
-        assert "initial_speed_rpm = AppMotorControl_SelectNextButtonSpeed();" in source
-    else:
-        assert (
-            numeric_define(app_source, "APP_PROFILE_FIXED_SPEED_RPM")
-            == EXPECTED_PROFILE_FIXED_SPEED_RPM
-        )
-        assert (
-            numeric_define(app_source, "APP_PROFILE_FIXED_LOAD_A")
-            == EXPECTED_PROFILE_FIXED_LOAD_A
-        )
-        assert "? AppMotorControl_SelectNextButtonSpeed()" in source
-        assert ": APP_PROFILE_FIXED_SPEED_RPM;" in source
+    # Both firmware projects run the same four PROFILE presets.
+    assert (
+        numeric_define(app_source, "APP_PROFILE_FIXED_SPEED_RPM")
+        == EXPECTED_PROFILE_FIXED_SPEED_RPM
+    )
+    assert (
+        numeric_define(app_source, "APP_PROFILE_FIXED_LOAD_A")
+        == EXPECTED_PROFILE_FIXED_LOAD_A
+    )
+    assert "? AppMotorControl_SelectNextButtonSpeed()" in source
+    assert ": APP_PROFILE_FIXED_SPEED_RPM;" in source
+    assert "AppMotorControl_StartProfile" in source
+    assert "AppMotorControl_ConfigureProfile" in source
+    assert "app_button_speed_variable = variable_speed;" in source
+    assert "!app_button_speed_variable ||" in source
+    assert "app_tb200s_requested_load_a = variable_load" in source
+    assert ": APP_PROFILE_FIXED_LOAD_A;" in source
+    assert "AppMotorControl_StartProfile(APP_MOTOR_PROFILE_VARIABLE_ALL)" in source
+    assert "app_motor_start_requested = true;" in source
+    header_source = app_header.read_text(encoding="utf-8")
+    for enum_name in (
+        "APP_MOTOR_PROFILE_STABLE",
+        "APP_MOTOR_PROFILE_VARIABLE_LOAD",
+        "APP_MOTOR_PROFILE_VARIABLE_SPEED",
+        "APP_MOTOR_PROFILE_VARIABLE_ALL",
+    ):
+        assert enum_name in header_source
+    assert "AppMotorControl_StartProfile(" in header_source
     assert "(uint32_t)APP_BUTTON_MIN_TARGET_SPEED_RPM" in source
     assert "(uint32_t)APP_BUTTON_MAX_TARGET_SPEED_RPM" in source
     assert "} while ((float)next_speed_rpm == app_target_speed_rpm);" in source
@@ -224,6 +261,7 @@ def validate_firmware_root(root: Path) -> None:
         assert "AppMotorControl_WaitForMcIdle(APP_START_WAIT_IDLE_MS)" in source
         assert "(void)MC_AcknowledgeFaultsMotor1();" in source
         assert "iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500" in source
+        assert "AppDatalog_SendText(app_profile_start_text);" in source
         serial_source = (
             root / "STM32CubeIDE" / "Application" / "User" / "app_serial_control.c"
         ).read_text(encoding="utf-8")
@@ -233,6 +271,19 @@ def validate_firmware_root(root: Path) -> None:
         assert 'strcmp(line, "LOAD,VARIABLE") == 0' in serial_source
         assert 'AppSerial_SendAck("LOAD")' in serial_source
         assert '"load_setpoint_a\\r\\n"' in datalog_source
+        # PROFILE,VARIABLE_LOAD,... contains "LOAD,": it must be matched first.
+        assert serial_source.index('strstr(line, "PROFILE")') < serial_source.index(
+            'strstr(line, "LOAD,")'
+        )
+        assert 'strncmp(cmd, "PROFILE", 7U) == 0' in serial_source
+        assert 'AppSerial_SendErr("BAD_PROFILE")' in serial_source
+        assert '"PROFILE,%s"' in serial_source
+        assert "AppDatalog_StartLogging();" in serial_source.split(
+            "static void AppSerial_HandleProfile", maxsplit=1
+        )[1]
+        for token in ("STABLE", "VARIABLE_LOAD", "VARIABLE_SPEED", "VARIABLE_ALL"):
+            assert f'{{ "{token}", APP_MOTOR_PROFILE_{token} }}' in serial_source
+            assert f'"#PROFILE,START,{token},' in source
     else:
         datalog_source = (
             root / "STM32CubeIDE" / "Application" / "User" / "app_datalog.c"
@@ -240,18 +291,8 @@ def validate_firmware_root(root: Path) -> None:
         assert 'strcmp(line, "LOAD,VARIABLE") == 0' in datalog_source
         assert '"ACK,LOAD\\r\\n"' in datalog_source
         assert "AppMotorControl_GetLoadSetpointA()" in datalog_source
-        assert "AppMotorControl_StartProfile" in source
-        assert "AppMotorControl_ConfigureProfile" in source
-        assert "app_button_speed_variable = variable_speed;" in source
-        assert "app_tb200s_requested_load_a = variable_load" in source
         assert "? APP_TB200S_MIN_LOAD_A" in source
-        assert ": APP_PROFILE_FIXED_LOAD_A;" in source
-        assert (
-            "AppMotorControl_StartProfile(APP_MOTOR_PROFILE_VARIABLE_ALL)"
-            in source
-        )
         assert "if (!app_tb200s_load_command_received)" not in source
-        assert "app_motor_start_requested = true;" in source
 
         for token in (
             "STABLE",
@@ -277,6 +318,10 @@ def validate_firmware_root(root: Path) -> None:
 def main() -> None:
     validate_firmware_root(ACQUISITION_ROOT)
     validate_firmware_root(VALIDATION_ROOT)
+    app_source = Path("STM32CubeIDE") / "Application" / "User" / "app_motor_control.c"
+    assert tb200s_calibration(ACQUISITION_ROOT / app_source) == tb200s_calibration(
+        VALIDATION_ROOT / app_source
+    )
 
     dashboard = load_dashboard_module()
     assert dashboard.MIN_TARGET_SPEED_RPM == 100.0
@@ -293,6 +338,24 @@ def main() -> None:
     )
     assert all(profile["accel_elec_hz_s"] <= dashboard.MAX_ACCEL_ELEC_HZ_S for profile in profiles)
 
+    # Dashboard quick-select presets must describe what both firmwares execute
+    # and expose the same profiles as the validation GUI.
+    for root in (ACQUISITION_ROOT, VALIDATION_ROOT):
+        source = root / app_source
+        assert dashboard.PRESET_FIXED_SPEED_RPM == numeric_define(source, "APP_PROFILE_FIXED_SPEED_RPM")
+        assert dashboard.PRESET_FIXED_LOAD_A == numeric_define(source, "APP_PROFILE_FIXED_LOAD_A")
+        assert dashboard.PRESET_MIN_SPEED_RPM == numeric_define(source, "APP_BUTTON_MIN_TARGET_SPEED_RPM")
+        assert dashboard.PRESET_MAX_SPEED_RPM == numeric_define(source, "APP_BUTTON_MAX_TARGET_SPEED_RPM")
+        assert dashboard.PRESET_IQ_LIMIT_A == numeric_define(source, "APP_BUTTON_IQ_LIMIT_A")
+        assert dashboard.PRESET_HARD_LIMIT_A == numeric_define(source, "APP_BUTTON_HARD_STOP_CURRENT_A")
+        assert dashboard.PRESET_ACCEL_ELEC_HZ_S == numeric_define(source, "APP_BUTTON_ACCEL_ELEC_HZ_S")
+    validation_gui = load_module(
+        "temperature_validation_gui",
+        PROJECT_ROOT / "validation" / "test" / "temperature_validation_gui.py",
+    )
+    assert dashboard.PRESET_PROFILE_TOKENS == validation_gui.PROFILE_COMMAND_TOKENS
+    assert dashboard.QUICK_PROFILE_COLLECT_ONLY == validation_gui.PROFILE_COLLECT_ONLY
+
     workbench = json.loads(
         (PROJECT_ROOT / "firmware_acquisition" / "tets_motor_dewalt.stwb6").read_text(
             encoding="utf-8"
@@ -305,7 +368,8 @@ def main() -> None:
     print(
         "Motor limits validation passed: global 4500 rpm/30 A; "
         "B2 2000-4000 rpm and TB-200S 0.05-0.25 A every 2-5 s; "
-        "Iq 25 A, total 28 A, 500 Hz_e/s."
+        "Iq 25 A, total 28 A, 500 Hz_e/s; PROFILE presets shared by both "
+        "firmwares, the dashboard and the validation GUI."
     )
 
 
