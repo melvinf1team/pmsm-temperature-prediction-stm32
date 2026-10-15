@@ -37,7 +37,7 @@
 #define APP_EWMA_SNAPSHOT_COUNT           2U
 
 _Static_assert(PREPROCESS_EWMA_OUTPUT_COUNT == 55U,
-               "Le pipeline NanoEdge attend exactement 55 features");
+               "The NanoEdge pipeline requires exactly 55 features");
 
 typedef enum
 {

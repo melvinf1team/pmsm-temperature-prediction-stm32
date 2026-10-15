@@ -19,7 +19,7 @@ typedef struct
   float motor_iq_a;
 } PreprocessEwmaInput_t;
 
-/* Etat en double : en float32, les increments alpha * (x - m) des longs spans sont perdus. */
+/* Double-precision state: float32 loses alpha * (x - m) increments for long spans. */
 typedef struct
 {
   double mean[PREPROCESS_EWMA_SIGNAL_COUNT][PREPROCESS_EWMA_SPAN_COUNT];

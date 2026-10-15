@@ -70,11 +70,11 @@ STOP
 
 An accepted profile returns `ACK,PROFILE,<TOKEN>` and an idempotent stop
 returns `ACK,STOP`. Invalid commands return `ERR,<reason>`. The GUI exposes the
-same choices as visual cards labelled `Collecte seule`, `Profil stable`,
-`Charge variable`, `Vitesse variable`, and `Tout variable`. Merely connecting
+same choices as visual cards labelled `Collect only`, `Stable profile`,
+`Variable load`, `Variable speed`, and `All variable`. Merely connecting
 does not send a command: select one of the four controlled profiles and use
-**Démarrer ce profil**, or leave `Collecte seule` selected. **Arrêter le
-moteur** sends `STOP` only for a profile launched by this GUI. In collection
+**Start this profile**, or leave `Collect only` selected. **Stop motor**
+sends `STOP` only for a profile launched by this GUI. In collection
 mode, it stays disabled: stop a B2 run with B2 itself. Disconnecting or closing
 sends no command in collection-only mode; if the GUI launched the active
 profile, it attempts a safety `STOP` before releasing the port.
@@ -134,9 +134,9 @@ MAE remains in degrees Celsius. Visual thresholds are:
 | Absolute error | Label | Color |
 |---|---|---|
 | `< 0.5 °C` | EXCELLENT | Green |
-| `0.5 °C to < 1.0 °C` | BON | Blue |
-| `1.0 °C to 1.5 °C` | ATTENTION | Orange |
-| `> 1.5 °C` | ÉLEVÉ | Red |
+| `0.5 °C to < 1.0 °C` | GOOD | Blue |
+| `1.0 °C to 1.5 °C` | NEEDS ATTENTION | Orange |
+| `> 1.5 °C` | HIGH ERROR | Red |
 
 Non-ASCII, nonnumeric, nonfinite frames, and frames with neither two nor three
 fields are ignored and counted as invalid. `ACK` and `ERR` control lines are
@@ -147,7 +147,7 @@ not counted as temperature samples.
 Each connection automatically creates a file in `validation/` named:
 
 ```text
-validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv
+validation_ia_YYYYMMDD_HHMMSS_microseconds.csv
 ```
 
 Each row is flushed to disk immediately and contains:

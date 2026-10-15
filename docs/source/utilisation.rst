@@ -267,9 +267,9 @@ On-device validation
 The `firmware_validation` project is not controlled by the acquisition
 dashboard's `CFG`/`START` sequence. Its stream starts automatically at boot.
 Opening the temperature-validation GUI connection does not send a motor
-command. The visual `Collecte seule` card leaves motor control entirely to the
+command. The visual `Collect only` card leaves motor control entirely to the
 operator; B2 can then start the fully variable standalone profile. The other
-GUI cards send one of these commands only when **Démarrer ce profil** is
+GUI cards send one of these commands only when **Start this profile** is
 pressed:
 
 .. code-block:: text
@@ -288,7 +288,7 @@ seconds, stable load is 0.10 A, and variable load is drawn from
 is applied only after MCSDK reaches RUN.
 
 The firmware answers `ACK,PROFILE,<TOKEN>` or `ACK,STOP`; invalid requests
-return `ERR,<reason>`. **Arrêter le moteur** sends `STOP` only if the GUI
+return `ERR,<reason>`. **Stop motor** sends `STOP` only if the GUI
 launched a profile. A collection-only disconnect sends nothing; when the GUI
 owns the active profile, disconnecting or closing attempts a safety `STOP`.
 

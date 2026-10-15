@@ -173,7 +173,7 @@ class CommandSafetyTests(unittest.TestCase):
         TemperatureValidationApp.launch_selected_profile(app)
 
         self.assertFalse(app.gui_started_motor)
-        self.assertEqual(statuses, ["Collecte seule · aucune commande moteur envoyée"])
+        self.assertEqual(statuses, ["Collect only · no motor command sent"])
 
     def test_disconnect_does_not_stop_a_motor_started_outside_the_gui(self) -> None:
         connection = FakeSerialConnection(threading.Event(), [])

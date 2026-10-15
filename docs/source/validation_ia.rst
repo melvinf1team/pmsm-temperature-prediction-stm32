@@ -140,8 +140,8 @@ Live graphical interface
 `validation/test/temperature_validation_gui.py` provides a dedicated view for
 model-enabled mode. It reads `D6T;prediction;load` lines at 115200 baud,
 also accepts two-field `D6T;prediction` lines, and displays both temperatures
-to one decimal place. Its command rail contains five cards: `Collecte seule`,
-`Profil stable`, `Charge variable`, `Vitesse variable`, and `Tout variable`.
+to one decimal place. Its command rail contains five cards: `Collect only`,
+`Stable profile`, `Variable load`, `Variable speed`, and `All variable`.
 Each card includes a compact speed/load signature and keeps selection, pending
 command, and active-profile states visually distinct.
 
@@ -152,12 +152,12 @@ command, and active-profile states visually distinct.
    .\.venv\Scripts\python.exe .\validation\test\temperature_validation_gui.py --demo
 
 Opening a connection only starts reception and CSV recording; it never starts
-the motor. With `Collecte seule`, **Démarrer ce profil** stays unavailable and
-no control command is sent. **Arrêter le moteur** also stays unavailable; use
-B2 itself to stop a run started with B2. This mode is suited to observation or
+the motor. With `Collect only`, **No motor commands** is shown and stays
+unavailable. No control command is sent. **Stop motor** also stays unavailable;
+use B2 itself to stop a run started with B2. This mode is suited to observation or
 to a run started physically with B2. For one of the other choices, press
-**Démarrer ce profil** to send its `PROFILE,<TOKEN>` command. Press **Arrêter
-le moteur** to send `STOP`. A profile request is shown as accepted only after
+**Start this profile** to send its `PROFILE,<TOKEN>` command. Press **Stop
+motor** to send `STOP`. A profile request is shown as accepted only after
 its matching `ACK,PROFILE,<TOKEN>` is received; this acknowledgment means that
 the profile is armed, not necessarily that MCSDK has already reached `RUN`.
 An `ERR` line is reported in the status area. Disconnecting or closing a
@@ -178,7 +178,7 @@ errors. Both are in °C and use the same display thresholds: green below
 above 1.5 °C.
 
 The chart shows the latest 90 seconds. Session readings are automatically
-written to `validation/validation_ia_YYYYMMDD_HHMMSS_microsecondes.csv` and
+written to `validation/validation_ia_YYYYMMDD_HHMMSS_microseconds.csv` and
 include `load_setpoint_a` as the final column. Two-field samples store
 `NaN` for that column. Files can be exported elsewhere at full precision.
 `requirements.txt` lists `pyserial` and `matplotlib`; Tkinter ships with

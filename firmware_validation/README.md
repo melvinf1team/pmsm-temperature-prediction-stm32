@@ -159,10 +159,10 @@ stream.
 
 The companion `validation/test/temperature_validation_gui.py` separates the
 serial connection from motor control. Connecting never sends a motor command.
-Its visual `Collecte seule` card records the stream without controlling the
+Its visual `Collect only` card records the stream without controlling the
 motor, allowing B2 to start `VARIABLE_ALL` physically. The four controlled
 cards map to the four `PROFILE,<TOKEN>` commands and are started explicitly
-with **Démarrer ce profil**; **Arrêter le moteur** sends `STOP` only after the
+with **Start this profile**; **Stop motor** sends `STOP` only after the
 GUI has launched a profile. A pure collection session neither stops a B2 run
 nor sends a command when closing. When it owns the active profile, the GUI
 attempts a safety `STOP` before disconnecting or closing.

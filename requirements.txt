@@ -1,14 +1,14 @@
-# Dashboard et outils de validation serie
+# Dashboard and serial validation tools
 pyserial
 matplotlib
 
-# Pretraitement et tests de parite firmware
+# Preprocessing and firmware parity tests
 numpy
 pandas
 ConfigArgParse
 PyYAML
 openpyxl
 
-# Documentation locale
+# Local documentation
 sphinx
 sphinx-rtd-theme

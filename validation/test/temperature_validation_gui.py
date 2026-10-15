@@ -59,11 +59,11 @@ PROFILE_LABELS_BY_TOKEN = {
     token: label for label, token in PROFILE_COMMAND_TOKENS.items()
 }
 PROFILE_DESCRIPTIONS = {
-    PROFILE_COLLECT_ONLY: "Observation uniquement : aucune commande moteur, le bouton physique B2 reste disponible.",
-    PROFILE_STABLE: "2500 tr/min et 0,10 A, avec un démarrage protégé à 0,05 A.",
-    PROFILE_VARIABLE_LOAD: "2500 tr/min, charge aléatoire de 0,05 à 0,25 A toutes les 2 à 5 s.",
-    PROFILE_VARIABLE_SPEED: "Vitesse aléatoire toutes les 2 à 5 s, charge fixe de 0,10 A après le démarrage.",
-    PROFILE_ALL_VARIABLE: "Vitesse et charge évoluent toutes les 2 à 5 s, comme avec le bouton B2.",
+    PROFILE_COLLECT_ONLY: "Observation only: no motor commands; the physical B2 button remains available.",
+    PROFILE_STABLE: "2500 rpm and 0.10 A, with a protected start at 0.05 A.",
+    PROFILE_VARIABLE_LOAD: "2500 rpm, random load from 0.05 to 0.25 A every 2 to 5 s.",
+    PROFILE_VARIABLE_SPEED: "Random speed every 2 to 5 s, fixed 0.10 A load after startup.",
+    PROFILE_ALL_VARIABLE: "Speed and load change every 2 to 5 s, as with the B2 button.",
 }
 VALIDATION_DIRECTORY = Path(__file__).resolve().parents[1]
 CSV_HEADER = (
@@ -102,36 +102,36 @@ COLORS = {
 
 PROFILE_PRESENTATION = {
     PROFILE_COLLECT_ONLY: {
-        "title": "Collecte seule",
-        "spec": "Aucune commande moteur",
+        "title": "Collect only",
+        "spec": "No motor commands",
         "accent": COLORS["neutral"],
         "speed_variable": False,
         "load_variable": False,
     },
     PROFILE_STABLE: {
-        "title": "Profil stable",
-        "spec": "2500 tr/min  ·  0,10 A",
+        "title": "Stable profile",
+        "spec": "2500 rpm  ·  0.10 A",
         "accent": COLORS["green"],
         "speed_variable": False,
         "load_variable": False,
     },
     PROFILE_VARIABLE_LOAD: {
-        "title": "Charge variable",
-        "spec": "2500 tr/min  ·  0,05–0,25 A",
+        "title": "Variable load",
+        "spec": "2500 rpm  ·  0.05–0.25 A",
         "accent": COLORS["load"],
         "speed_variable": False,
         "load_variable": True,
     },
     PROFILE_VARIABLE_SPEED: {
-        "title": "Vitesse variable",
-        "spec": "2000–4000 tr/min  ·  0,10 A",
+        "title": "Variable speed",
+        "spec": "2000–4000 rpm  ·  0.10 A",
         "accent": COLORS["blue"],
         "speed_variable": True,
         "load_variable": False,
     },
     PROFILE_ALL_VARIABLE: {
-        "title": "Tout variable",
-        "spec": "Vitesse + charge  ·  toutes les 2–5 s",
+        "title": "All variable",
+        "spec": "Speed + load  ·  every 2–5 s",
         "accent": COLORS["purple"],
         "speed_variable": True,
         "load_variable": True,
@@ -359,7 +359,7 @@ class TemperatureValidationApp(tk.Tk):
     def __init__(self, *, demo: bool = False, initial_port: str | None = None) -> None:
         super().__init__()
 
-        self.title("Validation thermique NanoEdge AI")
+        self.title("NanoEdge AI Temperature Validation")
         self.geometry("1320x780")
         self.minsize(1040, 760)
         self.configure(bg=COLORS["background"])
@@ -392,15 +392,15 @@ class TemperatureValidationApp(tk.Tk):
         self.pending_control_command: str | None = None
         self.control_command_error: str | None = None
         self.gui_started_motor = False
-        self.status_var = tk.StringVar(value="Prêt à connecter la carte")
-        self.serial_state_var = tk.StringVar(value="Série · hors ligne")
-        self.data_state_var = tk.StringVar(value="Données · en attente")
-        self.motor_state_var = tk.StringVar(value="Moteur · non piloté")
+        self.status_var = tk.StringVar(value="Ready to connect the board")
+        self.serial_state_var = tk.StringVar(value="Serial · offline")
+        self.data_state_var = tk.StringVar(value="Data · waiting")
+        self.motor_state_var = tk.StringVar(value="Motor · not controlled")
         self.sample_count_var = tk.StringVar(value="0")
         self.rate_var = tk.StringVar(value="0.0 Hz")
         self.invalid_var = tk.StringVar(value="0")
         self.load_value_var = tk.StringVar(value="—")
-        self.instant_error_detail_var = tk.StringVar(value="En attente de données")
+        self.instant_error_detail_var = tk.StringVar(value="Waiting for data")
         self.profile_context_var = tk.StringVar(
             value=PROFILE_DESCRIPTIONS[PROFILE_COLLECT_ONLY]
         )
@@ -537,16 +537,16 @@ class TemperatureValidationApp(tk.Tk):
 
         actual_panel, self.actual_value_label = self.build_temperature_panel(
             dashboard,
-            title="TEMP. MESURÉE",
-            subtitle="Capteur infrarouge D6T",
+            title="MEASURED TEMP.",
+            subtitle="D6T infrared sensor",
             accent=COLORS["actual"],
         )
         actual_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
 
         predicted_panel, self.predicted_value_label = self.build_temperature_panel(
             dashboard,
-            title="PRÉDICTION IA",
-            subtitle="Estimation NanoEdge AI",
+            title="AI PREDICTION",
+            subtitle="NanoEdge AI estimate",
             accent=COLORS["predicted"],
         )
         predicted_panel.grid(row=0, column=1, sticky="nsew", padx=5)
@@ -557,7 +557,7 @@ class TemperatureValidationApp(tk.Tk):
             self.instant_error_labels,
         ) = self.build_error_panel(
             dashboard,
-            title="ERREUR |e|",
+            title="ERROR |e|",
             subtitle_variable=self.instant_error_detail_var,
         )
         self.instant_error_frame.grid(row=0, column=2, sticky="nsew", padx=5)
@@ -568,8 +568,8 @@ class TemperatureValidationApp(tk.Tk):
             self.cumulative_error_labels,
         ) = self.build_error_panel(
             dashboard,
-            title="MAE SESSION",
-            subtitle="Moyenne depuis le départ",
+            title="SESSION MAE",
+            subtitle="Average since session start",
         )
         self.cumulative_error_frame.grid(row=0, column=3, sticky="nsew", padx=5)
 
@@ -698,14 +698,14 @@ class TemperatureValidationApp(tk.Tk):
         title_block.grid(row=0, column=0, sticky="w", padx=24, pady=8)
         tk.Label(
             title_block,
-            text="VALIDATION EMBARQUÉE  ·  NANOEDGE AI",
+            text="EMBEDDED VALIDATION  ·  NANOEDGE AI",
             bg=COLORS["header"],
             fg=COLORS["header_muted"],
             font=("Segoe UI Semibold", 8),
         ).pack(anchor="w")
         tk.Label(
             title_block,
-            text="Température moteur",
+            text="Motor temperature",
             bg=COLORS["header"],
             fg="#FFFFFF",
             font=("Segoe UI Semibold", 20),
@@ -804,7 +804,7 @@ class TemperatureValidationApp(tk.Tk):
 
         tk.Label(
             toolbar,
-            text="CONNEXION CARTE",
+            text="BOARD CONNECTION",
             bg=COLORS["surface"],
             fg=COLORS["muted"],
             font=("Segoe UI Semibold", 8),
@@ -821,7 +821,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.refresh_button = ttk.Button(
             toolbar,
-            text="Actualiser",
+            text="Refresh",
             command=self.refresh_ports,
             style="Secondary.TButton",
         )
@@ -829,7 +829,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.connect_button = ttk.Button(
             toolbar,
-            text="Connecter",
+            text="Connect",
             command=self.toggle_connection,
             style="Primary.TButton",
         )
@@ -843,7 +843,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.reset_button = ttk.Button(
             toolbar,
-            text="Réinitialiser",
+            text="Reset",
             command=self.reset_session,
             style="Secondary.TButton",
         )
@@ -851,7 +851,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.export_button = ttk.Button(
             toolbar,
-            text="Exporter CSV",
+            text="Export CSV",
             command=self.export_csv,
             style="Secondary.TButton",
             state=tk.DISABLED,
@@ -872,14 +872,14 @@ class TemperatureValidationApp(tk.Tk):
         heading.grid(row=0, column=0, sticky="ew", padx=18, pady=(13, 8))
         tk.Label(
             heading,
-            text="PROFIL DE TEST",
+            text="TEST PROFILE",
             bg=COLORS["surface"],
             fg=COLORS["ink"],
             font=("Segoe UI Semibold", 11),
         ).pack(anchor="w")
         tk.Label(
             heading,
-            text="Sélectionnez un scénario, puis lancez-le explicitement.",
+            text="Select a scenario, then start it explicitly.",
             bg=COLORS["surface"],
             fg=COLORS["muted"],
             font=("Segoe UI", 8),
@@ -912,7 +912,7 @@ class TemperatureValidationApp(tk.Tk):
         tk.Frame(safety, bg=COLORS["green"], width=4).pack(side="left", fill="y")
         tk.Label(
             safety,
-            text="DÉMARRAGE SÉCURISÉ  ·  charge à 0,05 A avant RUN",
+            text="SAFE START  ·  0.05 A load before RUN",
             bg="#EEF8F4",
             fg="#176B49",
             font=("Segoe UI Semibold", 7),
@@ -926,7 +926,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.launch_profile_button = ttk.Button(
             actions,
-            text="Démarrer ce profil",
+            text="Start this profile",
             command=self.launch_selected_profile,
             style="Primary.TButton",
             state=tk.DISABLED,
@@ -935,7 +935,7 @@ class TemperatureValidationApp(tk.Tk):
 
         self.stop_motor_button = ttk.Button(
             actions,
-            text="Arrêter le moteur",
+            text="Stop motor",
             command=self.stop_motor,
             style="Danger.TButton",
             state=tk.DISABLED,
@@ -1046,14 +1046,14 @@ class TemperatureValidationApp(tk.Tk):
         canvas.create_text(
             4,
             10,
-            text="V",
+            text="S",
             fill=COLORS["muted"],
             font=("Segoe UI", 6, "bold"),
         )
         canvas.create_text(
             4,
             28,
-            text="C",
+            text="L",
             fill=COLORS["muted"],
             font=("Segoe UI", 6, "bold"),
         )
@@ -1143,11 +1143,11 @@ class TemperatureValidationApp(tk.Tk):
             assert isinstance(signal, tk.Canvas)
             badge.configure(bg=background)
             if is_pending:
-                badge.configure(text="ENVOI…", fg=COLORS["orange"])
+                badge.configure(text="SENDING…", fg=COLORS["orange"])
             elif is_active:
-                badge.configure(text="ACTIF", fg=COLORS["green"])
+                badge.configure(text="ACTIVE", fg=COLORS["green"])
             elif is_selected:
-                badge.configure(text="SÉLECTION", fg=str(presentation["accent"]))
+                badge.configure(text="SELECTED", fg=str(presentation["accent"]))
             else:
                 badge.configure(text="")
 
@@ -1242,7 +1242,7 @@ class TemperatureValidationApp(tk.Tk):
 
         band_label = tk.Label(
             panel,
-            text="EN ATTENTE",
+            text="WAITING",
             bg=background,
             fg=COLORS["neutral"],
             font=("Segoe UI Semibold", 6),
@@ -1293,7 +1293,7 @@ class TemperatureValidationApp(tk.Tk):
         tk.Frame(panel, bg=COLORS["load"], height=4).grid(row=0, column=0, sticky="ew")
         tk.Label(
             panel,
-            text="CHARGE TB-200S",
+            text="TB-200S LOAD",
             bg=COLORS["surface"],
             fg=COLORS["load"],
             font=("Segoe UI Semibold", 8),
@@ -1347,7 +1347,7 @@ class TemperatureValidationApp(tk.Tk):
         canvas.create_text(
             x_start,
             17,
-            text="0,05",
+            text="0.05",
             anchor="w",
             fill=COLORS["muted"],
             font=("Segoe UI", 6),
@@ -1355,7 +1355,7 @@ class TemperatureValidationApp(tk.Tk):
         canvas.create_text(
             x_end,
             17,
-            text="0,25 A",
+            text="0.25 A",
             anchor="e",
             fill=COLORS["muted"],
             font=("Segoe UI", 6),
@@ -1378,14 +1378,14 @@ class TemperatureValidationApp(tk.Tk):
         chart_title.grid(row=0, column=0, sticky="w")
         tk.Label(
             chart_title,
-            text="Historique temps réel",
+            text="Real-time history",
             bg=COLORS["surface"],
             fg=COLORS["ink"],
             font=("Segoe UI Semibold", 12),
         ).pack(anchor="w")
         tk.Label(
             chart_title,
-            text="D6T / IA, erreur absolue et consigne de charge · fenêtre de 90 secondes",
+            text="D6T / AI, absolute error and load setpoint · 90-second window",
             bg=COLORS["surface"],
             fg=COLORS["muted"],
             font=("Segoe UI", 7),
@@ -1393,9 +1393,9 @@ class TemperatureValidationApp(tk.Tk):
 
         stats = tk.Frame(chart_header, bg=COLORS["surface"])
         stats.grid(row=0, column=1, sticky="e")
-        self.build_stat(stats, "ÉCHANTILLONS", self.sample_count_var).pack(side="left", padx=4)
-        self.build_stat(stats, "FRÉQUENCE", self.rate_var).pack(side="left", padx=4)
-        self.build_stat(stats, "TRAMES INVALIDES", self.invalid_var).pack(side="left", padx=(4, 0))
+        self.build_stat(stats, "SAMPLES", self.sample_count_var).pack(side="left", padx=4)
+        self.build_stat(stats, "RATE", self.rate_var).pack(side="left", padx=4)
+        self.build_stat(stats, "INVALID FRAMES", self.invalid_var).pack(side="left", padx=(4, 0))
 
         self.figure = Figure(figsize=(10, 5), dpi=100, facecolor=COLORS["surface"])
         grid = self.figure.add_gridspec(
@@ -1414,7 +1414,7 @@ class TemperatureValidationApp(tk.Tk):
             [],
             color=COLORS["actual"],
             linewidth=2.4,
-            label="Mesure D6T",
+            label="D6T measurement",
         )
         self.predicted_line, = self.temperature_axis.plot(
             [],
@@ -1422,7 +1422,7 @@ class TemperatureValidationApp(tk.Tk):
             color=COLORS["predicted"],
             linewidth=2.1,
             linestyle=(0, (6, 3)),
-            label="Prédiction IA",
+            label="AI prediction",
         )
         self.error_line, = self.error_axis.plot(
             [],
@@ -1445,7 +1445,7 @@ class TemperatureValidationApp(tk.Tk):
         self.waiting_text = self.temperature_axis.text(
             0.5,
             0.50,
-            "En attente de télémétrie",
+            "Waiting for telemetry",
             transform=self.temperature_axis.transAxes,
             ha="center",
             va="center",
@@ -1455,7 +1455,7 @@ class TemperatureValidationApp(tk.Tk):
         self.load_empty_text = self.load_axis.text(
             0.5,
             0.5,
-            "Charge non transmise",
+            "Load not transmitted",
             transform=self.load_axis.transAxes,
             ha="center",
             va="center",
@@ -1516,7 +1516,7 @@ class TemperatureValidationApp(tk.Tk):
         self.temperature_axis.set_ylabel("Temp. (°C)", color=COLORS["muted"], fontsize=8)
         self.error_axis.set_ylabel("|e|", color=COLORS["muted"], fontsize=7)
         self.load_axis.set_ylabel("A", color=COLORS["muted"], fontsize=7)
-        self.load_axis.set_xlabel("Temps écoulé (s)", color=COLORS["muted"], fontsize=8)
+        self.load_axis.set_xlabel("Elapsed time (s)", color=COLORS["muted"], fontsize=8)
         self.error_axis.yaxis.set_major_locator(MaxNLocator(nbins=3, prune="upper"))
         self.load_axis.set_ylim(0.04, 0.26)
         self.load_axis.set_yticks((0.05, 0.15, 0.25))
@@ -1617,13 +1617,13 @@ class TemperatureValidationApp(tk.Tk):
         self.launch_profile_button.configure(
             state=tk.NORMAL if can_launch else tk.DISABLED,
             text=(
-                "Commande en cours…"
+                "Command in progress…"
                 if self.pending_control_command is not None
-                else "Aucune commande moteur"
+                else "No motor commands"
                 if profile == PROFILE_COLLECT_ONLY
-                else "Appliquer ce profil"
+                else "Apply this profile"
                 if self.gui_started_motor
-                else "Démarrer ce profil"
+                else "Start this profile"
             ),
         )
         self.stop_motor_button.configure(
@@ -1632,16 +1632,16 @@ class TemperatureValidationApp(tk.Tk):
 
         context = PROFILE_DESCRIPTIONS[profile]
         if profile == PROFILE_COLLECT_ONLY and self.gui_started_motor:
-            context += " Le moteur déjà commandé continue : utilisez « Arrêter le moteur » pour l'immobiliser."
+            context += " The previously started motor is still running: use 'Stop motor' to stop it."
         elif self.control_command_error is not None:
-            context = f"Erreur firmware : {self.control_command_error}"
+            context = f"Firmware error: {self.control_command_error}"
         elif self.pending_control_command is not None:
-            context = "Commande envoyée. En attente de l'accusé de réception du firmware…"
+            context = "Command sent. Waiting for firmware acknowledgment…"
         elif self.active_profile_token is not None:
             active_profile = PROFILE_LABELS_BY_TOKEN.get(self.active_profile_token)
             if active_profile is not None:
                 active_title = PROFILE_PRESENTATION[active_profile]["title"]
-                context = f"Profil actif : {active_title}. {context}"
+                context = f"Active profile: {active_title}. {context}"
         self.profile_context_var.set(context)
         self.refresh_profile_cards()
         self.update_system_indicators()
@@ -1668,35 +1668,35 @@ class TemperatureValidationApp(tk.Tk):
             return
 
         if self.demo_mode:
-            self.set_state_indicator("serial", "Série · mode démo", COLORS["blue"])
+            self.set_state_indicator("serial", "Serial · demo mode", COLORS["blue"])
         elif self.serial_connection is not None:
-            self.set_state_indicator("serial", "Série · connectée", COLORS["green"])
+            self.set_state_indicator("serial", "Serial · connected", COLORS["green"])
         else:
-            self.set_state_indicator("serial", "Série · hors ligne", COLORS["neutral"])
+            self.set_state_indicator("serial", "Serial · offline", COLORS["neutral"])
 
         if self.demo_mode:
-            self.set_state_indicator("data", "Données · simulées", COLORS["blue"])
+            self.set_state_indicator("data", "Data · simulated", COLORS["blue"])
         elif self.serial_connection is None:
-            self.set_state_indicator("data", "Données · inactives", COLORS["neutral"])
+            self.set_state_indicator("data", "Data · inactive", COLORS["neutral"])
         elif self.last_sample_monotonic is None:
-            self.set_state_indicator("data", "Données · en attente", COLORS["orange"])
+            self.set_state_indicator("data", "Data · waiting", COLORS["orange"])
         elif (time.monotonic() - self.last_sample_monotonic) > STALE_DATA_SECONDS:
-            self.set_state_indicator("data", "Données · flux en pause", COLORS["orange"])
+            self.set_state_indicator("data", "Data · stream paused", COLORS["orange"])
         else:
             self.set_state_indicator(
                 "data",
-                f"Données · direct {self.current_rate_hz():.1f} Hz",
+                f"Data · live {self.current_rate_hz():.1f} Hz",
                 COLORS["green"],
             )
 
         if self.demo_mode:
-            self.set_state_indicator("motor", "Moteur · non piloté", COLORS["neutral"])
+            self.set_state_indicator("motor", "Motor · not controlled", COLORS["neutral"])
         elif self.control_command_error is not None:
-            self.set_state_indicator("motor", "Moteur · erreur commande", COLORS["red"])
+            self.set_state_indicator("motor", "Motor · command error", COLORS["red"])
         elif self.pending_control_command == "STOP":
-            self.set_state_indicator("motor", "Moteur · arrêt demandé", COLORS["orange"])
+            self.set_state_indicator("motor", "Motor · stop requested", COLORS["orange"])
         elif self.pending_control_command is not None:
-            self.set_state_indicator("motor", "Moteur · démarrage…", COLORS["orange"])
+            self.set_state_indicator("motor", "Motor · starting…", COLORS["orange"])
         elif self.active_profile_token is not None:
             active_profile = PROFILE_LABELS_BY_TOKEN.get(self.active_profile_token)
             active_title = (
@@ -1704,17 +1704,17 @@ class TemperatureValidationApp(tk.Tk):
                 if active_profile is not None
                 else self.active_profile_token
             )
-            self.set_state_indicator("motor", f"Moteur · {active_title}", COLORS["green"])
+            self.set_state_indicator("motor", f"Motor · {active_title}", COLORS["green"])
         elif self.gui_started_motor:
-            self.set_state_indicator("motor", "Moteur · commande envoyée", COLORS["orange"])
+            self.set_state_indicator("motor", "Motor · command sent", COLORS["orange"])
         else:
-            self.set_state_indicator("motor", "Moteur · non piloté", COLORS["neutral"])
+            self.set_state_indicator("motor", "Motor · not controlled", COLORS["neutral"])
 
     def send_control_command(self, command: bytes, pending_command: str) -> bool:
         """Send one explicit motor command over the active serial connection."""
         connection = self.serial_connection
         if connection is None:
-            self.set_status("Connectez la carte avant d'envoyer une commande", COLORS["orange"])
+            self.set_status("Connect the board before sending a command", COLORS["orange"])
             return False
 
         try:
@@ -1724,14 +1724,14 @@ class TemperatureValidationApp(tk.Tk):
             self.pending_control_command = None
             self.control_command_error = str(exc)
             self.update_profile_controls_state()
-            self.set_status("Échec de la commande moteur", COLORS["red"])
-            messagebox.showerror("Échec de la commande moteur", str(exc))
+            self.set_status("Motor command failed", COLORS["red"])
+            messagebox.showerror("Motor command failed", str(exc))
             return False
 
         self.pending_control_command = pending_command
         self.control_command_error = None
         self.update_profile_controls_state()
-        self.set_status("Commande envoyée · attente de l'ACK firmware", COLORS["orange"])
+        self.set_status("Command sent · waiting for firmware ACK", COLORS["orange"])
         return True
 
     def launch_selected_profile(self) -> None:
@@ -1739,7 +1739,7 @@ class TemperatureValidationApp(tk.Tk):
         profile = self.selected_profile()
         command = build_profile_command(profile)
         if command is None:
-            self.set_status("Collecte seule · aucune commande moteur envoyée", COLORS["blue"])
+            self.set_status("Collect only · no motor command sent", COLORS["blue"])
             return
         token = PROFILE_COMMAND_TOKENS[profile]
         if self.send_control_command(command, f"PROFILE,{token}"):
@@ -1762,10 +1762,10 @@ class TemperatureValidationApp(tk.Tk):
 
         device = self.selected_port_device()
         if not device:
-            messagebox.showerror("Port série", "Aucun port COM n'est sélectionné.")
+            messagebox.showerror("Serial port", "No COM port is selected.")
             return
 
-        self.set_status("Connexion à la carte…", COLORS["blue"])
+        self.set_status("Connecting to the board…", COLORS["blue"])
         self.update_idletasks()
 
         connection: serial.Serial | None = None
@@ -1781,8 +1781,8 @@ class TemperatureValidationApp(tk.Tk):
         except Exception as exc:
             if connection is not None:
                 connection.close()
-            self.set_status("Échec de la connexion", COLORS["red"])
-            messagebox.showerror("Échec de la connexion", f"Impossible d'ouvrir {device} :\n{exc}")
+            self.set_status("Connection failed", COLORS["red"])
+            messagebox.showerror("Connection failed", f"Unable to open {device}:\n{exc}")
             return
 
         self.reset_session()
@@ -1790,10 +1790,10 @@ class TemperatureValidationApp(tk.Tk):
             self.start_automatic_export()
         except OSError as exc:
             connection.close()
-            self.set_status("Échec de l'enregistrement automatique", COLORS["red"])
+            self.set_status("Automatic recording failed", COLORS["red"])
             messagebox.showerror(
-                "Échec de l'enregistrement CSV",
-                f"Impossible de créer le fichier CSV :\n{exc}",
+                "CSV recording failed",
+                f"Unable to create the CSV file:\n{exc}",
             )
             return
 
@@ -1811,11 +1811,11 @@ class TemperatureValidationApp(tk.Tk):
             daemon=True,
         )
         self.reader_thread.start()
-        self.connect_button.configure(text="Déconnecter")
+        self.connect_button.configure(text="Disconnect")
         self.port_combo.configure(state=tk.DISABLED)
         self.refresh_button.configure(state=tk.DISABLED)
         self.update_profile_controls_state()
-        self.set_status("Carte connectée · attente des données", COLORS["orange"])
+        self.set_status("Board connected · waiting for data", COLORS["orange"])
 
     def disconnect_serial(self, *, stop_owned_motor: bool = True) -> None:
         connection = self.serial_connection
@@ -1842,14 +1842,14 @@ class TemperatureValidationApp(tk.Tk):
             except Exception:
                 pass
 
-        self.connect_button.configure(text="Connecter")
+        self.connect_button.configure(text="Connect")
         self.port_combo.configure(state="readonly")
         self.refresh_button.configure(state=tk.NORMAL)
         self.update_profile_controls_state()
         if stop_failed:
-            self.set_status("Déconnecté · impossible d'envoyer STOP", COLORS["red"])
+            self.set_status("Disconnected · unable to send STOP", COLORS["red"])
         else:
-            self.set_status("Carte déconnectée", COLORS["neutral"])
+            self.set_status("Board disconnected", COLORS["neutral"])
 
     def serial_reader_loop(
         self,
@@ -1914,7 +1914,7 @@ class TemperatureValidationApp(tk.Tk):
             self.pending_control_command = None
             self.control_command_error = control_line
             self.update_profile_controls_state()
-            self.set_status(f"Firmware : {control_line}", COLORS["red"])
+            self.set_status(f"Firmware: {control_line}", COLORS["red"])
             return
 
         if response_kind == "profile_ack" and token is not None:
@@ -1925,7 +1925,7 @@ class TemperatureValidationApp(tk.Tk):
             self.update_profile_controls_state()
             profile_label = PROFILE_LABELS_BY_TOKEN[token]
             profile_title = PROFILE_PRESENTATION[profile_label]["title"]
-            self.set_status(f"Profil actif · {profile_title}", COLORS["green"])
+            self.set_status(f"Active profile · {profile_title}", COLORS["green"])
             return
 
         if response_kind == "stop_ack":
@@ -1934,14 +1934,14 @@ class TemperatureValidationApp(tk.Tk):
             self.active_profile_token = None
             self.gui_started_motor = False
             self.update_profile_controls_state()
-            self.set_status("Moteur arrêté · acquisition toujours active", COLORS["blue"])
+            self.set_status("Motor stopped · acquisition still active", COLORS["blue"])
             return
 
         if response_kind == "ack":
             self.pending_control_command = None
             self.control_command_error = None
             self.update_profile_controls_state()
-            self.set_status(f"Firmware : {control_line}", COLORS["blue"])
+            self.set_status(f"Firmware: {control_line}", COLORS["blue"])
 
     def process_events(self) -> None:
         try:
@@ -1976,13 +1976,13 @@ class TemperatureValidationApp(tk.Tk):
                 elif event == "serial_warning":
                     generation, _message = payload  # type: ignore[misc]
                     if is_current_connection_event(generation, self.connection_generation):
-                        self.set_status("Liaison série · nouvelle tentative", COLORS["orange"])
+                        self.set_status("Serial connection · retrying", COLORS["orange"])
                 elif event == "serial_error":
                     generation, message = payload  # type: ignore[misc]
                     if is_current_connection_event(generation, self.connection_generation):
                         self.disconnect_serial(stop_owned_motor=False)
-                        self.set_status("Erreur de liaison série", COLORS["red"])
-                        messagebox.showerror("Erreur de liaison série", str(message))
+                        self.set_status("Serial connection error", COLORS["red"])
+                        messagebox.showerror("Serial connection error", str(message))
         except queue.Empty:
             pass
         self.after(QUEUE_REFRESH_MS, self.process_events)
@@ -2013,7 +2013,7 @@ class TemperatureValidationApp(tk.Tk):
         self.actual_value_label.configure(text=format_one_decimal(actual_c))
         self.predicted_value_label.configure(text=format_one_decimal(predicted_c))
         self.instant_error_detail_var.set(
-            f"IA {sample.signed_error_c:+.1f} °C par rapport au D6T"
+            f"AI {sample.signed_error_c:+.1f} °C relative to D6T"
         )
         self.update_error_panel(
             self.instant_error_frame,
@@ -2043,11 +2043,11 @@ class TemperatureValidationApp(tk.Tk):
             and self.pending_control_command is None
         ):
             if self.active_profile_token is None:
-                self.set_status("Flux de télémétrie actif", COLORS["green"])
+                self.set_status("Telemetry stream active", COLORS["green"])
             else:
                 profile_label = PROFILE_LABELS_BY_TOKEN[self.active_profile_token]
                 profile_title = PROFILE_PRESENTATION[profile_label]["title"]
-                self.set_status(f"Profil actif · {profile_title}", COLORS["green"])
+                self.set_status(f"Active profile · {profile_title}", COLORS["green"])
         self.update_system_indicators()
         self.record_automatic_sample(sample)
 
@@ -2070,10 +2070,10 @@ class TemperatureValidationApp(tk.Tk):
         except OSError as exc:
             failed_path = self.automatic_export.path
             self.stop_automatic_export()
-            self.set_status("Erreur d'enregistrement automatique", COLORS["red"])
+            self.set_status("Automatic recording error", COLORS["red"])
             messagebox.showerror(
-                "Enregistrement CSV interrompu",
-                f"Impossible d'écrire dans {failed_path.name} :\n{exc}",
+                "CSV recording interrupted",
+                f"Unable to write to {failed_path.name}:\n{exc}",
             )
 
     def update_error_panel(
@@ -2093,15 +2093,8 @@ class TemperatureValidationApp(tk.Tk):
             accent_bar.configure(bg=band.color)
         band_label = getattr(frame, "_band_label", None)
         if isinstance(band_label, tk.Label):
-            french_band_names = {
-                "Excellent": "EXCELLENT",
-                "Good": "BON",
-                "Needs attention": "ATTENTION",
-                "High error": "ÉLEVÉ",
-                "Waiting": "EN ATTENTE",
-            }
             band_label.configure(
-                text=french_band_names.get(band.name, band.name.upper()),
+                text=band.name.upper(),
                 fg=band.color,
             )
         if labels:
@@ -2129,7 +2122,7 @@ class TemperatureValidationApp(tk.Tk):
         if hasattr(self, "actual_value_label"):
             self.actual_value_label.configure(text="--.-")
             self.predicted_value_label.configure(text="--.-")
-            self.instant_error_detail_var.set("En attente de données")
+            self.instant_error_detail_var.set("Waiting for data")
             self.load_value_var.set("—")
             self.update_load_gauge(math.nan)
             self.update_error_panel(
@@ -2243,16 +2236,16 @@ class TemperatureValidationApp(tk.Tk):
 
     def refresh_connection_status(self) -> None:
         if self.demo_mode:
-            self.set_status("Mode démonstration", COLORS["blue"])
+            self.set_status("Demo mode", COLORS["blue"])
         elif self.serial_connection is not None:
             if self.control_command_error is not None:
-                self.set_status(f"Firmware : {self.control_command_error}", COLORS["red"])
+                self.set_status(f"Firmware: {self.control_command_error}", COLORS["red"])
             elif self.pending_control_command is not None:
-                self.set_status("Commande envoyée · attente de l'ACK firmware", COLORS["orange"])
+                self.set_status("Command sent · waiting for firmware ACK", COLORS["orange"])
             elif self.last_sample_monotonic is None:
-                self.set_status("Carte connectée · attente des données", COLORS["orange"])
+                self.set_status("Board connected · waiting for data", COLORS["orange"])
             elif (time.monotonic() - self.last_sample_monotonic) > STALE_DATA_SECONDS:
-                self.set_status("Flux de données interrompu", COLORS["orange"])
+                self.set_status("Data stream interrupted", COLORS["orange"])
         self.update_system_indicators()
         self.after(STATUS_REFRESH_MS, self.refresh_connection_status)
 
@@ -2266,10 +2259,10 @@ class TemperatureValidationApp(tk.Tk):
 
         default_name = f"validation_ia_{datetime.now():%Y%m%d_%H%M%S}.csv"
         path = filedialog.asksaveasfilename(
-            title="Exporter la session",
+            title="Export session",
             defaultextension=".csv",
             initialfile=default_name,
-            filetypes=[("Fichiers CSV", "*.csv")],
+            filetypes=[("CSV files", "*.csv")],
         )
         if not path:
             return
@@ -2282,18 +2275,18 @@ class TemperatureValidationApp(tk.Tk):
                 for sample in self.session_samples:
                     writer.writerow(csv_sample_row(sample))
         except OSError as exc:
-            messagebox.showerror("Échec de l'export", str(exc))
+            messagebox.showerror("Export failed", str(exc))
             return
 
-        self.set_status("Export CSV terminé", COLORS["blue"])
+        self.set_status("CSV export complete", COLORS["blue"])
 
     def start_demo_mode(self) -> None:
         self.port_combo.configure(state=tk.DISABLED)
         self.refresh_button.configure(state=tk.DISABLED)
-        self.connect_button.configure(state=tk.DISABLED, text="Démo")
+        self.connect_button.configure(state=tk.DISABLED, text="Demo")
         self.reset_session()
         self.demo_started_at = time.monotonic()
-        self.set_status("Mode démonstration", COLORS["blue"])
+        self.set_status("Demo mode", COLORS["blue"])
         self.after(100, self.demo_tick)
 
     def demo_tick(self) -> None:

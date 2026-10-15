@@ -3,13 +3,13 @@
 
 #include <stdbool.h>
 
-/* Bornes applicatives communes au contrôle moteur et au protocole série. */
+/* Application limits shared by motor control and the serial protocol. */
 #define APP_MOTOR_MAX_TARGET_SPEED_RPM       4500.0f
 #define APP_MOTOR_MAX_IQ_LIMIT_A             30.0f
 #define APP_MOTOR_MAX_TOTAL_CURRENT_A        30.0f
 
-/* TB-200S en mode 0-10 V / 0-3 A. Le DAC 0-3,3 V couvre largement la
- * plage de charge volontairement limitée à 0,05-0,25 A. */
+/* TB-200S in 0-10 V / 0-3 A mode. The 0-3.3 V DAC easily covers the
+ * load range deliberately limited to 0.05-0.25 A. */
 #define APP_TB200S_MIN_LOAD_A                 0.05f
 #define APP_TB200S_MAX_LOAD_A                 0.25f
 
@@ -41,8 +41,8 @@ bool AppMotorControl_Start(void);
 void AppMotorControl_Stop(void);
 bool AppMotorControl_IsRunning(void);
 
-/* Arme puis lance le profil de facon non bloquante. Si le moteur tourne deja,
- * il est d'abord arrete et le redemarrage attend que le MCSDK revienne IDLE. */
+/* Arm and start the profile without blocking. If the motor is already running,
+ * stop it first and wait for MCSDK to return to IDLE before restarting. */
 AppMotorProfileStartResult_t AppMotorControl_StartProfile(
   AppMotorProfile_t profile);
 

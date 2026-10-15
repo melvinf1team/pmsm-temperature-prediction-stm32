@@ -8,9 +8,9 @@
 #include "NanoEdgeAI.h"
 
 _Static_assert(NEAI_INPUT_SIGNAL_LENGTH == 1,
-               "Le modele NEAI doit utiliser un echantillon par axe");
+               "The NEAI model must use one sample per axis");
 _Static_assert(NEAI_INPUT_AXIS_NUMBER == PREPROCESS_EWMA_OUTPUT_COUNT,
-               "Le modele NEAI doit accepter les 55 features EWMA");
+               "The NEAI model must accept all 55 EWMA features");
 #endif
 
 static bool app_ai_model_ready = false;

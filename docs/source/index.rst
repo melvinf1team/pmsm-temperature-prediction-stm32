@@ -15,6 +15,7 @@ Recommended reading
 -------------------
 
 * :doc:`installation` to prepare Python, STM32CubeIDE, and both firmware projects;
+* :doc:`bom` for test bench component references, prices, and supplier links;
 * :doc:`cablage` before applying power;
 * :doc:`utilisation` and :doc:`datalogging` to acquire raw CSV files;
 * :doc:`pretraitement` to produce the 55 features expected by the model;
@@ -46,6 +47,7 @@ The versioned NanoEdge AI export is a 55-input Ridge regression model with ID
    etat_projet
    installation
    architecture
+   bom
    cablage
    utilisation
    datalogging

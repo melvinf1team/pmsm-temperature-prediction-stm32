@@ -4,6 +4,8 @@ Wiring
 The setup uses an STM32 B-G473E-ZEST1S board with an STDES-LVHP01 power board.
 External sensors share the board's ground and must be supplied at the voltage
 specified in their datasheets.
+Component references, quantities, prices, and supplier links are listed in
+:doc:`bom`.
 
 .. danger::
 

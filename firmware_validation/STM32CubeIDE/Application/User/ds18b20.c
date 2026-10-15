@@ -11,14 +11,14 @@
 #define DS18B20_CMD_WRITE_SCRATCH  0x4EU
 
 /*
- * Nombre de tentatives de lecture scratchpad avant de considérer
- * qu'une mesure fraîche a échoué.
+ * Number of scratchpad read attempts before considering a fresh
+ * measurement unsuccessful.
  */
 #define DS18B20_READ_RETRY_COUNT   3U
 
 /*
  * ================================
- * CACHE DERNIERE VALEUR VALIDE
+ * LAST VALID VALUE CACHE
  * ================================
  */
 
@@ -27,12 +27,12 @@ static int16_t ds18b20_last_temp_centi = 0;
 
 /*
  * ================================
- * CRITICAL SECTIONS COURTES
+ * SHORT CRITICAL SECTIONS
  * ================================
  *
- * On ne bloque plus jamais les IRQ pendant toute une transaction.
- * On protège uniquement les fenêtres de quelques microsecondes où le timing
- * du 1-Wire est vraiment critique.
+ * Never block IRQs for an entire transaction.
+ * Protect only the windows of a few microseconds where 1-Wire timing
+ * is critical.
  */
 
 static uint32_t DS18B20_EnterTinyCritical(void)
@@ -52,7 +52,7 @@ static void DS18B20_ExitTinyCritical(uint32_t primask)
 
 /*
  * ================================
- * TIMING DWT
+ * DWT TIMING
  * ================================
  */
 
@@ -77,12 +77,12 @@ static void DS18B20_DelayUs(uint32_t us)
 
 /*
  * ================================
- * GPIO 1-WIRE
+ * 1-WIRE GPIO
  * ================================
  *
- * IMPORTANT HARDWARE :
- * La pin DS18B20_DQ doit être en Open-Drain avec pull-up.
- * Idéalement pull-up externe 4.7 kΩ vers 3.3 V.
+ * HARDWARE REQUIREMENTS:
+ * The DS18B20_DQ pin must use open-drain mode with a pull-up.
+ * Prefer an external 4.7 kOhm pull-up to 3.3 V.
  */
 
 static void DS18B20_LineLow(void)
@@ -93,7 +93,7 @@ static void DS18B20_LineLow(void)
 static void DS18B20_LineRelease(void)
 {
   /*
-   * Si la GPIO est bien en open-drain, écrire SET relâche la ligne.
+   * If the GPIO is correctly configured as open-drain, writing SET releases the line.
    */
   HAL_GPIO_WritePin(DS18B20_DQ_GPIO_Port, DS18B20_DQ_Pin, GPIO_PIN_SET);
 }
@@ -105,7 +105,7 @@ static GPIO_PinState DS18B20_ReadLine(void)
 
 /*
  * ================================
- * PRIMITIVES 1-WIRE
+ * 1-WIRE PRIMITIVES
  * ================================
  */
 
@@ -114,8 +114,8 @@ static bool DS18B20_Reset(void)
   bool presence;
 
   /*
-   * Pas de critical section longue ici.
-   * Un reset 1-Wire tolère bien un pulse low plus long que 480 us.
+   * No long critical section is needed here.
+   * A 1-Wire reset tolerates a low pulse longer than 480 us.
    */
   DS18B20_LineLow();
   DS18B20_DelayUs(500U);
@@ -150,9 +150,9 @@ static void DS18B20_WriteBit(uint8_t bit)
   if (bit != 0U)
   {
     /*
-     * Write 1 :
-     * Timing critique court : low environ 6 us puis release.
-     * On protège seulement cette petite fenêtre.
+     * Write 1:
+     * Short critical timing: low for about 6 us, then release.
+     * Protect only this short window.
      */
     uint32_t primask = DS18B20_EnterTinyCritical();
 
@@ -167,11 +167,11 @@ static void DS18B20_WriteBit(uint8_t bit)
   else
   {
     /*
-     * Write 0 :
-     * Low long environ 60 us.
-     * On ne coupe PAS les IRQ pendant 60 us.
-     * Si une IRQ FOC arrive, le slot peut être un peu allongé,
-     * ce qui est préférable à casser le contrôle moteur.
+     * Write 0:
+     * Long low pulse of about 60 us.
+     * Do NOT disable IRQs for 60 us.
+     * If a FOC IRQ occurs, the slot may be slightly extended,
+     * which is preferable to disrupting motor control.
      */
     DS18B20_LineLow();
     DS18B20_DelayUs(62U);
@@ -186,13 +186,13 @@ static uint8_t DS18B20_ReadBit(void)
   uint32_t primask;
 
   /*
-   * Read bit :
-   * Fenêtre critique courte :
-   * - low bref ;
-   * - release ;
-   * - échantillonnage vers 12-15 us.
+   * Read bit:
+   * Short critical window:
+   * - brief low pulse;
+   * - release;
+   * - sample at about 12-15 us.
    *
-   * On garde les IRQ désactivées environ 13 us, pas plusieurs ms.
+   * Keep IRQs disabled for about 13 us, not several ms.
    */
   primask = DS18B20_EnterTinyCritical();
 
@@ -270,19 +270,19 @@ static uint8_t DS18B20_Crc8(const uint8_t *data, uint8_t len)
 
 /*
  * ================================
- * COMMANDES HAUT NIVEAU
+ * HIGH-LEVEL COMMANDS
  * ================================
  */
 
 static bool DS18B20_ConfigureSensor(void)
 {
   /*
-   * Optionnel mais utile.
-   * On écrit la config scratchpad en 12 bits par défaut :
+   * Optional but useful.
+   * Write the default 12-bit scratchpad configuration:
    * TH=0x4B, TL=0x46, CONFIG=0x7F.
    *
-   * Ça reste du 1-Wire standard.
-   * Ce n'est pas indispensable, mais ça remet le capteur dans un état connu.
+   * This uses standard 1-Wire commands.
+   * It is not essential, but it restores the sensor to a known state.
    */
   if (!DS18B20_ResetRetry())
   {
@@ -307,8 +307,8 @@ void DS18B20_Init(void)
   ds18b20_last_temp_centi = 0;
 
   /*
-   * Si ça échoue ici, ce n'est pas grave :
-   * les lectures suivantes tenteront quand même.
+   * A failure here is not fatal:
+   * subsequent reads will still be attempted.
    */
   (void)DS18B20_ConfigureSensor();
 }
@@ -318,7 +318,7 @@ bool DS18B20_StartMeasurement(void)
   bool ok;
 
   /*
-   * On ne met PAS toute cette transaction en critical section.
+   * Do NOT place this entire transaction in a critical section.
    */
   ok = DS18B20_ResetRetry();
 

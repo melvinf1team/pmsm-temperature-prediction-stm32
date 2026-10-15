@@ -428,11 +428,11 @@ python .\validation\test\temperature_validation_gui.py --port COM5
 python .\validation\test\temperature_validation_gui.py --demo
 ```
 
-The interface presents five profile cards: `Collecte seule`,
-`Profil stable`, `Charge variable`, `Vitesse variable`, and `Tout variable`.
-Connecting never starts the motor. In `Collecte seule`, the GUI sends no motor
+The interface presents five profile cards: `Collect only`,
+`Stable profile`, `Variable load`, `Variable speed`, and `All variable`.
+Connecting never starts the motor. In `Collect only`, the GUI sends no motor
 command, so B2 can launch the standalone all-variable profile. For another
-selection, **Démarrer ce profil** sends `PROFILE,<TOKEN>`; **Arrêter le moteur**
+selection, **Start this profile** sends `PROFILE,<TOKEN>`; **Stop motor**
 is enabled only for a profile launched by the GUI and sends `STOP`. A
 collection-only disconnect sends no command; when the GUI owns the active
 profile, disconnecting or closing attempts a safety `STOP`.
