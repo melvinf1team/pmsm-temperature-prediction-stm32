@@ -22,5 +22,17 @@
     "ds18b20_ms": 1000,
     "load_mode": "Fixed",
     "load_setpoint_a": 0.25
+  },
+  {
+    "name": "Max 2",
+    "speed_value": 2500.0,
+    "speed_unit": "rpm",
+    "iq_limit_a": 30.0,
+    "hard_limit_a": 30.0,
+    "accel_elec_hz_s": 50.0,
+    "datalog_ms": 100,
+    "ds18b20_ms": 1000,
+    "load_mode": "Fixed",
+    "load_setpoint_a": 0.25
   }
 ]
