@@ -360,6 +360,37 @@ exceeds the absolute 4500 rpm ceiling.
 > into the bus. Monitor bus voltage and validate absorption or braking
 > capacity before the test.
 
+## Progressive Id and thermal protection (both firmwares)
+
+`Inc/app_motor_control.h` in each project defines `APP_ID_TARGET_A` (2 A)
+and `APP_ID_RAMP_A_PER_S` (0.25 A/s). Id starts at zero. After `RUN`, the
+speed must remain within 5% of the target (at least 50 rpm tolerance) for
+one second before Id increases. Reaching 2 A then takes about eight seconds
+at stable speed. A speed transition pauses the increase; a stop, fault, or
+new runtime configuration resets Id to zero. Set the target to zero in both
+headers to disable heating. This is a fixed current setting, not a 60 C
+temperature regulator. No UART command or CSV column has been added for Id;
+the existing `motor_id_a` column is the measured current.
+
+The Id/Iq reference circle remains bounded by the existing current ceilings.
+When Id is active, the application reserves vector-current headroom for Iq
+where possible, never exceeding the configured hard-stop limit or 30 A.
+Id is reduced if the measured Iq leaves insufficient total-current headroom.
+
+A fresh D6T reading is now required to start and keep the motor running.
+A selected-pixel temperature **strictly above 70 C** stops the motor,
+clears Id and pending starts, and restores the minimum TB-200S command.
+Missing readings or a last valid reading older than 1000 ms have the same
+effect. The UART reports `#FAULT,D6T_OVERTEMP` or `#FAULT,D6T_UNAVAILABLE`;
+a rejected profile returns `ERR,THERMAL_PROTECTION`. Recovery requires a
+fresh reading at or below 65 C and a new `START`, `PROFILE`, or B2 action.
+Cooling alone never restarts the motor. Logging can continue during cooling.
+These checks do not depend on logging periods or the AI prediction.
+
+Separately, the MCSDK power-board NTC threshold is **100 C**, with the
+existing 10 C hysteresis (fault clears below approximately 90 C). The
+generated headers, `.ioc`, `.ioc.wb`, and `.wbdef` settings agree.
+
 ## NanoEdge AI validation firmware
 
 The `firmware_validation/STM32CubeIDE` project recomputes the same 55 features

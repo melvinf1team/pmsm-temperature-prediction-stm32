@@ -825,7 +825,8 @@ static void AppSerial_HandleProfile(const char *line)
     AppDatalog_StopLogging();
     AppSerial_SendErr((result == APP_MOTOR_PROFILE_START_LOAD_ERROR)
                       ? "LOAD_DAC_FAILED"
-                      : "PROFILE_REJECTED");
+                      : ((result == APP_MOTOR_PROFILE_START_THERMAL_ERROR)
+                          ? "THERMAL_PROTECTION" : "PROFILE_REJECTED"));
     return;
   }
 

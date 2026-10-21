@@ -16,7 +16,8 @@ Select the mode at compile time in `Inc/app_config.h`:
 - `0U`: skip the model and output 55 features for the Serial Emulator.
 
 The stream starts automatically at boot. It contains no header, `DATA`
-prefix, or diagnostic text. USART1 uses 115200 baud, 8N1.
+prefix during normal acquisition. Fault events use `#FAULT,<reason>` lines;
+serial commands still return ACK/ERR lines. USART1 uses 115200 baud, 8N1.
 
 ## Organization
 
@@ -40,6 +41,20 @@ the D6T pixel calibration tool are in `../tests/bench` (see `../tests/README.md`
 tools. Review any CubeMX/Workbench regeneration before integrating it.
 
 ## Motor limits and B2 profile
+
+Both projects apply a positive Id target of 2 A at 0.25 A/s after one second
+of stable RUN speed. Configure `APP_ID_TARGET_A` and `APP_ID_RAMP_A_PER_S`
+in `Inc/app_motor_control.h`; zero disables heating. Stops, faults and new
+runtime configurations reset Id. Current ceilings still apply.
+
+The motor stops if the selected D6T pixel exceeds 70 C or its last valid
+reading is unavailable/older than 1000 ms. Startup is blocked in those cases.
+After a thermal/sensor fault, restart requires a fresh reading at or below
+65 C and a new command/button press. Faults report `#FAULT,D6T_OVERTEMP`
+or `#FAULT,D6T_UNAVAILABLE`; a blocked profile returns
+`ERR,THERMAL_PROTECTION`. The protection also runs in Serial Emulator mode
+and does not use the AI prediction. The independent power-board NTC cutoff
+is 100 C with 10 C hysteresis. See the root README for the complete behavior.
 
 Limits shared by the dashboard and both firmware projects are 4500 rpm,
 30 A for `Iq`, and 30 A for total current. The current sensor has a calculated

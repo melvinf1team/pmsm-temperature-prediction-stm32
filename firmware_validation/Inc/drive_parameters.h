@@ -103,7 +103,7 @@
 #ifdef NOT_IMPLEMENTED
 #define ON_OVER_VOLTAGE                     TURN_OFF_PWM /*!< TURN_OFF_PWM, TURN_ON_R_BRAKE or TURN_ON_LOW_SIDES */
 #endif /* NOT_IMPLEMENTED */
-#define OV_TEMPERATURE_THRESHOLD_C          120 /*!< Celsius degrees */
+#define OV_TEMPERATURE_THRESHOLD_C          100 /*!< Celsius degrees */
 #define OV_TEMPERATURE_HYSTERESIS_C         10 /*!< Celsius degrees */
 #define HW_OV_CURRENT_PROT_BYPASS           DISABLE /*!< In case ON_OVER_VOLTAGE is set to TURN_ON_LOW_SIDES this
                                                          feature may be used to bypass HW over-current protection

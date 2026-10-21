@@ -26,6 +26,8 @@
 
 static bool d6tir_present = false;
 static bool d6tir_has_value = false;
+static uint32_t d6tir_last_valid_ms = 0U;
+static int16_t d6tir_last_raw_tenth = 0;
 static bool d6tir_has_frame = false;
 static uint32_t d6tir_next_read_ms = 0U;
 static char d6tir_csv_value[16] = "NaN";
@@ -335,6 +337,8 @@ static bool D6TIR_ReadTemperature(void)
   }
 
   D6TIR_FormatRawTenth(raw_tenth);
+  d6tir_last_raw_tenth = raw_tenth;
+  d6tir_last_valid_ms = HAL_GetTick();
   d6tir_has_value = true;
 
   return true;
@@ -343,6 +347,10 @@ static bool D6TIR_ReadTemperature(void)
 void D6TIR_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  d6tir_has_value = false;
+  d6tir_has_frame = false;
+  d6tir_last_valid_ms = 0U;
 
   __HAL_RCC_GPIOB_CLK_ENABLE();
   D6TIR_DwtInit();
@@ -385,6 +393,18 @@ void D6TIR_Task(uint32_t now_ms)
 bool D6TIR_IsPresent(void)
 {
   return d6tir_present;
+}
+
+bool D6TIR_GetFreshTemperatureC(float *temperature_c, uint32_t max_age_ms)
+{
+  if ((temperature_c == NULL) || !d6tir_has_value ||
+      ((uint32_t)(HAL_GetTick() - d6tir_last_valid_ms) > max_age_ms))
+  {
+    return false;
+  }
+
+  *temperature_c = (float)d6tir_last_raw_tenth / 10.0f;
+  return true;
 }
 
 const char *D6TIR_GetCsvValue(void)

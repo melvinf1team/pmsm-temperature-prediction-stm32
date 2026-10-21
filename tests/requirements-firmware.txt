@@ -1,0 +1,3 @@
+# Optional: execute compiled firmware safety tests without a physical board.
+unicorn>=2.1,<3
+pyelftools>=0.32,<1

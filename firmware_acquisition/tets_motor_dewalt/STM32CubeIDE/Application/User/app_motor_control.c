@@ -6,6 +6,7 @@
 #include "mc_interface.h"
 #include "mc_type.h"
 #include "mc_tasks.h"
+#include "d6t_ir.h"
 #include "pmsm_motor_parameters.h"
 #include "drive_parameters.h"
 #include "pidreg_speed.h"
@@ -150,6 +151,12 @@ static uint32_t app_iq_ramp_last_ms = 0U;
 static float app_hard_stop_current_a = APP_DEFAULT_HARD_STOP_CURRENT_A;
 static float app_accel_elec_hz_s = APP_DEFAULT_ACCEL_ELEC_HZ_S;
 
+static float app_active_id_a = 0.0f;
+static uint32_t app_id_ramp_last_ms = 0U;
+static uint32_t app_id_speed_stable_since_ms = 0U;
+static bool app_id_speed_stable = false;
+static bool app_thermal_latched = false;
+
 static void AppMotorControl_ApplySpeedReference(void);
 
 static void AppMotorControl_SetFault(const char *reason)
@@ -166,6 +173,64 @@ static bool AppMotorControl_IsFiniteFloat(float value)
    * supprimé par -ffinite-math-only. Le test IEEE-754 sur les bits reste actif. */
   memcpy(&bits, &value, sizeof(bits));
   return (bits & 0x7F800000U) != 0x7F800000U;
+}
+
+static void AppMotorControl_ResetId(void)
+{
+  app_active_id_a = 0.0f;
+  app_id_ramp_last_ms = 0U;
+  app_id_speed_stable_since_ms = 0U;
+  app_id_speed_stable = false;
+  if ((pMCI[M1] != NULL) && (pMCI[M1]->pSTC != NULL))
+  {
+    MCI_SetIdRef(pMCI[M1], FIXP16(0.0f));
+  }
+}
+
+static void AppMotorControl_TripTemperatureFault(const char *reason)
+{
+  AppMotorControl_Stop();
+  /* MC_StopMotor rejects IDLE, even if a start command is still queued for
+   * the next MCSDK tick. Cancel that command as well as application starts. */
+  if (pMCI[M1] != NULL)
+  {
+    pMCI[M1]->DirectCommand = MCI_STOP;
+  }
+  app_button_toggle_pending = false;
+  app_thermal_latched = true;
+  AppMotorControl_SetFault(reason);
+  (void)AppDatalog_SendText("#FAULT,");
+  (void)AppDatalog_SendText(reason);
+  (void)AppDatalog_SendText("\r\n");
+}
+
+static bool AppMotorControl_CheckTemperature(bool allow_rearm)
+{
+  float temperature_c;
+
+  if (!D6TIR_GetFreshTemperatureC(&temperature_c, APP_MOTOR_D6T_MAX_AGE_MS) ||
+      !AppMotorControl_IsFiniteFloat(temperature_c))
+  {
+    AppMotorControl_TripTemperatureFault("D6T_UNAVAILABLE");
+    return false;
+  }
+  if (temperature_c > APP_MOTOR_OVERTEMP_C)
+  {
+    AppMotorControl_TripTemperatureFault("D6T_OVERTEMP");
+    return false;
+  }
+  if (app_thermal_latched)
+  {
+    if (!allow_rearm || (temperature_c > APP_MOTOR_RESTART_TEMP_C))
+    {
+      AppMotorControl_Stop();
+      AppMotorControl_SetFault(app_mc_fault_reason);
+      return false;
+    }
+    /* Only a new START / PROFILE / B2 action may clear this latch. */
+    app_thermal_latched = false;
+  }
+  return true;
 }
 
 static float AppMotorControl_MechRpmToElecHz(float rpm)
@@ -300,6 +365,7 @@ static bool AppMotorControl_OnMotorRunning(uint32_t now)
 
 static void AppMotorControl_OnMotorStopped(void)
 {
+  AppMotorControl_ResetId();
   app_tb200s_change_scheduled = false;
   app_tb200s_next_change_ms = 0U;
   (void)AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A);
@@ -577,6 +643,24 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
     }
   }
 
+  if (app_active_id_a > 0.0f)
+  {
+    /* Preserve the Iq budget where possible, without raising a safety ceiling. */
+    float vector_limit_a = sqrtf((limit_a * limit_a) +
+                                 (app_active_id_a * app_active_id_a));
+    if (vector_limit_a > total_limit_a)
+    {
+      total_limit_a = vector_limit_a;
+    }
+    if (total_limit_a > app_hard_stop_current_a)
+    {
+      total_limit_a = app_hard_stop_current_a;
+    }
+    if (total_limit_a > APP_MOTOR_MAX_TOTAL_CURRENT_A)
+    {
+      total_limit_a = APP_MOTOR_MAX_TOTAL_CURRENT_A;
+    }
+  }
   MCI_SetMaxCurrent(pMCI[M1], FIXP16(total_limit_a));
 
   /*
@@ -596,6 +680,57 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
       PIDREG_SPEED_setUi_pu(&pMCI[M1]->pSTC->PIDSpeed, FIXP30(0.0f));
     }
   }
+}
+
+static void AppMotorControl_UpdateIdReference(uint32_t now, float measured_iq_a)
+{
+  float target_a = APP_ID_TARGET_A;
+  float total_cap_a = fminf(app_hard_stop_current_a, APP_MOTOR_MAX_TOTAL_CURRENT_A);
+  float remaining_a2 = (total_cap_a * total_cap_a) -
+                       (measured_iq_a * measured_iq_a);
+  float available_id_a = sqrtf(fmaxf(remaining_a2, 0.0f));
+  float speed_rpm = (MC_GetSpeedMotor1_F() * 60.0f) / (float)POLE_PAIR_NUM;
+  float tolerance_rpm = fmaxf(APP_ID_MIN_SPEED_TOLERANCE_RPM,
+                             app_target_speed_rpm * APP_ID_SPEED_TOLERANCE_RATIO);
+  uint32_t dt_ms = now - app_id_ramp_last_ms;
+  app_id_ramp_last_ms = now;
+
+  if (!AppMotorControl_IsFiniteFloat(target_a) || (target_a < 0.0f))
+  {
+    target_a = 0.0f;
+  }
+  target_a = fminf(target_a, available_id_a);
+  if (app_active_id_a > target_a)
+  {
+    app_active_id_a = target_a;
+  }
+
+  if (!AppMotorControl_IsFiniteFloat(speed_rpm) ||
+      (fabsf(speed_rpm - app_target_speed_rpm) > tolerance_rpm))
+  {
+    app_id_speed_stable = false;
+  }
+  else
+  {
+    if (!app_id_speed_stable)
+    {
+      app_id_speed_stable = true;
+      app_id_speed_stable_since_ms = now;
+    }
+    uint32_t stable_ms = now - app_id_speed_stable_since_ms;
+    if (stable_ms > APP_ID_SPEED_STABLE_MS)
+    {
+      uint32_t ramp_ms = stable_ms - APP_ID_SPEED_STABLE_MS;
+      if (dt_ms > ramp_ms) dt_ms = ramp_ms;
+      /* A delayed main-loop iteration must not cause a large current step. */
+      if (dt_ms > 100U) dt_ms = 100U;
+      app_active_id_a = fminf(target_a, app_active_id_a +
+        (APP_ID_RAMP_A_PER_S * ((float)dt_ms / 1000.0f)));
+    }
+  }
+
+  AppMotorControl_SetIqLimit(app_active_iq_limit_a, false);
+  MCI_SetIdRef(pMCI[M1], FIXP16(app_active_id_a));
 }
 
 static void AppMotorControl_ApplySpeedPidTuning(void)
@@ -654,6 +789,7 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
                                       float hard_limit_a,
                                       float accel_elec_hz_s)
 {
+  AppMotorControl_ResetId();
   /* Une commande UART reprend explicitement la main sur le profil autonome. */
   AppMotorControl_StopButtonProfile();
 
@@ -720,6 +856,8 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 
 void AppMotorControl_Init(void)
 {
+  AppMotorControl_ResetId();
+  app_thermal_latched = false;
   app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
   app_tb200s_requested_load_a = APP_TB200S_MIN_LOAD_A;
   app_tb200s_load_setpoint_a = APP_TB200S_MIN_LOAD_A;
@@ -775,6 +913,10 @@ static bool AppMotorControl_WaitForMcIdle(uint32_t timeout_ms)
 
 bool AppMotorControl_Start(void)
 {
+  if (!AppMotorControl_CheckTemperature(true))
+  {
+    return false;
+  }
   if (!AppMotorControl_WaitForMcIdle(APP_START_WAIT_IDLE_MS))
   {
     AppMotorControl_SetFault((MC_GetCurrentFaultsMotor1() != MC_NO_FAULTS)
@@ -791,6 +933,7 @@ bool AppMotorControl_Start(void)
     return false;
   }
 
+  AppMotorControl_ResetId();
   app_active_iq_limit_a = app_iq_limit_a;
   if (app_active_iq_limit_a > APP_IQ_START_LIMIT_A)
   {
@@ -859,6 +1002,10 @@ AppMotorProfileStartResult_t AppMotorControl_StartProfile(
     AppMotorControl_StopButtonProfile();
   }
 
+  if (!AppMotorControl_CheckTemperature(true))
+  {
+    return APP_MOTOR_PROFILE_START_THERMAL_ERROR;
+  }
   now = HAL_GetTick();
   if (!AppMotorControl_ConfigureProfile(profile, now))
   {
@@ -1007,6 +1154,15 @@ void AppMotorControl_Task(void)
 {
   uint32_t now = HAL_GetTick();
 
+  /* This protection is independent of logging and NanoEdge AI inference. */
+  if (((app_mc_state == APP_MC_STARTING) ||
+       (app_mc_state == APP_MC_RUNNING) ||
+       (MC_GetSTMStateMotor1() == RUN)) &&
+      !AppMotorControl_CheckTemperature(false))
+  {
+    return;
+  }
+
   AppMotorControl_HandleButtonToggle();
 
   uint32_t current_faults = MC_GetCurrentFaultsMotor1();
@@ -1037,6 +1193,7 @@ void AppMotorControl_Task(void)
         app_mc_state = APP_MC_RUNNING;
         app_mc_run_enter_ms = now;
         app_iq_ramp_last_ms = now;
+        app_id_ramp_last_ms = now;
         AppMotorControl_ResetSpeedPi();
         AppMotorControl_SetIqLimit(app_active_iq_limit_a, true);
         AppMotorControl_ApplySpeedReference();
@@ -1091,6 +1248,8 @@ void AppMotorControl_Task(void)
         AppMotorControl_SetFault("NONFINITE_CURRENT");
         return;
       }
+
+      AppMotorControl_UpdateIdReference(now, idq.Q);
 
       if ((now - app_mc_run_enter_ms) >= APP_CURRENT_CHECK_AFTER_RUN_MS)
       {

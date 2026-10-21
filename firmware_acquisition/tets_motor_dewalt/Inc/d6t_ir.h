@@ -11,6 +11,8 @@ void D6TIR_Task(uint32_t now_ms);
 
 bool D6TIR_IsPresent(void);
 const char *D6TIR_GetCsvValue(void);
+/* Safety path: reject a missing or stale measurement, including across tick wrap. */
+bool D6TIR_GetFreshTemperatureC(float *temperature_c, uint32_t max_age_ms);
 
 /* Dernière trame valide, en dixièmes de degré : PTAT (référence interne) et
  * 16 pixels dans l'ordre du capteur. Faux si le capteur ne répond plus. */

@@ -104,6 +104,11 @@ def validate_firmware_root(root: Path) -> None:
     assert numeric_define(drive_header, "BOARD_SOFT_OVERCURRENT_TRIP") == EXPECTED_MAX_CURRENT_A
     assert numeric_define(drive_header, "IQMAX_A") == EXPECTED_MAX_CURRENT_A
     assert numeric_define(drive_header, "PULSE_CURRENT_GOAL") == EXPECTED_POLPULSE_CURRENT_A
+    assert numeric_define(drive_header, "OV_TEMPERATURE_THRESHOLD_C") == 100.0
+    assert numeric_define(drive_header, "OV_TEMPERATURE_HYSTERESIS_C") == 10.0
+    assert numeric_define(app_header, "APP_MOTOR_OVERTEMP_C") == 70.0
+    assert numeric_define(app_header, "APP_MOTOR_RESTART_TEMP_C") == 65.0
+    assert numeric_define(app_header, "APP_MOTOR_D6T_MAX_AGE_MS") == 1000.0
     assert numeric_define(motor_header, "MOTOR_MAX_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
     assert numeric_define(motor_header, "NOMINAL_CURRENT_A") == EXPECTED_MAX_CURRENT_A
 
@@ -121,6 +126,7 @@ def validate_firmware_root(root: Path) -> None:
         "M1_MAX_APPLICATION_SPEED": "4500",
         "M1_MOTOR_MAX_SPEED_RPM": "4500",
         "M1_NOMINAL_CURRENT": "30",
+        "M1_OV_TEMPERATURE_THRESHOLD_C": "100",
         "M1_POLPULSES_PULSE_CURRENT_GOAL": "14.0",
         "WB_UI_MAX_CURRENT": "30",
     }

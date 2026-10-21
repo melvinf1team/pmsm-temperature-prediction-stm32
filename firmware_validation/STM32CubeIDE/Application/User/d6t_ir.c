@@ -14,7 +14,7 @@
 #define D6TIR_FRAME_SIZE            35U
 #define D6TIR_OBJECT_COUNT          16U
 
-/* Instantaneous pixel logged in d6t_temp_c: 10 = row 3, column 3 in the 4x4 array.
+/* Pixel instantane logge dans d6t_temp_c : 10 = ligne 3, colonne 3 sur la matrice 4x4.
  * Select the value using tests/bench/d6t_calibration.py. */
 #define D6TIR_SELECTED_PIXEL_INDEX  10U
 
@@ -24,6 +24,7 @@
 #define D6TIR_SCL_WAIT_US           100U
 
 static bool d6tir_has_value = false;
+static uint32_t d6tir_last_valid_ms = 0U;
 static uint32_t d6tir_next_read_ms = 0U;
 static int16_t d6tir_last_raw_tenth = 0;
 
@@ -301,6 +302,7 @@ static bool D6TIR_ReadTemperature(void)
   }
 
   d6tir_last_raw_tenth = raw_tenth;
+  d6tir_last_valid_ms = HAL_GetTick();
   d6tir_has_value = true;
 
   return true;
@@ -310,6 +312,9 @@ void D6TIR_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   bool first_read_ok;
+
+  d6tir_has_value = false;
+  d6tir_last_valid_ms = 0U;
 
   __HAL_RCC_GPIOB_CLK_ENABLE();
   D6TIR_DwtInit();
@@ -347,6 +352,18 @@ void D6TIR_Task(uint32_t now_ms)
 bool D6TIR_GetTemperatureC(float *temperature_c)
 {
   if ((temperature_c == NULL) || !d6tir_has_value)
+  {
+    return false;
+  }
+
+  *temperature_c = (float)d6tir_last_raw_tenth / 10.0f;
+  return true;
+}
+
+bool D6TIR_GetFreshTemperatureC(float *temperature_c, uint32_t max_age_ms)
+{
+  if ((temperature_c == NULL) || !d6tir_has_value ||
+      ((uint32_t)(HAL_GetTick() - d6tir_last_valid_ms) > max_age_ms))
   {
     return false;
   }

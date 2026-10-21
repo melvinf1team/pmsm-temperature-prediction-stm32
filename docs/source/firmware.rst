@@ -143,7 +143,28 @@ waits up to 1 s for MCSDK to reach `IDLE`, acknowledging latched faults (for
 example an undervoltage recorded before the motor supply was switched on) and
 covering the 400 ms `STOP` permanency, so a serial `START` behaves like B2. The
 `Iq` limit is ramped during RUN to avoid a sudden torque request.
-`AppMotorControl_Task` monitors MCSDK faults, overcurrent, and overspeed.
+`AppMotorControl_Task` monitors MCSDK faults, overcurrent, overspeed, and
+the D6T motor temperature independently of logging and AI inference.
+
+Both projects define the heating settings in ``Inc/app_motor_control.h``:
+``APP_ID_TARGET_A=2.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Id remains zero
+during startup. After one second within 5% of the speed target (minimum
+tolerance 50 rpm), it increases at 0.25 A/s. Speed transitions pause the
+increase; stops, faults and runtime reconfiguration reset Id to zero.
+Current headroom is bounded by the hard-stop limit and the global 30 A
+ceiling. Setting the Id target to zero disables this heating current.
+
+A selected D6T pixel strictly above 70 C stops the motor and latches an
+application fault. A missing reading or a last valid reading older than
+1000 ms also stops/prevents startup. A new start is accepted only after a
+fresh reading at or below 65 C. Pending starts/button actions are cleared;
+cooling never starts the motor automatically. Fault UART events are
+``#FAULT,D6T_OVERTEMP`` and ``#FAULT,D6T_UNAVAILABLE``. A blocked ``PROFILE``
+returns ``ERR,THERMAL_PROTECTION``. Logging can continue after the stop.
+
+The separate MCSDK NTC protection for the power board trips at 100 C, with
+10 C hysteresis. The generated headers and Workbench/CubeMX files contain
+the same threshold.
 
 B2 on `PC13` places a request in the interrupt, then the main loop draws the
 first target directly from the full 2000–4000 rpm range. It caps the PI

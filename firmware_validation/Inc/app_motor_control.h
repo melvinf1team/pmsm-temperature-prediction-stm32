@@ -8,6 +8,18 @@
 #define APP_MOTOR_MAX_IQ_LIMIT_A             30.0f
 #define APP_MOTOR_MAX_TOTAL_CURRENT_A        30.0f
 
+/* Positive d-axis heating current, applied only after stable RUN speed. */
+#define APP_ID_TARGET_A                       2.0f
+#define APP_ID_RAMP_A_PER_S                    0.25f
+#define APP_ID_SPEED_STABLE_MS                1000U
+#define APP_ID_SPEED_TOLERANCE_RATIO          0.05f
+#define APP_ID_MIN_SPEED_TOLERANCE_RPM        50.0f
+
+/* D6T motor protection; restart needs a fresh reading and an explicit start. */
+#define APP_MOTOR_OVERTEMP_C                  70.0f
+#define APP_MOTOR_RESTART_TEMP_C              65.0f
+#define APP_MOTOR_D6T_MAX_AGE_MS               1000U
+
 /* TB-200S in 0-10 V / 0-3 A mode. The 0-3.3 V DAC easily covers the
  * load range deliberately limited to 0.05-0.25 A. */
 #define APP_TB200S_MIN_LOAD_A                 0.05f
@@ -26,7 +38,8 @@ typedef enum
 {
   APP_MOTOR_PROFILE_START_ACCEPTED = 0,
   APP_MOTOR_PROFILE_START_INVALID,
-  APP_MOTOR_PROFILE_START_LOAD_ERROR
+  APP_MOTOR_PROFILE_START_LOAD_ERROR,
+  APP_MOTOR_PROFILE_START_THERMAL_ERROR
 } AppMotorProfileStartResult_t;
 
 void AppMotorControl_Init(void);

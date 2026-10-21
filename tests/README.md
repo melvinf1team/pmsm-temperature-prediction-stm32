@@ -8,6 +8,8 @@ the scripts also work from any other directory.
 ```text
 tests/
 ├── run_all.py        One command for every check that needs no board
+├── firmware/         C harnesses for ARM safety tests with mocked HAL/MCSDK
+├── requirements-firmware.txt  Optional ARM-emulation test dependencies
 ├── bench/            Tools that talk to the board
 │   ├── check_wiring.py           Wiring diagnosis (firmware_acquisition)
 │   ├── calibrate_tb200s.py       Guided TB-200S load calibration (firmware_acquisition)
@@ -22,6 +24,7 @@ tests/
     ├── test_check_wiring.py
     ├── test_d6t_calibration.py
     ├── test_motor_datalog_gui_dashboard.py
+    ├── test_motor_firmware_safety.py
     ├── test_preprocess_logs_ewma.py
     └── test_temperature_validation_gui.py
 ```
@@ -41,7 +44,7 @@ tests/
 
 ## Checks without a board
 
-`run_all.py` runs the six unit-test files and the three consistency checks,
+`run_all.py` runs the unit-test files and the three consistency checks,
 each in its own process, and prints one `PASS`/`FAIL` line per script with
 its duration. The output of a failing script is printed below its line;
 `--verbose` prints it for every script. The exit code is `0` when everything
@@ -52,12 +55,29 @@ passes.
   ...
   consistency/validate_preprocess_parity.py   PASS    4.0 s
 
-9/9 passed in 15 s.
+10/10 passed in 19 s.
 ```
 
 `validate_preprocess_parity.py` replays all logs of `datalogging/logs` through
 the embedded preprocessing. `test_d6t_calibration.py` also fails if the two
 firmwares log different D6T pixels.
+
+## Compiled firmware safety checks
+
+`unit/test_motor_firmware_safety.py` compiles the real application and D6T
+driver from each firmware, then executes the ARM binaries with deterministic
+HAL/MCSDK boundary mocks. It checks the stability delay and Id ramp, current
+headroom, stop/fault resets, the strict 70 C trip, 65 C manual restart,
+missing/stale readings, and tick-counter wrap. It also uses `-Ofast` to test
+that NaN rejection survives the firmware's optimization settings.
+
+Install the optional dependencies with
+`python -m pip install -r tests/requirements-firmware.txt`, then run
+`python tests/unit/test_motor_firmware_safety.py`. The compiler is found on
+PATH, through `ARM_NONE_EABI_GCC`, or in a Windows `C:/ST/STM32CubeIDE*`
+installation. These tests are skipped by `run_all.py` if the optional tools
+are absent. Emulation does not validate the physical sensor, inverter, or
+motor; rebuild and qualify the changes on the bench before unattended use.
 
 ## D6T pixel calibration
 

@@ -238,6 +238,11 @@ static bool AppDatalog_UartQueueText(const char *text)
   return true;
 }
 
+bool AppDatalog_SendText(const char *text)
+{
+  return AppDatalog_UartQueueText(text);
+}
+
 static void AppDatalog_RxPush(uint8_t value)
 {
   uint16_t next = (uint16_t)((rx_head + 1U) % APP_DATALOG_RX_QUEUE_SIZE);
@@ -398,6 +403,10 @@ static void AppDatalog_HandleCommand(char *line)
     else if (profile_result == APP_MOTOR_PROFILE_START_LOAD_ERROR)
     {
       (void)AppDatalog_UartQueueText("ERR,LOAD_DAC_FAILED\r\n");
+    }
+    else if (profile_result == APP_MOTOR_PROFILE_START_THERMAL_ERROR)
+    {
+      (void)AppDatalog_UartQueueText("ERR,THERMAL_PROTECTION\r\n");
     }
     else
     {
