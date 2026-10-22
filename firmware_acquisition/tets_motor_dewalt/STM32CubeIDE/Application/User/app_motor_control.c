@@ -15,6 +15,7 @@
 
 #include <stdbool.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 /*
@@ -126,6 +127,8 @@ typedef enum
 
 static AppMotorControlState_t app_mc_state = APP_MC_IDLE;
 static const char *app_mc_fault_reason = "NONE";
+static char app_fault_report[256];
+static bool app_fault_report_pending = false;
 
 static uint32_t app_mc_boot_ms = 0U;
 static uint32_t app_mc_start_ms = 0U;
@@ -176,6 +179,7 @@ static bool app_id_speed_stable = false;
 static bool app_thermal_latched = false;
 
 static void AppMotorControl_ApplySpeedReference(void);
+static float AppMotorControl_GetOverspeedReferenceRpm(void);
 
 static bool AppMotorControl_IsCustomStartActive(void)
 {
@@ -201,12 +205,6 @@ static void AppMotorControl_BeginCustomStart(float initial_speed_rpm)
   app_custom_speed_unstable = false;
 }
 
-static void AppMotorControl_SetFault(const char *reason)
-{
-  app_mc_fault_reason = reason;
-  app_mc_state = APP_MC_FAULT;
-}
-
 static bool AppMotorControl_IsFiniteFloat(float value)
 {
   uint32_t bits;
@@ -215,6 +213,61 @@ static bool AppMotorControl_IsFiniteFloat(float value)
    * supprimé par -ffinite-math-only. Le test IEEE-754 sur les bits reste actif. */
   memcpy(&bits, &value, sizeof(bits));
   return (bits & 0x7F800000U) != 0x7F800000U;
+}
+
+static long AppMotorControl_DiagnosticMilli(float value)
+{
+  if (!AppMotorControl_IsFiniteFloat(value) || (fabsf(value) > 1000000.0f))
+  {
+    return 0L;
+  }
+  return (long)(value * 1000.0f);
+}
+
+static void AppMotorControl_ReportPendingFault(void)
+{
+  if (app_fault_report_pending && AppDatalog_SendText(app_fault_report))
+  {
+    app_fault_report_pending = false;
+  }
+}
+
+static void AppMotorControl_SetFault(const char *reason)
+{
+  if ((app_mc_state != APP_MC_FAULT) || strcmp(reason, app_mc_fault_reason) != 0)
+  {
+    float speed_rpm = MC_GetSpeedMotor1_F() * 60.0f / (float)POLE_PAIR_NUM;
+    float speed_limit_rpm = fminf(APP_MOTOR_MAX_TARGET_SPEED_RPM,
+      AppMotorControl_GetOverspeedReferenceRpm() * APP_OVERSPEED_RATIO +
+      APP_OVERSPEED_MARGIN_RPM);
+    dq_float_t current = MC_GetCurrentMotor1_F();
+    /* Capture before stopping: STOP resets the brake and speed references. */
+    (void)snprintf(app_fault_report, sizeof(app_fault_report),
+      "#FAULT,%s,t_ms=%lu,speed_mrpm=%ld,speed_limit_rpm=%ld,"
+      "iq_ma=%ld,id_ma=%ld,hard_ma=%ld,load_ma=%ld,"
+      "mc_now=0x%04lX,mc_occurred=0x%04lX\r\n",
+      reason, (unsigned long)HAL_GetTick(),
+      AppMotorControl_DiagnosticMilli(speed_rpm),
+      AppMotorControl_DiagnosticMilli(speed_limit_rpm) / 1000L,
+      AppMotorControl_DiagnosticMilli(current.Q),
+      AppMotorControl_DiagnosticMilli(current.D),
+      AppMotorControl_DiagnosticMilli(app_hard_stop_current_a),
+      AppMotorControl_DiagnosticMilli(app_tb200s_load_setpoint_a),
+      (unsigned long)MC_GetCurrentFaultsMotor1(),
+      (unsigned long)MC_GetOccurredFaultsMotor1());
+    app_fault_report_pending = true;
+  }
+  app_mc_fault_reason = reason;
+  app_mc_state = APP_MC_FAULT;
+}
+
+static void AppMotorControl_TripFault(const char *reason)
+{
+  AppMotorControl_SetFault(reason);
+  AppMotorControl_Stop();
+  app_button_toggle_pending = false;
+  app_mc_state = APP_MC_FAULT;
+  AppMotorControl_ReportPendingFault();
 }
 
 static void AppMotorControl_ResetId(void)
@@ -231,19 +284,8 @@ static void AppMotorControl_ResetId(void)
 
 static void AppMotorControl_TripTemperatureFault(const char *reason)
 {
-  AppMotorControl_Stop();
-  /* MC_StopMotor rejects IDLE, even if a start command is still queued for
-   * the next MCSDK tick. Cancel that command as well as application starts. */
-  if (pMCI[M1] != NULL)
-  {
-    pMCI[M1]->DirectCommand = MCI_STOP;
-  }
-  app_button_toggle_pending = false;
   app_thermal_latched = true;
-  AppMotorControl_SetFault(reason);
-  (void)AppDatalog_SendText("#FAULT,");
-  (void)AppDatalog_SendText(reason);
-  (void)AppDatalog_SendText("\r\n");
+  AppMotorControl_TripFault(reason);
 }
 
 static bool AppMotorControl_CheckTemperature(bool allow_rearm)
@@ -265,8 +307,7 @@ static bool AppMotorControl_CheckTemperature(bool allow_rearm)
   {
     if (!allow_rearm || (temperature_c > APP_MOTOR_RESTART_TEMP_C))
     {
-      AppMotorControl_Stop();
-      AppMotorControl_SetFault(app_mc_fault_reason);
+      AppMotorControl_TripFault(app_mc_fault_reason);
       return false;
     }
     /* Only a new START / PROFILE / B2 action may clear this latch. */
@@ -851,11 +892,7 @@ static void AppMotorControl_ApplySpeedReference(void)
 
 static bool AppMotorControl_AbortCustomStart(const char *reason)
 {
-  AppMotorControl_Stop();
-  AppMotorControl_SetFault(reason);
-  (void)AppDatalog_SendText("#FAULT,");
-  (void)AppDatalog_SendText(reason);
-  (void)AppDatalog_SendText("\r\n");
+  AppMotorControl_TripFault(reason);
   return false;
 }
 
@@ -1112,6 +1149,8 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 
 void AppMotorControl_Init(void)
 {
+  app_fault_report_pending = false;
+  app_mc_fault_reason = "NONE";
   AppMotorControl_ResetCustomStart();
   AppMotorControl_ResetId();
   app_thermal_latched = false;
@@ -1176,7 +1215,7 @@ bool AppMotorControl_Start(void)
   }
   if (!AppMotorControl_WaitForMcIdle(APP_START_WAIT_IDLE_MS))
   {
-    AppMotorControl_SetFault((MC_GetCurrentFaultsMotor1() != MC_NO_FAULTS)
+    AppMotorControl_TripFault((MC_GetCurrentFaultsMotor1() != MC_NO_FAULTS)
                              ? "MCSDK_FAULT"
                              : "MCSDK_NOT_IDLE");
     return false;
@@ -1186,7 +1225,7 @@ bool AppMotorControl_Start(void)
    * Custom keeps it until speed is stable, then ramps the requested load. */
   if (!AppMotorControl_PrepareLoadForMotorStart())
   {
-    AppMotorControl_SetFault("LOAD_DAC");
+    AppMotorControl_TripFault("LOAD_DAC");
     return false;
   }
 
@@ -1222,7 +1261,7 @@ bool AppMotorControl_Start(void)
     return true;
   }
 
-  AppMotorControl_SetFault("START_REJECTED");
+  AppMotorControl_TripFault("START_REJECTED");
   return false;
 }
 
@@ -1425,6 +1464,7 @@ static void AppMotorControl_UpdateIqLimitRamp(uint32_t now)
 void AppMotorControl_Task(void)
 {
   uint32_t now = HAL_GetTick();
+  AppMotorControl_ReportPendingFault();
 
   /* This protection is independent of logging and NanoEdge AI inference. */
   if (((app_mc_state == APP_MC_STARTING) ||
@@ -1444,9 +1484,10 @@ void AppMotorControl_Task(void)
 
   if (current_faults != MC_NO_FAULTS)
   {
-    MC_StopMotor1();
-    AppMotorControl_OnMotorStopped();
-    AppMotorControl_SetFault("MCSDK_FAULT");
+    if (app_mc_state != APP_MC_FAULT)
+    {
+      AppMotorControl_TripFault("MCSDK_FAULT");
+    }
     return;
   }
 
@@ -1471,9 +1512,7 @@ void AppMotorControl_Task(void)
         AppMotorControl_ApplySpeedReference();
         if (!AppMotorControl_OnMotorRunning(now))
         {
-          MC_StopMotor1();
-          AppMotorControl_OnMotorStopped();
-          AppMotorControl_SetFault("LOAD_DAC");
+          AppMotorControl_TripFault("LOAD_DAC");
           break;
         }
         app_mc_overcurrent_since_ms = 0U;
@@ -1481,19 +1520,23 @@ void AppMotorControl_Task(void)
       }
       else if ((mc_state == FAULT_NOW) || (mc_state == FAULT_OVER))
       {
-        AppMotorControl_OnMotorStopped();
-        AppMotorControl_SetFault("MCSDK_FAULT");
+        AppMotorControl_TripFault("MCSDK_FAULT");
       }
       else if ((now - app_mc_start_ms) > APP_STARTUP_TIMEOUT_MS)
       {
-        MC_StopMotor1();
-        AppMotorControl_OnMotorStopped();
-        AppMotorControl_SetFault("STARTUP_TIMEOUT");
+        AppMotorControl_TripFault("STARTUP_TIMEOUT");
       }
       break;
 
     case APP_MC_RUNNING:
     {
+      if (mc_state != RUN)
+      {
+        AppMotorControl_TripFault(
+          ((mc_state == FAULT_NOW) || (mc_state == FAULT_OVER))
+          ? "MCSDK_FAULT" : "MCSDK_STOPPED");
+        return;
+      }
       if (!AppMotorControl_ServiceCustomStart(now))
       {
         return;
@@ -1501,9 +1544,7 @@ void AppMotorControl_Task(void)
       AppMotorControl_ServiceButtonProfile(now);
       if (!AppMotorControl_ServiceVariableLoad(now))
       {
-        MC_StopMotor1();
-        AppMotorControl_OnMotorStopped();
-        AppMotorControl_SetFault("LOAD_DAC");
+        AppMotorControl_TripFault("LOAD_DAC");
         return;
       }
       AppMotorControl_UpdateIqLimitRamp(now);
@@ -1517,11 +1558,7 @@ void AppMotorControl_Task(void)
           !AppMotorControl_IsFiniteFloat(idq.Q) ||
           !AppMotorControl_IsFiniteFloat(i2))
       {
-        app_motor_start_requested = false;
-        AppMotorControl_StopButtonProfile();
-        MC_StopMotor1();
-        AppMotorControl_OnMotorStopped();
-        AppMotorControl_SetFault("NONFINITE_CURRENT");
+        AppMotorControl_TripFault("NONFINITE_CURRENT");
         return;
       }
 
@@ -1538,9 +1575,8 @@ void AppMotorControl_Task(void)
 
           if ((now - app_mc_overcurrent_since_ms) >= APP_HARD_STOP_DEBOUNCE_MS)
           {
-            MC_StopMotor1();
-            AppMotorControl_OnMotorStopped();
-            AppMotorControl_SetFault("HARD_OVERCURRENT");
+            AppMotorControl_TripFault("HARD_OVERCURRENT");
+            return;
           }
         }
         else
@@ -1560,11 +1596,7 @@ void AppMotorControl_Task(void)
         if (!AppMotorControl_IsFiniteFloat(speed_elec_hz) ||
             !AppMotorControl_IsFiniteFloat(speed_rpm))
         {
-          app_motor_start_requested = false;
-          AppMotorControl_StopButtonProfile();
-          MC_StopMotor1();
-          AppMotorControl_OnMotorStopped();
-          AppMotorControl_SetFault("NONFINITE_SPEED");
+          AppMotorControl_TripFault("NONFINITE_SPEED");
           return;
         }
 
@@ -1587,9 +1619,8 @@ void AppMotorControl_Task(void)
 
           if ((now - app_mc_overspeed_since_ms) >= APP_OVERSPEED_DEBOUNCE_MS)
           {
-            MC_StopMotor1();
-            AppMotorControl_OnMotorStopped();
-            AppMotorControl_SetFault("OVERSPEED");
+            AppMotorControl_TripFault("OVERSPEED");
+            return;
           }
         }
         else

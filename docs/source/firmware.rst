@@ -161,6 +161,17 @@ plus initial startup/tracking delays. B2/PROFILE presets are unchanged.
 Runtime configuration restages a transition from the current reference;
 Custom fixed-load increases use the brake ramp and decreases are immediate.
 
+Both projects emit ``#FAULT,<reason>,...`` on every protection stop. The
+snapshot precedes STOP: ``speed_mrpm`` is rpm multiplied by 1000;
+``speed_limit_rpm`` is the shutdown threshold; ``iq_ma``, ``id_ma``,
+``hard_ma`` and ``load_ma`` are currents/commands in mA. ``mc_now`` and
+``mc_occurred`` are hexadecimal MCSDK masks. Application faults may have
+zero SDK masks. Full UART queues defer a whole report for retry; persistent
+faults do not flood the link. The dashboard explains these lines in the
+console and retains a red motor-error state while logging continues.
+The current 4500 rpm absolute overspeed cap also applies to a 4500 rpm
+target: exceeding it for 80 ms stops the motor.
+
 Both projects define the heating settings in ``Inc/app_motor_control.h``:
 ``APP_ID_TARGET_A=2.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Id remains zero
 during startup, including the complete Custom speed/brake sequence.

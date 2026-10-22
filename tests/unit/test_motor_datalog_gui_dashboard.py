@@ -35,6 +35,7 @@ from motor_datalog_gui_dashboard import (
     MotorDatalogGui,
     build_load_command,
     build_profile_command,
+    describe_motor_fault,
     normalize_quick_profile,
     preset_load_settings,
 )
@@ -294,7 +295,9 @@ class FirmwareEventTests(unittest.TestCase):
         app.active_acquisition_mode = ACQUISITION_MODE_MOTOR
         app.active_quick_profile = QUICK_PROFILE_STABLE
         app.motor_start_confirmed = False
+        app.motor_fault_message = ""
         app.statuses = []
+        app.log = mock.Mock()
         app.set_status = lambda state, detail="": app.statuses.append(state)
         return app
 
@@ -319,6 +322,62 @@ class FirmwareEventTests(unittest.TestCase):
         app.is_running = False
         app.handle_firmware_event("#B2,STOP,motor_off")
         self.assertEqual(app.statuses, [])
+
+    def test_fault_is_visible_and_not_overwritten_by_running_status(self) -> None:
+        app = self.make_app()
+        app.handle_firmware_event(
+            "#FAULT,OVERSPEED,t_ms=15000,speed_mrpm=4510000,"
+            "speed_limit_rpm=4500,iq_ma=4800,id_ma=0,hard_ma=30000,"
+            "load_ma=250,mc_now=0x0000,mc_occurred=0x0000"
+        )
+        self.assertEqual(app.statuses, ["Motor error"])
+        self.assertIn("OVERSPEED", app.motor_fault_message)
+        self.assertIn("4510.000 rpm", app.motor_fault_message)
+        self.assertIn("brake command 0.250 A", app.motor_fault_message)
+        app.log.assert_called_once()
+        self.assertIn("ERROR: Motor stopped", app.log.call_args.args[0])
+        app.show_running_status()  # Late ACK/header must not mask the error.
+        app.handle_firmware_event("#CUSTOM,READY")
+        self.assertEqual(app.statuses, ["Motor error", "Motor error"])
+        self.assertTrue(app.is_running)  # Logging session stays open.
+
+    def test_new_explicit_start_clears_fault_display(self) -> None:
+        app = self.make_app()
+        app.handle_firmware_event("#FAULT,D6T_OVERTEMP")
+        app.handle_firmware_event("#CUSTOM,START")
+        self.assertEqual(app.motor_fault_message, "")
+        self.assertEqual(app.statuses[-1], "Motor starting")
+        app.handle_firmware_event("#CUSTOM,READY")
+        self.assertEqual(app.statuses[-1], "Motor running")
+
+    def test_late_header_during_startup_does_not_hide_fault(self) -> None:
+        app = self.make_app()
+        app.is_running = False
+        app.is_launching = True
+        app.csv_writer = None
+        app.open_csv_with_header = mock.Mock()
+        app.handle_firmware_event("#FAULT,MCSDK_FAULT,mc_now=0x0008")
+        app.handle_serial_line("#CSV_HEADER,stm32_time_ms,d6t_temp_c")
+        self.assertEqual(app.statuses, ["Motor error", "Motor error"])
+
+    def test_mcsdk_mask_and_legacy_faults_are_explained(self) -> None:
+        reason, detail = describe_motor_fault(
+            "#FAULT,MCSDK_FAULT,mc_now=0x0008,mc_occurred=0x800C"
+        )
+        self.assertEqual(reason, "MCSDK_FAULT")
+        self.assertIn("power-board overtemperature", detail)
+        self.assertIn("undervoltage", detail)
+        self.assertIn("unknown bits 0x8000", detail)
+        reason, detail = describe_motor_fault("#FAULT,D6T_OVERTEMP")
+        self.assertEqual(reason, "D6T_OVERTEMP")
+        self.assertIn("70 C", detail)
+
+    def test_unknown_or_malformed_diagnostics_keep_the_reason(self) -> None:
+        reason, detail = describe_motor_fault(
+            "#FAULT,NEW_REASON,speed_mrpm=oops,iq_ma=NaN,mc_now=invalid"
+        )
+        self.assertEqual(reason, "NEW_REASON")
+        self.assertEqual(detail, "The firmware stopped the motor.")
 
 
 class SessionPathTests(unittest.TestCase):

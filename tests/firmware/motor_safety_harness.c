@@ -8,6 +8,9 @@ static MCI_State_t mock_state;
 static bool mock_d6t_valid;
 static bool mock_start_queued;
 static bool mock_dac_fail;
+static bool mock_tx_busy;
+static char mock_events[16384];
+static size_t mock_events_length;
 static float mock_temperature, mock_speed_rpm;
 static float mock_speed_reference_rpm, mock_acceleration;
 static dq_float_t mock_current;
@@ -30,6 +33,7 @@ int HAL_DAC_Start(DAC_HandleTypeDef *d, int c)
 void Error_Handler(void) { for (;;) {} }
 MCI_State_t MC_GetSTMStateMotor1(void) { return mock_state; }
 uint32_t MC_GetCurrentFaultsMotor1(void) { return mock_faults; }
+uint32_t MC_GetOccurredFaultsMotor1(void) { return mock_faults; }
 bool MC_AcknowledgeFaultsMotor1(void) { return true; }
 int MC_StartWithPolarizationMotor1(void)
 {
@@ -49,7 +53,14 @@ void MCI_SetIdRef(MCI_Handle_t *p, fixp16_t v) { (void)p; mock_id_ref = v; }
 void MCI_SetMaxCurrent(MCI_Handle_t *p, fixp16_t v) { (void)p; mock_current_limit = v; }
 void MCI_SetPidSpeedKp(MCI_Handle_t *p, float v) { (void)p; (void)v; }
 void MCI_SetPidSpeedKi(MCI_Handle_t *p, float v) { (void)p; (void)v; }
-bool AppDatalog_SendText(const char *t) { (void)t; return true; }
+bool AppDatalog_SendText(const char *t)
+{
+  size_t length = strlen(t);
+  if (mock_tx_busy || (length >= sizeof(mock_events) - mock_events_length)) return false;
+  memcpy(mock_events + mock_events_length, t, length + 1U);
+  mock_events_length += length;
+  return true;
+}
 bool D6TIR_GetFreshTemperatureC(float *t, uint32_t max_age)
 { mock_max_age = max_age; *t = mock_temperature; return mock_d6t_valid; }
 
@@ -61,6 +72,9 @@ static void reset(void)
   mock_d6t_valid = true;
   mock_start_queued = false;
   mock_dac_fail = false;
+  mock_tx_busy = false;
+  mock_events_length = 0U;
+  mock_events[0] = '\0';
   mock_mci.DirectCommand = 0;
   mock_temperature = 25.0f;
   mock_speed_rpm = 2500.0f;
@@ -333,10 +347,75 @@ static int test_custom_start(void)
   return 0;
 }
 
+static int test_fault_reporting(void)
+{
+  reset();
+  AppMotorControl_SetRuntimeConfig(4500.0f, 30.0f, 30.0f, 50.0f);
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  CHECK(finish_custom_start());
+  mock_speed_rpm = 4510.0f;
+  step(100U);
+  CHECK(app_mc_state == APP_MC_RUNNING); /* 80 ms debounce is still active. */
+  mock_tx_busy = true;
+  step(80U);
+  CHECK(app_mc_state == APP_MC_FAULT && mock_state == IDLE);
+  CHECK(!strcmp(app_mc_fault_reason, "OVERSPEED"));
+  CHECK(app_fault_report_pending);
+  CHECK(strstr(mock_events, "#FAULT,") == NULL);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  mock_speed_rpm = 0.0f;
+  step(100U);
+  CHECK(app_fault_report_pending);
+  mock_tx_busy = false;
+  step(100U);
+  CHECK(!app_fault_report_pending);
+  const char *report = strstr(mock_events, "#FAULT,OVERSPEED,");
+  CHECK(report != NULL);
+  CHECK(strstr(report, "speed_mrpm=4510") != NULL);
+  CHECK(strstr(report, "speed_limit_rpm=4500,") != NULL);
+  CHECK(strstr(report, "load_ma=250,") != NULL); /* Before STOP reset it. */
+  CHECK(strstr(report, "hard_ma=30000,") != NULL);
+  CHECK(strstr(report, "mc_now=0x0000,mc_occurred=0x0000\r\n") != NULL);
+  size_t sent_length = mock_events_length;
+  for (int i = 0; i < 10; i++) step(100U);
+  CHECK(mock_events_length == sent_length); /* No repeated fault spam. */
+  mock_faults = MC_OVER_TEMP;
+  step(100U);
+  CHECK(!strcmp(app_mc_fault_reason, "OVERSPEED")); /* Preserve first cause. */
+  CHECK(mock_events_length == sent_length);
+
+  reset();
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  mock_faults = MC_OVER_TEMP;
+  step(100U);
+  CHECK(!strcmp(app_mc_fault_reason, "MCSDK_FAULT"));
+  CHECK(strstr(mock_events, "#FAULT,MCSDK_FAULT,") != NULL);
+  CHECK(strstr(mock_events, "mc_now=0x0008,mc_occurred=0x0008") != NULL);
+  sent_length = mock_events_length;
+  for (int i = 0; i < 10; i++) step(100U);
+  CHECK(mock_events_length == sent_length);
+
+  reset();
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  mock_temperature = 70.1f;
+  step(100U);
+  CHECK(strstr(mock_events, "#FAULT,D6T_OVERTEMP,") != NULL);
+  sent_length = mock_events_length;
+  CHECK(!AppMotorControl_Start());
+  CHECK(mock_events_length == sent_length);
+  return 0;
+}
+
 int main(void)
 {
   int custom_result = test_custom_start();
   if (custom_result != 0) return custom_result;
+  int fault_result = test_fault_reporting();
+  if (fault_result != 0) return fault_result;
   reset();
   CHECK(AppMotorControl_Start());
   CHECK(mock_id_ref == 0);

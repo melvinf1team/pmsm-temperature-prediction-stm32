@@ -27,6 +27,7 @@ The expected firmware serial protocol is line-oriented text::
     ERR,<reason>
     #CSV_HEADER,<column_1>,<column_2>,...
     #PROFILE,START,<TOKEN>,...
+    #FAULT,<reason>,t_ms=...,speed_mrpm=...,speed_limit_rpm=...,iq_ma=...,id_ma=...,hard_ma=...,load_ma=...,mc_now=0x...,mc_occurred=0x...
     DATA,<value_1>,<value_2>,...
 """
 
@@ -83,6 +84,64 @@ MAX_DATALOG_MS = 10000
 MAX_DS18B20_MS = 10000
 MIN_LOAD_SETPOINT_A = 0.05
 MAX_LOAD_SETPOINT_A = 0.25
+
+MOTOR_FAULT_DESCRIPTIONS = {
+    "OVERSPEED": "Measured speed exceeded the shutdown threshold.",
+    "HARD_OVERCURRENT": "Measured Id/Iq current exceeded the hard-stop limit.",
+    "MCSDK_FAULT": "The motor-control SDK reported a protection fault.",
+    "MCSDK_STOPPED": "MCSDK unexpectedly left the running state.",
+    "D6T_OVERTEMP": "D6T motor temperature exceeded 70 C.",
+    "D6T_UNAVAILABLE": "D6T motor temperature is missing, invalid or stale.",
+    "CUSTOM_SPEED_TIMEOUT": "Speed failed to follow the reference for 5 seconds.",
+    "CUSTOM_MOTOR_STOPPED": "MCSDK left RUN during the Custom startup sequence.",
+    "STARTUP_TIMEOUT": "MCSDK did not reach RUN within the startup timeout.",
+    "START_REJECTED": "MCSDK rejected the start command.",
+    "MCSDK_NOT_IDLE": "MCSDK was not ready to accept a start command.",
+    "LOAD_DAC": "The TB-200S load command could not be written to the DAC.",
+    "NONFINITE_SPEED": "The measured motor speed is invalid.",
+    "NONFINITE_CURRENT": "The measured motor current is invalid.",
+}
+MCSDK_FAULT_BITS = {
+    0x0001: "FOC duration", 0x0002: "overvoltage", 0x0004: "undervoltage",
+    0x0008: "power-board overtemperature", 0x0010: "startup failure",
+    0x0020: "speed feedback", 0x0040: "hardware overcurrent",
+    0x0080: "software error", 0x0100: "current-sampling fault",
+    0x0200: "software overcurrent", 0x0400: "driver protection",
+}
+
+
+def describe_motor_fault(line):
+    """Decode both legacy #FAULT lines and detailed firmware stop snapshots."""
+    parts = line.split(",")
+    reason = parts[1].strip() if len(parts) > 1 and parts[1].strip() else "UNKNOWN"
+    fields = dict(part.split("=", 1) for part in parts[2:] if "=" in part)
+    detail = [MOTOR_FAULT_DESCRIPTIONS.get(reason, "The firmware stopped the motor.")]
+    for key, label, scale, unit in (
+        ("speed_mrpm", "speed", 1000.0, "rpm"),
+        ("speed_limit_rpm", "shutdown speed", 1.0, "rpm"),
+        ("iq_ma", "Iq", 1000.0, "A"), ("id_ma", "Id", 1000.0, "A"),
+        ("hard_ma", "hard current limit", 1000.0, "A"),
+        ("load_ma", "brake command", 1000.0, "A"),
+    ):
+        try:
+            value = float(fields[key]) / scale
+            if math.isfinite(value):
+                detail.append(f"{label} {value:.3f} {unit}")
+        except (KeyError, ValueError):
+            pass
+    for key in ("mc_now", "mc_occurred"):
+        try:
+            mask = int(fields[key], 0)
+        except (KeyError, ValueError):
+            continue
+        if mask:
+            names = [name for bit, name in MCSDK_FAULT_BITS.items() if mask & bit]
+            unknown = mask & ~sum(MCSDK_FAULT_BITS)
+            if unknown:
+                names.append(f"unknown bits 0x{unknown:04X}")
+            detail.append(f"{key}=0x{mask:04X} ({', '.join(names)})")
+    return reason, " | ".join(detail)
+
 
 ACQUISITION_MODE_MOTOR = "Motor + logging"
 ACQUISITION_MODE_IDLE = "Logging only (motor stopped)"
@@ -633,6 +692,7 @@ class MotorDatalogGui(tk.Tk):
         self.is_running = False
         self.is_launching = False
         self.is_stopping = False
+        self.motor_fault_message = ""
         self.data_before_header_count = 0
         self.log_line_count = 0
         self.close_requested = False
@@ -2839,6 +2899,7 @@ class MotorDatalogGui(tk.Tk):
 
         self.stop_event.clear()
         self.launch_cancel_event.clear()
+        self.motor_fault_message = ""
         self.reader_thread = threading.Thread(target=self.serial_reader_loop, daemon=True)
         self.reader_thread.start()
 
@@ -3307,7 +3368,7 @@ class MotorDatalogGui(tk.Tk):
                 return
             if self.csv_writer is None:
                 self.open_csv_with_header(columns)
-                if self.is_running:
+                if self.is_running or self.motor_fault_message:
                     self.show_running_status()
                 else:
                     self.set_status("Logging active", "Receiving DATA rows.")
@@ -3351,19 +3412,38 @@ class MotorDatalogGui(tk.Tk):
 
     def handle_firmware_event(self, line):
         """React to firmware status lines that change what the motor is doing."""
+        if line.startswith("#FAULT,"):
+            reason, detail = describe_motor_fault(line)
+            self.motor_start_confirmed = False
+            self.motor_fault_message = f"{reason}: {detail}"
+            self.log(f"ERROR: Motor stopped — {self.motor_fault_message}")
+            self.set_status("Motor error", self.motor_fault_message)
+            return
         if not (self.is_running or self.is_launching):
             return
         if line.startswith("#PROFILE,START,"):
+            self.motor_fault_message = ""
             self.motor_start_confirmed = True
             if self.is_running:
                 self.show_running_status()
         elif line.startswith("#B2,STOP"):
             self.set_status("Motor stopped (B2)", "Board button B2 stopped the motor; logging continues until STOP.")
-        elif line.startswith("#B2,START"):
+        elif line.startswith("#B2,START,"):
+            self.motor_fault_message = ""
             self.set_status("Motor running (B2)", "Board button B2 started the All variable profile.")
+        elif line.startswith("#CUSTOM,START"):
+            self.motor_fault_message = ""
+            self.motor_start_confirmed = False
+            self.set_status("Motor starting", "Custom speed and brake ramps are in progress.")
+        elif line.startswith("#CUSTOM,READY") and not getattr(self, "motor_fault_message", ""):
+            self.motor_start_confirmed = True
+            self.set_status("Motor running", "Custom speed and brake targets reached.")
 
     def show_running_status(self):
         """Describe the running session in the header status card."""
+        if getattr(self, "motor_fault_message", ""):
+            self.set_status("Motor error", self.motor_fault_message)
+            return
         if self.active_acquisition_mode == ACQUISITION_MODE_IDLE:
             self.set_status("Logging active", "Motor stopped; receiving temperatures and zero motor values.")
             return

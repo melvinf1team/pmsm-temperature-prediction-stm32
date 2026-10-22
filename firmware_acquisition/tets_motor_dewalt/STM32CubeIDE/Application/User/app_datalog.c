@@ -152,6 +152,16 @@ static bool AppDatalog_UartQueueText(const char *text)
     return false;
   }
 
+  /* Queue complete lines only, so a fault can be retried without leaving
+   * a truncated prefix in front of the next CSV row or status line. */
+  size_t free_bytes = (tx_tail + APP_DATALOG_TX_BUFFER_SIZE - tx_head - 1U) %
+                      APP_DATALOG_TX_BUFFER_SIZE;
+  if (strlen(text) > free_bytes)
+  {
+    tx_overflow_count++;
+    return false;
+  }
+
   while (*text != '\0')
   {
     if (!AppDatalog_TxQueueChar(*text))

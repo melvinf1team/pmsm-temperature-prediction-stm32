@@ -42,6 +42,7 @@ static inline void __NOP(void) {}
 
 MCI_State_t MC_GetSTMStateMotor1(void);
 uint32_t MC_GetCurrentFaultsMotor1(void);
+uint32_t MC_GetOccurredFaultsMotor1(void);
 bool MC_AcknowledgeFaultsMotor1(void);
 int MC_StartWithPolarizationMotor1(void);
 bool MC_StopMotor1(void);

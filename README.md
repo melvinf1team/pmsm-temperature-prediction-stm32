@@ -383,6 +383,29 @@ any queued SDK start; no automatic restart occurs. The speed setpoint is
 reapplied on `RUN`, a restart requested during shutdown waits for `IDLE`, and
 overspeed protection never exceeds the absolute 4500 rpm ceiling.
 
+Every protection stop now reports a complete UART fault line, even when CSV
+logging is disabled. For example:
+
+```text
+#FAULT,OVERSPEED,t_ms=15000,speed_mrpm=4510000,speed_limit_rpm=4500,iq_ma=4800,id_ma=0,hard_ma=30000,load_ma=250,mc_now=0x0000,mc_occurred=0x0000
+```
+
+The values are captured before STOP clears the references and returns the
+brake to 0.05 A. `speed_mrpm` is mechanical rpm multiplied by 1000; currents
+and the brake command are in mA. `mc_now` and `mc_occurred` carry the MCSDK
+fault masks. Application faults such as `OVERSPEED` can have both masks zero.
+The report is retried if the UART queue is full and is not repeated while
+the same fault persists. An unexpected MCSDK stop reports `MCSDK_STOPPED`.
+The dashboard displays the decoded reason in the console and a persistent
+red `Motor error` state; logging continues until the operator presses STOP.
+A late header/launch ACK does not hide this state. A new explicit start
+clears the display once accepted by the firmware.
+
+At a 4500 rpm target, the current overspeed shutdown threshold is also
+4500 rpm: any measured speed above it for 80 ms trips `OVERSPEED`. Reaching
+the target itself does not request a stop. Use the fault report to identify
+the actual cause before changing a protection threshold.
+
 > **Qualification required:** these are software ceilings, not test bench
 > certification. Before running at 4500 rpm or 30 A, verify the motor,
 > STDES-LVHP01, supply, wiring, cooling, and protections. Startup polarization

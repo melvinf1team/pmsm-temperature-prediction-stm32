@@ -52,6 +52,13 @@ ramps; five continuous seconds outside tolerance aborts the sequence.
 STOP/faults restore 0.05 A and cancel the sequence. `APP_CUSTOM_*` settings
 are in `Inc/app_motor_control.h`. B2/PROFILE presets retain their behavior.
 
+All protection stops report `#FAULT,<reason>,...` with the speed, shutdown
+threshold, Id/Iq, brake command, and current/occurred MCSDK fault masks
+captured before STOP. Reports retry on a full UART queue and are emitted
+once per fault. Unexpected MCSDK stops are also reported. The acquisition
+dashboard decodes these events and retains the error state while logging.
+The root README documents the fields and the strict 4500 rpm shutdown cap.
+
 Both projects apply a positive Id target of 2 A at 0.25 A/s after one second
 of stable RUN speed, after the Custom speed/brake sequence has completed.
 Configure `APP_ID_TARGET_A` and `APP_ID_RAMP_A_PER_S`
