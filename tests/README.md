@@ -75,7 +75,7 @@ slopes, final-speed stability, pause/recovery, stalled-speed timeout, lower
 targets, runtime CFG/LOAD updates, DAC failures, queued-start cancellation,
 and Id inhibition until the sequence is complete. B2/PROFILE behavior is
 also checked separately.
-Fault-report tests reproduce a 4510 rpm overspeed stop, verify capture before
+Fault-report tests reproduce a 5010 rpm overspeed stop, verify capture before
 the brake resets, retry a full UART queue, preserve the first stop cause,
 and ensure persistent faults are reported once. Dashboard tests check
 decoded SDK masks, legacy messages, and an error state that survives late

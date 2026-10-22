@@ -102,7 +102,7 @@ authority for commands sent directly over UART:
    :widths: 25, 25, 50
 
    "Target speed", "100 to 4500 rpm", "Values below 100 rpm are rejected"
-   "Iq limit", "greater than 0 to 30 A", "Startup begins at no more than 4.5 A, then follows a ramp"
+   "Iq limit", "greater than 0 to 28 A", "Startup begins at no more than 4.5 A, then follows a ramp"
    "Total-current shutdown", "greater than 0 to 30 A", "Application protection in addition to MCSDK faults"
    "Acceleration", "greater than 0 to 50 electrical Hz/s", "Same limit in dashboard and firmware"
    "DATA period", "1 to 10,000 ms", "Sets the raw CSV sampling rate"

@@ -45,7 +45,7 @@
 /* Overspeed protection: stop the motor if the estimated speed significantly
  * exceeds the setpoint during RUN. */
 #define APP_OVERSPEED_CHECK_AFTER_RUN_MS    800U
-#define APP_OVERSPEED_DEBOUNCE_MS           80U
+#define APP_OVERSPEED_DEBOUNCE_MS           100U
 #define APP_OVERSPEED_RATIO                 1.35f
 #define APP_OVERSPEED_MARGIN_RPM            150.0f
 
@@ -88,7 +88,7 @@
 #define APP_SPEED_PID_KI_FACTOR             0.20f
 
 /*
- * Even if the user requests up to 30 A, start with a lower limit and ramp it
+ * Even if the user requests up to 28 A, start with a lower limit and ramp it
  * gradually during RUN. This avoids a sudden spike when speed control
  * takes over.
  */
@@ -233,7 +233,7 @@ static void AppMotorControl_SetFault(const char *reason)
   if ((app_mc_state != APP_MC_FAULT) || strcmp(reason, app_mc_fault_reason) != 0)
   {
     float speed_rpm = MC_GetSpeedMotor1_F() * 60.0f / (float)POLE_PAIR_NUM;
-    float speed_limit_rpm = fminf(APP_MOTOR_MAX_TARGET_SPEED_RPM,
+    float speed_limit_rpm = fminf(APP_MOTOR_OVERSPEED_LIMIT_RPM,
       AppMotorControl_GetOverspeedReferenceRpm() * APP_OVERSPEED_RATIO +
       APP_OVERSPEED_MARGIN_RPM);
     dq_float_t current = MC_GetCurrentMotor1_F();
@@ -1523,9 +1523,9 @@ void AppMotorControl_Task(void)
           return;
         }
 
-        if (speed_limit_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM)
+        if (speed_limit_rpm > APP_MOTOR_OVERSPEED_LIMIT_RPM)
         {
-          speed_limit_rpm = APP_MOTOR_MAX_TARGET_SPEED_RPM;
+          speed_limit_rpm = APP_MOTOR_OVERSPEED_LIMIT_RPM;
         }
 
         if (speed_rpm < 0.0f)

@@ -83,8 +83,8 @@ motor and logger, clears the received `CFG`, restarts logging, and calls
 `PROFILE` is matched before `LOAD,` because `PROFILE,VARIABLE_LOAD,...`
 contains that substring.
 
-Protocol limits are 100 to 4500 rpm, at most 30 A for `Iq` and the hard
-stop, at most 50 electrical Hz/s for acceleration, 1 to 10,000 ms for
+Protocol limits are 100 to 4500 rpm, at most 28 A for `Iq` and 30 A for the
+hard stop, at most 50 electrical Hz/s for acceleration, 1 to 10,000 ms for
 `DATA`, and at most 10,000 ms for the DS18B20. A requested DS18B20 period
 below 750 ms is accepted and raised to 750 ms.
 
@@ -169,8 +169,8 @@ snapshot precedes STOP: ``speed_mrpm`` is rpm multiplied by 1000;
 zero SDK masks. Full UART queues defer a whole report for retry; persistent
 faults do not flood the link. The dashboard explains these lines in the
 console and retains a red motor-error state while logging continues.
-The current 4500 rpm absolute overspeed cap also applies to a 4500 rpm
-target: exceeding it for 80 ms stops the motor.
+The current 5000 rpm absolute overspeed cap also applies to a 4500 rpm
+target: exceeding it for 100 ms stops the motor.
 
 Both projects define the heating settings in ``Inc/app_motor_control.h``:
 ``APP_ID_TARGET_A=2.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Id remains zero
@@ -219,7 +219,7 @@ When MCSDK accepts the start, the firmware sends `#PROFILE,START,<TOKEN>,...`
 (`#B2,START,...` for the button). A `CFG` command
 disables the standalone profile and takes control. During a
 downward transition, overspeed protection follows the setpoint actually
-being ramped by MCSDK while remaining capped at 4500 rpm. It therefore does
+being ramped by MCSDK while remaining capped at 5000 rpm. It therefore does
 not mistake normal ramp inertia for runaway speed.
 
 Preventive DC bus protection is disabled
@@ -292,7 +292,7 @@ Workbench sources, `.ioc`, `.wbdef`, and generated C files use the same
 ceilings, so a regeneration keeps them consistent.
 
 The overspeed threshold follows the setpoint with a margin but remains
-bounded by the absolute 4500 rpm ceiling. Direct configuration calls also
+bounded by the absolute 5000 rpm ceiling. Direct configuration calls also
 normalize `NaN` or infinite values to defaults before passing them to MCSDK.
 
 Nonfinite MCSDK current or speed telemetry triggers fail-safe behavior:

@@ -15,6 +15,8 @@ ACQUISITION_ROOT = PROJECT_ROOT / "firmware_acquisition" / "tets_motor_dewalt"
 VALIDATION_ROOT = PROJECT_ROOT / "firmware_validation"
 
 EXPECTED_MAX_SPEED_RPM = 4500.0
+EXPECTED_OVERSPEED_LIMIT_RPM = 5000.0
+EXPECTED_MAX_IQ_A = 28.0
 EXPECTED_MAX_CURRENT_A = 30.0
 EXPECTED_POLPULSE_CURRENT_A = 14.0
 EXPECTED_B2_MIN_SPEED_RPM = 2000.0
@@ -94,7 +96,9 @@ def validate_firmware_root(root: Path) -> None:
     app_source = root / "STM32CubeIDE" / "Application" / "User" / "app_motor_control.c"
 
     assert numeric_define(app_header, "APP_MOTOR_MAX_TARGET_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
-    assert numeric_define(app_header, "APP_MOTOR_MAX_IQ_LIMIT_A") == EXPECTED_MAX_CURRENT_A
+    assert numeric_define(app_header, "APP_MOTOR_OVERSPEED_LIMIT_RPM") == EXPECTED_OVERSPEED_LIMIT_RPM
+    assert numeric_define(app_header, "APP_MOTOR_MAX_IQ_LIMIT_A") == EXPECTED_MAX_IQ_A
+    assert numeric_define(app_source, "APP_OVERSPEED_DEBOUNCE_MS") == 100.0
     assert numeric_define(app_header, "APP_MOTOR_MAX_TOTAL_CURRENT_A") == EXPECTED_MAX_CURRENT_A
     assert numeric_define(app_header, "APP_TB200S_MIN_LOAD_A") == EXPECTED_TB200S_MIN_LOAD_A
     assert numeric_define(app_header, "APP_TB200S_MAX_LOAD_A") == EXPECTED_TB200S_MAX_LOAD_A
@@ -102,7 +106,7 @@ def validate_firmware_root(root: Path) -> None:
     assert numeric_define(drive_header, "MAX_APPLICATION_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
     assert numeric_define(drive_header, "BOARD_MAX_CURRENT") == EXPECTED_MAX_CURRENT_A
     assert numeric_define(drive_header, "BOARD_SOFT_OVERCURRENT_TRIP") == EXPECTED_MAX_CURRENT_A
-    assert numeric_define(drive_header, "IQMAX_A") == EXPECTED_MAX_CURRENT_A
+    assert numeric_define(drive_header, "IQMAX_A") == EXPECTED_MAX_IQ_A
     assert numeric_define(drive_header, "PULSE_CURRENT_GOAL") == EXPECTED_POLPULSE_CURRENT_A
     assert numeric_define(drive_header, "OV_TEMPERATURE_THRESHOLD_C") == 120.0
     assert numeric_define(drive_header, "OV_TEMPERATURE_HYSTERESIS_C") == 10.0
@@ -135,7 +139,7 @@ def validate_firmware_root(root: Path) -> None:
     expected_ioc = {
         "M1_BOARD_MAX_CURRENT": "30",
         "M1_BOARD_SOFT_OVERCURRENT_TRIP": "30",
-        "M1_IQMAX": "30",
+        "M1_IQMAX": "28",
         "M1_MAX_APPLICATION_SPEED": "4500",
         "M1_MOTOR_MAX_SPEED_RPM": "4500",
         "M1_NOMINAL_CURRENT": "30",
@@ -263,7 +267,7 @@ def validate_firmware_root(root: Path) -> None:
     assert "PA5     ------> DAC1_OUT2" in msp_source
 
     assert source.count("AppMotorControl_ApplySpeedReference();") >= 3
-    assert "if (speed_limit_rpm > APP_MOTOR_MAX_TARGET_SPEED_RPM)" in source
+    assert "if (speed_limit_rpm > APP_MOTOR_OVERSPEED_LIMIT_RPM)" in source
     assert "AppMotorControl_IsFiniteFloat" in source
     assert "!AppMotorControl_IsFiniteFloat(target_rpm)" in source
     assert "!AppMotorControl_IsFiniteFloat(iq_limit_a)" in source
@@ -345,7 +349,7 @@ def main() -> None:
     dashboard = load_dashboard_module()
     assert dashboard.MIN_TARGET_SPEED_RPM == 100.0
     assert dashboard.MAX_TARGET_SPEED_RPM == EXPECTED_MAX_SPEED_RPM
-    assert dashboard.MAX_IQ_LIMIT_A == EXPECTED_MAX_CURRENT_A
+    assert dashboard.MAX_IQ_LIMIT_A == EXPECTED_MAX_IQ_A
     assert dashboard.MAX_HARD_LIMIT_A == EXPECTED_MAX_CURRENT_A
     assert dashboard.MAX_ACCEL_ELEC_HZ_S == 50.0
     assert dashboard.MIN_LOAD_SETPOINT_A == EXPECTED_TB200S_MIN_LOAD_A
@@ -356,6 +360,7 @@ def main() -> None:
         (PROJECT_ROOT / "datalogging" / "motor_profiles.json").read_text(encoding="utf-8")
     )
     assert all(profile["accel_elec_hz_s"] <= dashboard.MAX_ACCEL_ELEC_HZ_S for profile in profiles)
+    assert all(profile["iq_limit_a"] <= dashboard.MAX_IQ_LIMIT_A for profile in profiles)
 
     # Dashboard quick-select presets must describe what both firmwares execute
     # and expose the same profiles as the validation GUI.
@@ -385,7 +390,8 @@ def main() -> None:
     assert motor["maxRatedSpeed"] == EXPECTED_MAX_SPEED_RPM
 
     print(
-        "Motor limits validation passed: global 4500 rpm/30 A; "
+        "Motor limits validation passed: target 4500 rpm, Iq 28 A, total 30 A; "
+        "overspeed 5000 rpm / 100 ms; "
         "B2 2000-4000 rpm and TB-200S 0.05-0.25 A every 2-5 s; "
         "Iq 25 A, total 28 A, 500 Hz_e/s; PROFILE presets shared by both "
         "firmwares, the dashboard and the validation GUI."

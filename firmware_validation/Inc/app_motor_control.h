@@ -5,7 +5,8 @@
 
 /* Application limits shared by motor control and the serial protocol. */
 #define APP_MOTOR_MAX_TARGET_SPEED_RPM       4500.0f
-#define APP_MOTOR_MAX_IQ_LIMIT_A             30.0f
+#define APP_MOTOR_OVERSPEED_LIMIT_RPM        5000.0f
+#define APP_MOTOR_MAX_IQ_LIMIT_A             28.0f
 #define APP_MOTOR_MAX_TOTAL_CURRENT_A        30.0f
 
 /* Custom START: speed first, then brake load; B2/PROFILE keep their presets. */

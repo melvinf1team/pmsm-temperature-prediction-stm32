@@ -166,6 +166,24 @@ class ParseConfigTests(unittest.TestCase):
         self.assertNotIn("profile_token", cfg)
         self.assertNotIn("load_mode", cfg)
 
+    def test_custom_iq_ceiling_is_28_while_hard_limit_stays_30(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(QUICK_PROFILE_CUSTOM, Path(directory) / "run.csv")
+            for name, value in {
+                "speed_rpm_var": "4500", "speed_hz_var": "150",
+                "pole_pairs_var": "2", "hard_limit_var": "30", "accel_var": "50",
+                "load_mode_var": LOAD_MODE_FIXED, "load_setpoint_var": "0.25",
+                "iq_limit_var": "28",
+            }.items():
+                setattr(app, name, FakeVar(value))
+            cfg = app.parse_config()
+            self.assertEqual(cfg["iq_limit"], 28.0)
+            self.assertEqual(cfg["hard_limit"], 30.0)
+            for rejected in ("28.1", "30"):
+                app.iq_limit_var = FakeVar(rejected)
+                with self.subTest(iq=rejected), self.assertRaisesRegex(ValueError, "at most 28 A"):
+                    app.parse_config()
+
 
 class StartupSequenceTests(unittest.TestCase):
     CONFIG = {

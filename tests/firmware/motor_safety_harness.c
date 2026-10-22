@@ -101,7 +101,7 @@ static bool finish_custom_start(void)
   {
     if (app_custom_phase == APP_CUSTOM_DONE) return true;
     if (app_mc_state != APP_MC_RUNNING) return false;
-    /* Stay below the existing strict 4500 rpm overspeed ceiling. */
+    /* Model a motor tracking slightly below its final speed reference. */
     mock_speed_rpm = fminf(mock_speed_reference_rpm, 4490.0f);
     step(100U);
   }
@@ -355,11 +355,21 @@ static int test_fault_reporting(void)
   CHECK(AppMotorControl_Start());
   AppMotorControl_Task();
   CHECK(finish_custom_start());
-  mock_speed_rpm = 4510.0f;
+  CHECK(NEAR(app_iq_limit_a, 28.0f)); /* A 30 A request is capped at 28 A. */
+  CHECK(NEAR(app_hard_stop_current_a, 30.0f));
+  mock_speed_rpm = 4525.666f; /* The reported bench speed must now be tolerated. */
+  for (int i = 0; i < 5; i++) step(100U);
+  CHECK(app_mc_state == APP_MC_RUNNING);
+  CHECK(strstr(mock_events, "#FAULT,") == NULL);
+  mock_speed_rpm = 5010.0f;
   step(100U);
-  CHECK(app_mc_state == APP_MC_RUNNING); /* 80 ms debounce is still active. */
-  mock_tx_busy = true;
+  CHECK(app_mc_state == APP_MC_RUNNING);
   step(80U);
+  CHECK(app_mc_state == APP_MC_RUNNING); /* 80 ms no longer triggers a stop. */
+  step(19U);
+  CHECK(app_mc_state == APP_MC_RUNNING);
+  mock_tx_busy = true;
+  step(1U); /* Exactly 100 ms continuously above 5000 rpm. */
   CHECK(app_mc_state == APP_MC_FAULT && mock_state == IDLE);
   CHECK(!strcmp(app_mc_fault_reason, "OVERSPEED"));
   CHECK(app_fault_report_pending);
@@ -373,8 +383,8 @@ static int test_fault_reporting(void)
   CHECK(!app_fault_report_pending);
   const char *report = strstr(mock_events, "#FAULT,OVERSPEED,");
   CHECK(report != NULL);
-  CHECK(strstr(report, "speed_mrpm=4510") != NULL);
-  CHECK(strstr(report, "speed_limit_rpm=4500,") != NULL);
+  CHECK(strstr(report, "speed_mrpm=5010") != NULL);
+  CHECK(strstr(report, "speed_limit_rpm=5000,") != NULL);
   CHECK(strstr(report, "load_ma=250,") != NULL); /* Before STOP reset it. */
   CHECK(strstr(report, "hard_ma=30000,") != NULL);
   CHECK(strstr(report, "mc_now=0x0000,mc_occurred=0x0000\r\n") != NULL);
@@ -407,6 +417,28 @@ static int test_fault_reporting(void)
   sent_length = mock_events_length;
   CHECK(!AppMotorControl_Start());
   CHECK(mock_events_length == sent_length);
+
+  /* The speed-command ceiling remains 4500; Iq and total current differ. */
+  reset();
+  AppMotorControl_SetRuntimeConfig(5000.0f, 30.0f, 30.0f, 50.0f);
+  CHECK(NEAR(app_target_speed_rpm, 4500.0f));
+  CHECK(NEAR(app_iq_limit_a, 28.0f));
+  CHECK(NEAR(app_hard_stop_current_a, 30.0f));
+  AppMotorControl_SetIqLimit(30.0f, false);
+  CHECK(mock_stc.PIDSpeed.upper == FIXP30(28.0f / CURRENT_SCALE));
+  CHECK(mock_current_limit == FIXP16(28.0f));
+
+  /* The existing relative threshold still protects lower speed targets. */
+  AppMotorControl_SetRuntimeConfig(2000.0f, 28.0f, 30.0f, 50.0f);
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  CHECK(finish_custom_start());
+  mock_speed_rpm = 2860.0f; /* 2000 * 1.35 + 150 = 2850 rpm. */
+  step(100U);
+  CHECK(app_mc_state == APP_MC_RUNNING);
+  step(100U);
+  CHECK(app_mc_state == APP_MC_FAULT);
+  CHECK(strstr(mock_events, "speed_limit_rpm=2850,") != NULL);
   return 0;
 }
 

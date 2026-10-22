@@ -327,7 +327,7 @@ answers `DIAG,...` lines followed by `ACK,DIAG`. `STATUS` answers
 `D6T_FRAME` answers the 16 D6T pixels and PTAT in tenths of a degree
 (`D6T_FRAME,ok=1,selected=10,ptat=253,px=241:...`) without touching the motor.
 
-Application limits are 4500 rpm, 30 A for `Iq`, and 30 A for total current.
+Application limits are 4500 rpm, 28 A for `Iq`, and 30 A for total current.
 Minimum speed is 100 rpm, and `CFG` acceleration is capped at 50 electrical
 Hz/s in both dashboard and firmware.
 
@@ -381,13 +381,13 @@ and restores the 0.05 A brake command (`#FAULT,CUSTOM_SPEED_TIMEOUT`). A
 stopped MCSDK or a DAC failure also aborts it. STOP cancels the sequence and
 any queued SDK start; no automatic restart occurs. The speed setpoint is
 reapplied on `RUN`, a restart requested during shutdown waits for `IDLE`, and
-overspeed protection never exceeds the absolute 4500 rpm ceiling.
+overspeed protection never exceeds the absolute 5000 rpm ceiling.
 
 Every protection stop now reports a complete UART fault line, even when CSV
 logging is disabled. For example:
 
 ```text
-#FAULT,OVERSPEED,t_ms=15000,speed_mrpm=4510000,speed_limit_rpm=4500,iq_ma=4800,id_ma=0,hard_ma=30000,load_ma=250,mc_now=0x0000,mc_occurred=0x0000
+#FAULT,OVERSPEED,t_ms=15000,speed_mrpm=5010000,speed_limit_rpm=5000,iq_ma=4800,id_ma=0,hard_ma=30000,load_ma=250,mc_now=0x0000,mc_occurred=0x0000
 ```
 
 The values are captured before STOP clears the references and returns the
@@ -401,8 +401,8 @@ red `Motor error` state; logging continues until the operator presses STOP.
 A late header/launch ACK does not hide this state. A new explicit start
 clears the display once accepted by the firmware.
 
-At a 4500 rpm target, the current overspeed shutdown threshold is also
-4500 rpm: any measured speed above it for 80 ms trips `OVERSPEED`. Reaching
+At a 4500 rpm target, the current overspeed shutdown threshold is
+5000 rpm: any measured speed above it for 100 ms trips `OVERSPEED`. Reaching
 the target itself does not request a stop. Use the fault report to identify
 the actual cause before changing a protection threshold.
 

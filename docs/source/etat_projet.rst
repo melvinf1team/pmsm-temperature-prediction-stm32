@@ -27,7 +27,7 @@ Open points
 1. Test bench qualification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**High priority.** Software ceilings are 4500 rpm, 30 A for `Iq`, and 30 A
+**High priority.** Software ceilings are 4500 rpm, 28 A for `Iq`, and 30 A
 for total current. The measurement chain represents about 110 A at full
 scale, but this does not establish the test bench's electrical, thermal, or
 mechanical capacity.

@@ -118,7 +118,7 @@
         <define key="M1_INT_AMP_OPAMP4_PIN" value="[{'mode':'Standalone','name':'PB11','signal':'OPAMP4_VINP','label':'SHUNT_P_V'},{'mode':'Standalone','name':'PB10','signal':'OPAMP4_VINM','label':'SHUNT_M_V'},{'mode':'Standalone','name':'PB12','signal':'OPAMP4_VOUT','label':'CURR_AMP_V'}]" />
         <define key="M1_INT_AMP_OPAMP5_PIN" value="[{'mode':'Standalone','name':'PB14','signal':'OPAMP5_VINP','label':'SHUNT_P_W'},{'mode':'Standalone','name':'PB15','signal':'OPAMP5_VINM','label':'SHUNT_M_W'},{'mode':'Standalone','name':'PA8','signal':'OPAMP5_VOUT','label':'CURR_AMP_W'}]" />
         <define key="M1_INT_AMP_OPAMPS" value="['OPAMP3','OPAMP4','OPAMP5']" />
-        <define key="M1_IQMAX" value="30" />
+        <define key="M1_IQMAX" value="28" />
         <define key="M1_KSAMPLE_DELAY" value="0.2" />
         <define key="M1_LDLQ_RATIO" value="1.000" />
         <define key="M1_LOW_SIDE_IDLE_STATE" value="TURN_OFF" />

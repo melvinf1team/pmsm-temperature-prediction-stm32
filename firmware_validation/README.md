@@ -57,7 +57,7 @@ threshold, Id/Iq, brake command, and current/occurred MCSDK fault masks
 captured before STOP. Reports retry on a full UART queue and are emitted
 once per fault. Unexpected MCSDK stops are also reported. The acquisition
 dashboard decodes these events and retains the error state while logging.
-The root README documents the fields and the strict 4500 rpm shutdown cap.
+The root README documents the fields and the strict 5000 rpm shutdown cap.
 
 Both projects apply a positive Id target of 2 A at 0.25 A/s after one second
 of stable RUN speed, after the Custom speed/brake sequence has completed.
@@ -75,7 +75,7 @@ and does not use the AI prediction. The independent power-board NTC cutoff
 is 120 C with 10 C hysteresis. See the root README for the complete behavior.
 
 Limits shared by the dashboard and both firmware projects are 4500 rpm,
-30 A for `Iq`, and 30 A for total current. The current sensor has a calculated
+28 A for `Iq`, and 30 A for total current. The current sensor has a calculated
 full scale of about 110 A; this ensures numeric representation, not the test
 bench's thermal capacity. Startup polarization is capped at 14 A; its
 software threshold and the DC profiler cannot exceed 30 A.

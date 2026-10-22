@@ -129,7 +129,7 @@ load fields are disabled and ignored for the other profiles.
 The dashboard notes that the DS18B20 refreshes at most every 750 ms.
 
 The dashboard and firmware parser enforce the same `Custom` limits: 100 to
-4500 rpm, at most 30 A for `Iq` and the hard stop, and at most 50 electrical
+4500 rpm, at most 28 A for `Iq`, 30 A for the hard stop, and at most 50 electrical
 Hz/s for acceleration. Out-of-range values are rejected before startup. See
 :doc:`utilisation` for details and precautions.
 
