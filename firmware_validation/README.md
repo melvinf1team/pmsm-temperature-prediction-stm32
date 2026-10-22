@@ -54,7 +54,7 @@ After a thermal/sensor fault, restart requires a fresh reading at or below
 or `#FAULT,D6T_UNAVAILABLE`; a blocked profile returns
 `ERR,THERMAL_PROTECTION`. The protection also runs in Serial Emulator mode
 and does not use the AI prediction. The independent power-board NTC cutoff
-is 100 C with 10 C hysteresis. See the root README for the complete behavior.
+is 120 C with 10 C hysteresis. See the root README for the complete behavior.
 
 Limits shared by the dashboard and both firmware projects are 4500 rpm,
 30 A for `Iq`, and 30 A for total current. The current sensor has a calculated

@@ -152,7 +152,7 @@
         <define key="M1_ON_OVER_VOLTAGE" value="TURN_OFF_PWM" />
         <define key="M1_OV_TEMPERATURE_HYSTERESIS_C" value="10" />
         <define key="M1_OV_TEMPERATURE_PROT_ENABLING" value="ENABLE" />
-        <define key="M1_OV_TEMPERATURE_THRESHOLD_C" value="100" />
+        <define key="M1_OV_TEMPERATURE_THRESHOLD_C" value="120" />
         <define key="M1_OV_VOLTAGE_PROT_ENABLING" value="ENABLE" />
         <define key="M1_OV_VOLTAGE_THRESHOLD_V" value="21.6" />
         <define key="M1_OVERMODULATION" value="FALSE" />

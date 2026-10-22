@@ -387,8 +387,8 @@ fresh reading at or below 65 C and a new `START`, `PROFILE`, or B2 action.
 Cooling alone never restarts the motor. Logging can continue during cooling.
 These checks do not depend on logging periods or the AI prediction.
 
-Separately, the MCSDK power-board NTC threshold is **100 C**, with the
-existing 10 C hysteresis (fault clears below approximately 90 C). The
+Separately, the MCSDK power-board NTC threshold is **120 C**, with the
+existing 10 C hysteresis (fault clears below approximately 110 C). The
 generated headers, `.ioc`, `.ioc.wb`, and `.wbdef` settings agree.
 
 ## NanoEdge AI validation firmware

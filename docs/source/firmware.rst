@@ -162,7 +162,7 @@ cooling never starts the motor automatically. Fault UART events are
 ``#FAULT,D6T_OVERTEMP`` and ``#FAULT,D6T_UNAVAILABLE``. A blocked ``PROFILE``
 returns ``ERR,THERMAL_PROTECTION``. Logging can continue after the stop.
 
-The separate MCSDK NTC protection for the power board trips at 100 C, with
+The separate MCSDK NTC protection for the power board trips at 120 C, with
 10 C hysteresis. The generated headers and Workbench/CubeMX files contain
 the same threshold.
 
