@@ -458,9 +458,13 @@ int main(void)
   CHECK(mock_id_ref == 0); /* No Id during the stability interval. */
   for (int i = 0; i < 40; i++) step(100U);
   CHECK(NEAR(app_active_id_a, 1.0f));
-  for (int i = 0; i < 41; i++) step(100U);
+  for (int i = 0; i < 40; i++) step(100U);
   CHECK(NEAR(app_active_id_a, 2.0f));
-  CHECK(NEAR((float)mock_id_ref / 65536.0f, 2.0f));
+  for (int i = 0; i < 80; i++) step(100U);
+  CHECK(NEAR(app_active_id_a, 4.0f));
+  CHECK(NEAR((float)mock_id_ref / 65536.0f, 4.0f));
+  for (int i = 0; i < 10; i++) step(100U);
+  CHECK(NEAR(app_active_id_a, 4.0f));
   CHECK(mock_current_limit <= FIXP16(30.0f));
   CHECK(mock_max_age == 1000U);
 

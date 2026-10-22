@@ -21,7 +21,7 @@
 #define APP_CUSTOM_SPEED_TIMEOUT_MS          5000U
 
 /* Positive d-axis heating current, applied only after stable RUN speed. */
-#define APP_ID_TARGET_A                       2.0f
+#define APP_ID_TARGET_A                       4.0f
 #define APP_ID_RAMP_A_PER_S                    0.25f
 #define APP_ID_SPEED_STABLE_MS                1000U
 #define APP_ID_SPEED_TOLERANCE_RATIO          0.05f
