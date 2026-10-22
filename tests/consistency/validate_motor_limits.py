@@ -109,6 +109,19 @@ def validate_firmware_root(root: Path) -> None:
     assert numeric_define(app_header, "APP_MOTOR_OVERTEMP_C") == 70.0
     assert numeric_define(app_header, "APP_MOTOR_RESTART_TEMP_C") == 65.0
     assert numeric_define(app_header, "APP_MOTOR_D6T_MAX_AGE_MS") == 1000.0
+    expected_custom_start = {
+        "APP_CUSTOM_START_SPEED_RPM": 2000.0,
+        "APP_CUSTOM_START_ACCEL_ELEC_HZ_S": 500.0,
+        "APP_CUSTOM_START_STABLE_MS": 2000.0,
+        "APP_CUSTOM_SPEED_RAMP_RPM_PER_S": 500.0,
+        "APP_CUSTOM_TARGET_STABLE_MS": 1000.0,
+        "APP_CUSTOM_LOAD_RAMP_A_PER_S": 0.04,
+        "APP_CUSTOM_SPEED_TOLERANCE_RATIO": 0.05,
+        "APP_CUSTOM_MIN_SPEED_TOLERANCE_RPM": 50.0,
+        "APP_CUSTOM_SPEED_TIMEOUT_MS": 5000.0,
+    }
+    for name, expected in expected_custom_start.items():
+        assert numeric_define(app_header, name) == expected
     assert numeric_define(motor_header, "MOTOR_MAX_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
     assert numeric_define(motor_header, "NOMINAL_CURRENT_A") == EXPECTED_MAX_CURRENT_A
 

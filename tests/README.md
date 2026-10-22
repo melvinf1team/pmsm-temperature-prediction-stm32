@@ -70,6 +70,11 @@ HAL/MCSDK boundary mocks. It checks the stability delay and Id ramp, current
 headroom, stop/fault resets, the strict 70 C trip, 65 C manual restart,
 missing/stale readings, and tick-counter wrap. It also uses `-Ofast` to test
 that NaN rejection survives the firmware's optimization settings.
+Custom-start checks cover the initial low-speed/0.05 A hold, speed and brake
+slopes, final-speed stability, pause/recovery, stalled-speed timeout, lower
+targets, runtime CFG/LOAD updates, DAC failures, queued-start cancellation,
+and Id inhibition until the sequence is complete. B2/PROFILE behavior is
+also checked separately.
 
 Install the optional dependencies with
 `python -m pip install -r tests/requirements-firmware.txt`, then run

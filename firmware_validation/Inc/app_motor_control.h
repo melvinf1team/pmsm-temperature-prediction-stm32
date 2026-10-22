@@ -8,6 +8,17 @@
 #define APP_MOTOR_MAX_IQ_LIMIT_A             30.0f
 #define APP_MOTOR_MAX_TOTAL_CURRENT_A        30.0f
 
+/* Custom START: speed first, then brake load; B2/PROFILE keep their presets. */
+#define APP_CUSTOM_START_SPEED_RPM           2000.0f
+#define APP_CUSTOM_START_ACCEL_ELEC_HZ_S      500.0f
+#define APP_CUSTOM_START_STABLE_MS           2000U
+#define APP_CUSTOM_SPEED_RAMP_RPM_PER_S       500.0f
+#define APP_CUSTOM_TARGET_STABLE_MS          1000U
+#define APP_CUSTOM_LOAD_RAMP_A_PER_S          0.04f
+#define APP_CUSTOM_SPEED_TOLERANCE_RATIO     0.05f
+#define APP_CUSTOM_MIN_SPEED_TOLERANCE_RPM   50.0f
+#define APP_CUSTOM_SPEED_TIMEOUT_MS          5000U
+
 /* Positive d-axis heating current, applied only after stable RUN speed. */
 #define APP_ID_TARGET_A                       2.0f
 #define APP_ID_RAMP_A_PER_S                    0.25f

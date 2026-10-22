@@ -146,9 +146,25 @@ covering the 400 ms `STOP` permanency, so a serial `START` behaves like B2. The
 `AppMotorControl_Task` monitors MCSDK faults, overcurrent, overspeed, and
 the D6T motor temperature independently of logging and AI inference.
 
+Custom starts in both projects use a staged speed/brake sequence configured
+by ``APP_CUSTOM_*`` in ``Inc/app_motor_control.h``. Start at min(2000 rpm,
+requested speed) with the B2 acceleration and 0.05 A brake. After two stable
+seconds, ramp speed at up to 500 rpm/s (respecting a lower configured
+acceleration), wait one stable second at the final speed, then ramp the
+fixed brake at 0.04 A/s. Speed must track within 5% (minimum tolerance
+50 rpm). Speed loss pauses growth; brake growth resumes after one stable
+second. Five continuous seconds outside tolerance stops the motor with
+``CUSTOM_SPEED_TIMEOUT``. STOP, DAC errors and MCSDK stops cancel the
+sequence and restore 0.05 A. UART markers are ``#CUSTOM,START`` and
+``#CUSTOM,READY``. The 4500 rpm / 0.25 A sequence takes about 13 seconds
+plus initial startup/tracking delays. B2/PROFILE presets are unchanged.
+Runtime configuration restages a transition from the current reference;
+Custom fixed-load increases use the brake ramp and decreases are immediate.
+
 Both projects define the heating settings in ``Inc/app_motor_control.h``:
 ``APP_ID_TARGET_A=2.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Id remains zero
-during startup. After one second within 5% of the speed target (minimum
+during startup, including the complete Custom speed/brake sequence.
+After one second within 5% of the speed target (minimum
 tolerance 50 rpm), it increases at 0.25 A/s. Speed transitions pause the
 increase; stops, faults and runtime reconfiguration reset Id to zero.
 Current headroom is bounded by the hard-stop limit and the global 30 A

@@ -7,7 +7,9 @@ static uint32_t mock_max_age;
 static MCI_State_t mock_state;
 static bool mock_d6t_valid;
 static bool mock_start_queued;
+static bool mock_dac_fail;
 static float mock_temperature, mock_speed_rpm;
+static float mock_speed_reference_rpm, mock_acceleration;
 static dq_float_t mock_current;
 static fixp16_t mock_id_ref, mock_current_limit;
 static TestStc mock_stc;
@@ -18,7 +20,11 @@ DAC_HandleTypeDef hdac1;
 uint32_t HAL_GetTick(void) { return mock_tick; }
 void HAL_Delay(uint32_t ms) { mock_tick += ms; }
 int HAL_DAC_SetValue(DAC_HandleTypeDef *d, int c, int a, uint32_t v)
-{ (void)d; (void)c; (void)a; (void)v; return HAL_OK; }
+{
+  (void)d; (void)c; (void)a; (void)v;
+  if (mock_dac_fail) { mock_dac_fail = false; return 1; }
+  return HAL_OK;
+}
 int HAL_DAC_Start(DAC_HandleTypeDef *d, int c)
 { (void)d; (void)c; return HAL_OK; }
 void Error_Handler(void) { for (;;) {} }
@@ -36,8 +42,9 @@ bool MC_StopMotor1(void) { mock_stops++; mock_state = IDLE; return true; }
 float MC_GetSpeedMotor1_F(void) { return mock_speed_rpm * 2.0f / 60.0f; }
 dq_float_t MC_GetCurrentMotor1_F(void) { return mock_current; }
 bool MC_SetControlModeMotor1(int mode) { return mode == MCM_SPEED_MODE; }
-void MC_SetAccelerationMotor1_F(float a) { (void)a; }
-void MC_SetSpeedReferenceMotor1_F(float a) { (void)a; }
+void MC_SetAccelerationMotor1_F(float a) { mock_acceleration = a; }
+void MC_SetSpeedReferenceMotor1_F(float a)
+{ mock_speed_reference_rpm = a * 60.0f / 2.0f; }
 void MCI_SetIdRef(MCI_Handle_t *p, fixp16_t v) { (void)p; mock_id_ref = v; }
 void MCI_SetMaxCurrent(MCI_Handle_t *p, fixp16_t v) { (void)p; mock_current_limit = v; }
 void MCI_SetPidSpeedKp(MCI_Handle_t *p, float v) { (void)p; (void)v; }
@@ -53,6 +60,7 @@ static void reset(void)
   mock_state = IDLE;
   mock_d6t_valid = true;
   mock_start_queued = false;
+  mock_dac_fail = false;
   mock_mci.DirectCommand = 0;
   mock_temperature = 25.0f;
   mock_speed_rpm = 2500.0f;
@@ -71,13 +79,270 @@ static void step(uint32_t ms)
 #define CHECK(x) do { if (!(x)) return __LINE__; } while (0)
 #define NEAR(a, b) (fabsf((a) - (b)) < 0.001f)
 
+/* Follow the emitted reference, modelling a motor that tracks its command.
+ * Physical observer/current-loop dynamics are deliberately not simulated. */
+static bool finish_custom_start(void)
+{
+  for (int i = 0; i < 400; i++)
+  {
+    if (app_custom_phase == APP_CUSTOM_DONE) return true;
+    if (app_mc_state != APP_MC_RUNNING) return false;
+    /* Stay below the existing strict 4500 rpm overspeed ceiling. */
+    mock_speed_rpm = fminf(mock_speed_reference_rpm, 4490.0f);
+    step(100U);
+  }
+  return false;
+}
+
+static int test_custom_start(void)
+{
+  reset();
+  AppMotorControl_SetRuntimeConfig(4500.0f, 30.0f, 30.0f, 50.0f);
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  CHECK(AppMotorControl_Start());
+  CHECK(NEAR(mock_speed_reference_rpm, 2000.0f));
+  CHECK(NEAR(mock_acceleration, 500.0f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  CHECK(NEAR(app_target_speed_rpm, 4500.0f));
+  CHECK(NEAR(app_active_iq_limit_a, 4.5f));
+  AppMotorControl_Task();
+  mock_speed_rpm = 2000.0f;
+  uint32_t start = mock_tick;
+  for (int i = 0; i < 20; i++) step(100U);
+  CHECK(NEAR(mock_speed_reference_rpm, 2000.0f));
+  step(100U);
+  CHECK(app_custom_phase == APP_CUSTOM_SPEED_RAMP);
+  CHECK(mock_acceleration > 16.6f && mock_acceleration < 16.7f);
+  CHECK(NEAR(AppMotorControl_GetOverspeedReferenceRpm(), 2000.0f));
+
+  for (int i = 0; i < 50; i++)
+  {
+    float previous = mock_speed_reference_rpm;
+    mock_speed_rpm = previous;
+    step(100U);
+    CHECK(mock_speed_reference_rpm <= previous + 50.01f);
+    CHECK(mock_speed_reference_rpm >= previous);
+    CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+    CHECK(mock_id_ref == 0);
+    CHECK(mock_current_limit <= FIXP16(30.0f));
+  }
+  CHECK(NEAR(mock_speed_reference_rpm, 4500.0f));
+  CHECK(app_custom_phase == APP_CUSTOM_FINAL_SPEED);
+  mock_speed_rpm = 4490.0f;
+  for (int i = 0; i < 11; i++) step(100U);
+  CHECK(app_custom_phase == APP_CUSTOM_LOAD_RAMP);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  for (int i = 0; i < 50; i++)
+  {
+    float previous = AppMotorControl_GetLoadSetpointA();
+    step(100U);
+    CHECK(AppMotorControl_GetLoadSetpointA() <= previous + 0.00401f);
+    CHECK(AppMotorControl_GetLoadSetpointA() >= previous);
+    CHECK(AppMotorControl_GetLoadSetpointA() <= 0.25001f);
+    CHECK(mock_id_ref == 0);
+  }
+  step(100U); /* Allow floating-point rounding on the final DAC step. */
+  CHECK(app_custom_phase == APP_CUSTOM_DONE);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.25f));
+  CHECK((mock_tick - start) >= 13000U && (mock_tick - start) <= 13500U);
+  for (int i = 0; i < 10; i++) step(100U);
+  CHECK(mock_id_ref == 0);
+  for (int i = 0; i < 5; i++) step(100U);
+  CHECK(app_active_id_a > 0.0f); /* Heating follows the completed startup. */
+
+  /* A Custom LOAD update cannot bypass the initial low-load phase. */
+  reset();
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  CHECK(finish_custom_start());
+  CHECK(AppMotorControl_SetLoadFixed(0.10f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.10f));
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.10f));
+  CHECK(app_custom_phase == APP_CUSTOM_FINAL_SPEED);
+  CHECK(finish_custom_start());
+
+  /* Brake growth pauses on speed loss, then waits for 1 s stable recovery. */
+  AppMotorControl_SetRuntimeConfig(4500.0f, 30.0f, 30.0f, 50.0f);
+  for (int i = 0; i < 200 && app_custom_phase != APP_CUSTOM_LOAD_RAMP; i++)
+  {
+    mock_speed_rpm = fminf(mock_speed_reference_rpm, 4490.0f);
+    step(100U);
+  }
+  CHECK(app_custom_phase == APP_CUSTOM_LOAD_RAMP);
+  mock_speed_rpm = 4490.0f;
+  for (int i = 0; i < 5; i++) step(100U);
+  float held_load = AppMotorControl_GetLoadSetpointA();
+  CHECK(held_load > 0.05f && held_load < 0.25f);
+  mock_speed_rpm = 3900.0f;
+  for (int i = 0; i < 10; i++) step(100U);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), held_load));
+  CHECK(mock_id_ref == 0);
+  mock_speed_rpm = 4490.0f;
+  for (int i = 0; i < 11; i++) step(100U);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), held_load));
+  step(1000U); /* A delayed iteration must not catch up the brake ramp. */
+  CHECK(AppMotorControl_GetLoadSetpointA() <= held_load + 0.00401f);
+  CHECK(finish_custom_start());
+
+  /* A smaller speed/load request is never exceeded by startup settings. */
+  reset();
+  AppMotorControl_SetRuntimeConfig(1200.0f, 5.0f, 6.0f, 50.0f);
+  CHECK(AppMotorControl_SetLoadFixed(0.05f));
+  CHECK(AppMotorControl_Start());
+  CHECK(NEAR(mock_speed_reference_rpm, 1200.0f));
+  AppMotorControl_Task();
+  CHECK(finish_custom_start());
+  CHECK(NEAR(mock_speed_reference_rpm, 1200.0f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+
+  /* Speed growth also pauses when the measured motor cannot follow. */
+  reset();
+  AppMotorControl_SetRuntimeConfig(4500.0f, 30.0f, 30.0f, 10.0f);
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  mock_speed_rpm = 2000.0f;
+  for (int i = 0; i < 21; i++) step(100U);
+  CHECK(app_custom_phase == APP_CUSTOM_SPEED_RAMP);
+  CHECK(NEAR(mock_acceleration, 10.0f));
+  step(1000U);
+  CHECK(mock_speed_reference_rpm <= 2030.01f); /* 300 rpm/s, dt capped at 100 ms. */
+  float held_speed = mock_speed_reference_rpm;
+  mock_speed_rpm = 1500.0f;
+  for (int i = 0; i < 10; i++) step(100U);
+  CHECK(NEAR(mock_speed_reference_rpm, held_speed));
+  mock_speed_rpm = held_speed;
+  step(100U);
+  CHECK(mock_speed_reference_rpm > held_speed);
+
+  /* A new CFG uses the current reference, not a jump to the new target. */
+  held_speed = mock_speed_reference_rpm;
+  AppMotorControl_SetRuntimeConfig(3500.0f, 20.0f, 25.0f, 50.0f);
+  CHECK(NEAR(mock_speed_reference_rpm, held_speed));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  CHECK(finish_custom_start());
+  CHECK(NEAR(mock_speed_reference_rpm, 3500.0f));
+
+  /* A sustained blocked/stalled start stops instead of vibrating forever. */
+  reset();
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  mock_speed_rpm = 0.0f;
+  for (int i = 0; i < 51; i++) step(100U);
+  CHECK(app_mc_state == APP_MC_FAULT && mock_state == IDLE);
+  CHECK(!strcmp(app_mc_fault_reason, "CUSTOM_SPEED_TIMEOUT"));
+  CHECK(app_custom_phase == APP_CUSTOM_OFF);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  uint32_t starts = mock_starts;
+  for (int i = 0; i < 20; i++) step(100U);
+  CHECK(mock_starts == starts);
+
+  /* Stop/restart and thermal faults cancel a partially applied brake ramp. */
+  reset();
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  for (int i = 0; i < 200 && AppMotorControl_GetLoadSetpointA() < 0.10f; i++)
+  {
+    mock_speed_rpm = mock_speed_reference_rpm;
+    step(100U);
+  }
+  CHECK(AppMotorControl_GetLoadSetpointA() >= 0.10f);
+  AppMotorControl_Stop();
+  CHECK(app_custom_phase == APP_CUSTOM_OFF);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  CHECK(AppMotorControl_Start());
+  CHECK(NEAR(mock_speed_reference_rpm, 2000.0f));
+  AppMotorControl_Task();
+  mock_temperature = 70.1f;
+  step(100U);
+  CHECK(app_mc_state == APP_MC_FAULT && app_custom_phase == APP_CUSTOM_OFF);
+
+  /* DAC failure and a stopped MCSDK cannot leave the sequence progressing. */
+  reset();
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  for (int i = 0; i < 200 && app_custom_phase != APP_CUSTOM_LOAD_RAMP; i++)
+  {
+    mock_speed_rpm = mock_speed_reference_rpm;
+    step(100U);
+  }
+  CHECK(app_custom_phase == APP_CUSTOM_LOAD_RAMP);
+  mock_dac_fail = true;
+  step(100U);
+  CHECK(app_mc_state == APP_MC_FAULT && mock_state == IDLE);
+  CHECK(!strcmp(app_mc_fault_reason, "LOAD_DAC"));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  reset();
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  mock_state = IDLE;
+  step(100U);
+  CHECK(app_mc_state == APP_MC_FAULT && app_custom_phase == APP_CUSTOM_OFF);
+
+  /* STOP also cancels a Custom start still queued before the first SDK tick. */
+  reset();
+  mock_start_queued = true;
+  CHECK(AppMotorControl_Start());
+  CHECK(mock_mci.DirectCommand == MCI_START);
+  AppMotorControl_Stop();
+  CHECK(mock_mci.DirectCommand == MCI_STOP);
+  CHECK(app_custom_phase == APP_CUSTOM_OFF);
+
+  /* Both stability intervals and ramps survive a HAL tick rollover. */
+  reset();
+  AppMotorControl_SetRuntimeConfig(4500.0f, 30.0f, 30.0f, 50.0f);
+  CHECK(AppMotorControl_SetLoadFixed(0.25f));
+  mock_tick = UINT32_MAX - 3000U;
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  CHECK(finish_custom_start());
+  CHECK(mock_tick < 20000U);
+
+  /* Custom variable load starts drawing only after the speed sequence. */
+  reset();
+  CHECK(AppMotorControl_Start());
+  AppMotorControl_Task();
+  CHECK(AppMotorControl_SetLoadVariable());
+  CHECK(!app_tb200s_change_scheduled);
+  CHECK(finish_custom_start());
+  CHECK(app_tb200s_change_scheduled);
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+
+  /* B2 and PROFILE presets retain their original speed/load behavior. */
+  reset();
+  CHECK(AppMotorControl_StartProfile(APP_MOTOR_PROFILE_STABLE) ==
+        APP_MOTOR_PROFILE_START_ACCEPTED);
+  AppMotorControl_Task();
+  AppMotorControl_Task();
+  CHECK(app_custom_phase == APP_CUSTOM_OFF);
+  CHECK(NEAR(mock_speed_reference_rpm, 2500.0f));
+  CHECK(NEAR(mock_acceleration, 500.0f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.10f));
+  AppMotorControl_Stop();
+  UI_HandleStartStopButton_cb();
+  AppMotorControl_Task();
+  AppMotorControl_Task();
+  CHECK(app_custom_phase == APP_CUSTOM_OFF && app_button_speed_variable);
+  CHECK(mock_speed_reference_rpm >= 2000.0f && mock_speed_reference_rpm <= 4000.0f);
+  CHECK(NEAR(mock_acceleration, 500.0f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  return 0;
+}
+
 int main(void)
 {
+  int custom_result = test_custom_start();
+  if (custom_result != 0) return custom_result;
   reset();
   CHECK(AppMotorControl_Start());
   CHECK(mock_id_ref == 0);
   AppMotorControl_Task(); /* STARTING -> RUNNING */
-  step(100U); /* Start tracking stable speed. */
+  CHECK(finish_custom_start());
+  /* The completion tick starts tracking stable speed for Id. */
   for (int i = 0; i < 10; i++) step(100U);
   CHECK(mock_id_ref == 0); /* No Id during the stability interval. */
   for (int i = 0; i < 40; i++) step(100U);
@@ -125,6 +390,7 @@ int main(void)
   reset();
   CHECK(AppMotorControl_Start());
   AppMotorControl_Task();
+  CHECK(finish_custom_start());
   app_active_id_a = 1.0f;
   MCI_SetIdRef(pMCI[M1], FIXP16(1.0f));
   mock_temperature = 70.0f;
@@ -194,9 +460,12 @@ int main(void)
 
   /* A tick-counter wrap must not restart the one-second stability interval. */
   reset();
-  mock_tick = UINT32_MAX - 500U;
   CHECK(AppMotorControl_Start());
   AppMotorControl_Task();
+  CHECK(finish_custom_start());
+  mock_tick = UINT32_MAX - 500U;
+  app_id_ramp_last_ms = mock_tick;
+  app_id_speed_stable = false;
   for (int i = 0; i < 52; i++) step(100U);
   CHECK(app_active_id_a > 0.9f && app_active_id_a < 1.1f);
   return 0;

@@ -71,6 +71,11 @@ class MotorFirmwareSafetyTests(unittest.TestCase):
                     if segment["p_type"] == "PT_LOAD":
                         emulator.mem_write(segment["p_vaddr"], segment.data())
                 entry = elf.header["e_entry"]
+                debug_symbols = {
+                    symbol.name: symbol["st_value"]
+                    for symbol in elf.get_section_by_name(".symtab").iter_symbols()
+                    if symbol.name in ("app_mc_state", "app_custom_phase", "app_mc_fault_reason")
+                }
             sentinel = 0x1F0000
             emulator.reg_write(UC_ARM_REG_SP, 0x1E0000)
             emulator.reg_write(UC_ARM_REG_LR, sentinel | 1)
@@ -78,7 +83,15 @@ class MotorFirmwareSafetyTests(unittest.TestCase):
             self.assertEqual(emulator.reg_read(UC_ARM_REG_PC), sentinel,
                              "C test did not return before the instruction limit")
             result = emulator.reg_read(UC_ARM_REG_R0)
-            self.assertEqual(result, 0, f"{project.name}: C assertion failed at {fixture}:{result}")
+            details = {}
+            if result:
+                for name, address in debug_symbols.items():
+                    value = int.from_bytes(emulator.mem_read(address, 4), "little")
+                    if name == "app_mc_fault_reason":
+                        value = bytes(emulator.mem_read(value, 80)).split(b"\0", 1)[0].decode()
+                    details[name] = value
+            self.assertEqual(result, 0,
+                             f"{project.name}: C assertion failed at {fixture}:{result}; {details}")
 
     def test_motor_state_machine_and_id_ramp(self):
         for project in PROJECTS:

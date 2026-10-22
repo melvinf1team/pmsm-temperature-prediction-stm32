@@ -42,8 +42,19 @@ tools. Review any CubeMX/Workbench regeneration before integrating it.
 
 ## Motor limits and B2 profile
 
+Custom starts first hold min(2000 rpm, requested speed) with 0.05 A brake
+for two stable seconds, ramp speed at up to 500 rpm/s, wait one stable second
+at the final speed, then ramp fixed brake load at 0.04 A/s to its requested
+value. A lower configured acceleration is respected after the first leg;
+the first leg uses the B2 acceleration. The 4500 rpm / 0.25 A sequence takes
+roughly 13–15 seconds if the motor tracks promptly. Speed loss pauses the
+ramps; five continuous seconds outside tolerance aborts the sequence.
+STOP/faults restore 0.05 A and cancel the sequence. `APP_CUSTOM_*` settings
+are in `Inc/app_motor_control.h`. B2/PROFILE presets retain their behavior.
+
 Both projects apply a positive Id target of 2 A at 0.25 A/s after one second
-of stable RUN speed. Configure `APP_ID_TARGET_A` and `APP_ID_RAMP_A_PER_S`
+of stable RUN speed, after the Custom speed/brake sequence has completed.
+Configure `APP_ID_TARGET_A` and `APP_ID_RAMP_A_PER_S`
 in `Inc/app_motor_control.h`; zero disables heating. Stops, faults and new
 runtime configurations reset Id. Current ceilings still apply.
 

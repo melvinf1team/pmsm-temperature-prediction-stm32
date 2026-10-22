@@ -112,6 +112,16 @@ typedef enum
   APP_MC_FAULT
 } AppMotorControlState_t;
 
+typedef enum
+{
+  APP_CUSTOM_OFF = 0,
+  APP_CUSTOM_INITIAL_SPEED,
+  APP_CUSTOM_SPEED_RAMP,
+  APP_CUSTOM_FINAL_SPEED,
+  APP_CUSTOM_LOAD_RAMP,
+  APP_CUSTOM_DONE
+} AppCustomStartPhase_t;
+
 static AppMotorControlState_t app_mc_state = APP_MC_IDLE;
 static const char *app_mc_fault_reason = "NONE";
 
@@ -147,6 +157,14 @@ static uint32_t app_iq_ramp_last_ms = 0U;
 static float app_hard_stop_current_a = APP_DEFAULT_HARD_STOP_CURRENT_A;
 static float app_accel_elec_hz_s = APP_DEFAULT_ACCEL_ELEC_HZ_S;
 
+static AppCustomStartPhase_t app_custom_phase = APP_CUSTOM_OFF;
+static float app_custom_speed_ref_rpm = 0.0f;
+static uint32_t app_custom_last_ms = 0U;
+static uint32_t app_custom_stable_since_ms = 0U;
+static uint32_t app_custom_unstable_since_ms = 0U;
+static bool app_custom_speed_stable = false;
+static bool app_custom_speed_unstable = false;
+
 static float app_active_id_a = 0.0f;
 static uint32_t app_id_ramp_last_ms = 0U;
 static uint32_t app_id_speed_stable_since_ms = 0U;
@@ -154,6 +172,30 @@ static bool app_id_speed_stable = false;
 static bool app_thermal_latched = false;
 
 static void AppMotorControl_ApplySpeedReference(void);
+
+static bool AppMotorControl_IsCustomStartActive(void)
+{
+  return (app_custom_phase != APP_CUSTOM_OFF) &&
+         (app_custom_phase != APP_CUSTOM_DONE);
+}
+
+static void AppMotorControl_ResetCustomStart(void)
+{
+  app_custom_phase = APP_CUSTOM_OFF;
+  app_custom_speed_ref_rpm = 0.0f;
+  app_custom_last_ms = 0U;
+  app_custom_speed_stable = false;
+  app_custom_speed_unstable = false;
+}
+
+static void AppMotorControl_BeginCustomStart(float initial_speed_rpm)
+{
+  app_custom_phase = APP_CUSTOM_INITIAL_SPEED;
+  app_custom_speed_ref_rpm = initial_speed_rpm;
+  app_custom_last_ms = HAL_GetTick();
+  app_custom_speed_stable = false;
+  app_custom_speed_unstable = false;
+}
 
 static void AppMotorControl_SetFault(const char *reason)
 {
@@ -346,6 +388,12 @@ static bool AppMotorControl_OnMotorRunning(uint32_t now)
   app_tb200s_change_scheduled = false;
   app_tb200s_next_change_ms = 0U;
 
+  if (AppMotorControl_IsCustomStartActive())
+  {
+    app_custom_last_ms = now;
+    return AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A);
+  }
+
   if (app_tb200s_load_mode == APP_TB200S_LOAD_VARIABLE)
   {
     if (!AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A))
@@ -361,6 +409,7 @@ static bool AppMotorControl_OnMotorRunning(uint32_t now)
 
 static void AppMotorControl_OnMotorStopped(void)
 {
+  AppMotorControl_ResetCustomStart();
   AppMotorControl_ResetId();
   app_tb200s_change_scheduled = false;
   app_tb200s_next_change_ms = 0U;
@@ -369,6 +418,11 @@ static void AppMotorControl_OnMotorStopped(void)
 
 static bool AppMotorControl_ServiceVariableLoad(uint32_t now)
 {
+  if (AppMotorControl_IsCustomStartActive())
+  {
+    return true;
+  }
+
   if (app_tb200s_load_mode != APP_TB200S_LOAD_VARIABLE)
   {
     return true;
@@ -408,6 +462,26 @@ bool AppMotorControl_SetLoadFixed(float load_a)
   app_tb200s_change_scheduled = false;
   app_tb200s_next_change_ms = 0U;
 
+  /* A LOAD received during Custom startup cannot bypass the brake ramp.
+   * Subsequent increases also wait for stable speed and use the same ramp. */
+  if ((app_mc_state == APP_MC_RUNNING) &&
+      (app_custom_phase != APP_CUSTOM_OFF))
+  {
+    if ((app_custom_phase == APP_CUSTOM_DONE) &&
+        (load_a > app_tb200s_load_setpoint_a))
+    {
+      app_custom_phase = APP_CUSTOM_FINAL_SPEED;
+      app_custom_last_ms = HAL_GetTick();
+      app_custom_speed_stable = false;
+      app_custom_speed_unstable = false;
+    }
+    if (AppMotorControl_IsCustomStartActive())
+    {
+      return AppMotorControl_ApplyLoadSetpoint(
+        fminf(app_tb200s_load_setpoint_a, load_a));
+    }
+  }
+
   /* Outside RUN, enforce 0.05 A so that the next start can never occur
    * under a higher load. */
   return AppMotorControl_ApplyLoadSetpoint(
@@ -429,7 +503,8 @@ bool AppMotorControl_SetLoadVariable(void)
     return false;
   }
 
-  if (app_mc_state == APP_MC_RUNNING)
+  if ((app_mc_state == APP_MC_RUNNING) &&
+      !AppMotorControl_IsCustomStartActive())
   {
     AppMotorControl_ScheduleNextLoadChange(now);
   }
@@ -633,6 +708,15 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
 
 static void AppMotorControl_UpdateIdReference(uint32_t now, float measured_iq_a)
 {
+  /* Keep the heating current out of the speed/brake startup sequence. */
+  if (AppMotorControl_IsCustomStartActive())
+  {
+    AppMotorControl_ResetId();
+    app_id_ramp_last_ms = now;
+    AppMotorControl_SetIqLimit(app_active_iq_limit_a, false);
+    return;
+  }
+
   float target_a = APP_ID_TARGET_A;
   float total_cap_a = fminf(app_hard_stop_current_a, APP_MOTOR_MAX_TOTAL_CURRENT_A);
   float remaining_a2 = (total_cap_a * total_cap_a) -
@@ -694,14 +778,174 @@ static void AppMotorControl_ApplySpeedReference(void)
     ? APP_BUTTON_ACCEL_ELEC_HZ_S
     : app_accel_elec_hz_s;
 
+  float speed_ref_rpm = app_target_speed_rpm;
+  if (app_custom_phase != APP_CUSTOM_OFF)
+  {
+    speed_ref_rpm = app_custom_speed_ref_rpm;
+    if (app_custom_phase == APP_CUSTOM_INITIAL_SPEED)
+    {
+      accel_elec_hz_s = APP_CUSTOM_START_ACCEL_ELEC_HZ_S;
+    }
+    else if (app_custom_phase == APP_CUSTOM_SPEED_RAMP)
+    {
+      accel_elec_hz_s = fminf(accel_elec_hz_s,
+        AppMotorControl_MechRpmToElecHz(APP_CUSTOM_SPEED_RAMP_RPM_PER_S));
+    }
+  }
+
   MC_SetAccelerationMotor1_F(accel_elec_hz_s);
   MC_SetSpeedReferenceMotor1_F(
-    AppMotorControl_MechRpmToElecHz(app_target_speed_rpm));
+    AppMotorControl_MechRpmToElecHz(speed_ref_rpm));
+}
+
+static bool AppMotorControl_AbortCustomStart(const char *reason)
+{
+  AppMotorControl_Stop();
+  AppMotorControl_SetFault(reason);
+  (void)AppDatalog_SendText("#FAULT,");
+  (void)AppDatalog_SendText(reason);
+  (void)AppDatalog_SendText("\r\n");
+  return false;
+}
+
+static void AppMotorControl_CompleteCustomStart(uint32_t now)
+{
+  app_custom_phase = APP_CUSTOM_DONE;
+  if (app_tb200s_load_mode == APP_TB200S_LOAD_VARIABLE)
+  {
+    AppMotorControl_ScheduleNextLoadChange(now);
+  }
+  (void)AppDatalog_SendText("#CUSTOM,READY\r\n");
+}
+
+static bool AppMotorControl_ServiceCustomStart(uint32_t now)
+{
+  if (!AppMotorControl_IsCustomStartActive())
+  {
+    return true;
+  }
+  if (MC_GetSTMStateMotor1() != RUN)
+  {
+    return AppMotorControl_AbortCustomStart("CUSTOM_MOTOR_STOPPED");
+  }
+
+  uint32_t dt_ms = now - app_custom_last_ms;
+  app_custom_last_ms = now;
+  /* Never catch up a delayed loop with a large speed or brake step. */
+  if (dt_ms > 100U) dt_ms = 100U;
+
+  float speed_rpm = (MC_GetSpeedMotor1_F() * 60.0f) / (float)POLE_PAIR_NUM;
+  if (!AppMotorControl_IsFiniteFloat(speed_rpm))
+  {
+    return AppMotorControl_AbortCustomStart("NONFINITE_SPEED");
+  }
+  float tolerance_rpm = fmaxf(APP_CUSTOM_MIN_SPEED_TOLERANCE_RPM,
+    app_custom_speed_ref_rpm * APP_CUSTOM_SPEED_TOLERANCE_RATIO);
+  bool tracking_speed = fabsf(speed_rpm - app_custom_speed_ref_rpm) <= tolerance_rpm;
+  if (!tracking_speed)
+  {
+    app_custom_speed_stable = false;
+    if (!app_custom_speed_unstable)
+    {
+      app_custom_speed_unstable = true;
+      app_custom_unstable_since_ms = now;
+    }
+    if ((now - app_custom_unstable_since_ms) >= APP_CUSTOM_SPEED_TIMEOUT_MS)
+    {
+      return AppMotorControl_AbortCustomStart("CUSTOM_SPEED_TIMEOUT");
+    }
+  }
+  else
+  {
+    app_custom_speed_unstable = false;
+    if (!app_custom_speed_stable)
+    {
+      app_custom_speed_stable = true;
+      app_custom_stable_since_ms = now;
+    }
+  }
+  uint32_t stable_ms = app_custom_speed_stable
+    ? now - app_custom_stable_since_ms : 0U;
+
+  switch (app_custom_phase)
+  {
+    case APP_CUSTOM_INITIAL_SPEED:
+      if (tracking_speed && (stable_ms >= APP_CUSTOM_START_STABLE_MS))
+      {
+        app_custom_phase = (app_custom_speed_ref_rpm == app_target_speed_rpm)
+          ? APP_CUSTOM_FINAL_SPEED : APP_CUSTOM_SPEED_RAMP;
+        AppMotorControl_ApplySpeedReference();
+      }
+      break;
+
+    case APP_CUSTOM_SPEED_RAMP:
+      if (tracking_speed)
+      {
+        float rate_rpm_s = fminf(APP_CUSTOM_SPEED_RAMP_RPM_PER_S,
+          app_accel_elec_hz_s * 60.0f / (float)POLE_PAIR_NUM);
+        float step_rpm = rate_rpm_s * ((float)dt_ms / 1000.0f);
+        if (app_custom_speed_ref_rpm < app_target_speed_rpm)
+        {
+          app_custom_speed_ref_rpm = fminf(app_target_speed_rpm,
+            app_custom_speed_ref_rpm + step_rpm);
+        }
+        else
+        {
+          app_custom_speed_ref_rpm = fmaxf(app_target_speed_rpm,
+            app_custom_speed_ref_rpm - step_rpm);
+        }
+        AppMotorControl_ApplySpeedReference();
+        if (app_custom_speed_ref_rpm == app_target_speed_rpm)
+        {
+          app_custom_phase = APP_CUSTOM_FINAL_SPEED;
+          app_custom_speed_stable = false;
+        }
+      }
+      break;
+
+    case APP_CUSTOM_FINAL_SPEED:
+      if (tracking_speed && (stable_ms >= APP_CUSTOM_TARGET_STABLE_MS))
+      {
+        app_custom_phase = APP_CUSTOM_LOAD_RAMP;
+      }
+      break;
+
+    case APP_CUSTOM_LOAD_RAMP:
+      /* If speed drops, hold the brake at its current value. Require a
+       * full stability interval before increasing it again. */
+      if (tracking_speed && (stable_ms >= APP_CUSTOM_TARGET_STABLE_MS))
+      {
+        if (app_tb200s_load_mode == APP_TB200S_LOAD_VARIABLE)
+        {
+          AppMotorControl_CompleteCustomStart(now);
+          break;
+        }
+        uint32_t ramp_ms = stable_ms - APP_CUSTOM_TARGET_STABLE_MS;
+        if (dt_ms > ramp_ms) dt_ms = ramp_ms;
+        float next_a = fminf(app_tb200s_requested_load_a,
+          app_tb200s_load_setpoint_a +
+          APP_CUSTOM_LOAD_RAMP_A_PER_S * ((float)dt_ms / 1000.0f));
+        if (!AppMotorControl_ApplyLoadSetpoint(next_a))
+        {
+          return AppMotorControl_AbortCustomStart("LOAD_DAC");
+        }
+        if (next_a >= app_tb200s_requested_load_a)
+        {
+          AppMotorControl_CompleteCustomStart(now);
+        }
+      }
+      break;
+
+    default:
+      break;
+  }
+  return true;
 }
 
 static float AppMotorControl_GetOverspeedReferenceRpm(void)
 {
-  float reference_rpm = app_target_speed_rpm;
+  float reference_rpm = (app_custom_phase != APP_CUSTOM_OFF)
+    ? app_custom_speed_ref_rpm : app_target_speed_rpm;
 
   /* During a downward B2 transition, speed cannot instantly track the final
    * target. The envelope therefore follows the internal setpoint actually
@@ -738,6 +982,9 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
                                       float hard_limit_a,
                                       float accel_elec_hz_s)
 {
+  float previous_ref_rpm = (app_custom_phase != APP_CUSTOM_OFF)
+    ? app_custom_speed_ref_rpm : app_target_speed_rpm;
+  AppMotorControl_ResetCustomStart();
   AppMotorControl_ResetId();
   /* An external configuration explicitly takes control back from B2. */
   AppMotorControl_StopButtonProfile();
@@ -787,11 +1034,23 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
   }
   app_accel_elec_hz_s = accel_elec_hz_s;
 
+  /* Reconfiguration during STARTING/RUN restarts the staged sequence from
+   * the current reference, avoiding a speed step or a full brake load. */
+  if ((app_mc_state == APP_MC_RUNNING) || (app_mc_state == APP_MC_STARTING))
+  {
+    AppMotorControl_BeginCustomStart(previous_ref_rpm);
+    if (!AppMotorControl_ApplyLoadSetpoint(APP_TB200S_MIN_LOAD_A))
+    {
+      (void)AppMotorControl_AbortCustomStart("LOAD_DAC");
+      return;
+    }
+  }
+
   /*
    * If parameters are changed during RUN, this line applies the new
    * setpoint directly.
    */
-  if (app_mc_state == APP_MC_RUNNING)
+  if ((app_mc_state == APP_MC_RUNNING) || (app_mc_state == APP_MC_STARTING))
   {
     /* During RUN, do not jump abruptly to a higher current limit. */
     if (app_active_iq_limit_a > app_iq_limit_a)
@@ -805,6 +1064,7 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 
 void AppMotorControl_Init(void)
 {
+  AppMotorControl_ResetCustomStart();
   AppMotorControl_ResetId();
   app_thermal_latched = false;
   app_tb200s_load_mode = APP_TB200S_LOAD_FIXED;
@@ -857,7 +1117,7 @@ bool AppMotorControl_Start(void)
   }
 
   /* Write the minimum load before any MCSDK polarization/startup.
-   * Restore a higher fixed setpoint only after RUN is confirmed. */
+   * Custom keeps it until speed is stable, then ramps the requested load. */
   if (!AppMotorControl_PrepareLoadForMotorStart())
   {
     app_mc_state = APP_MC_FAULT;
@@ -865,6 +1125,12 @@ bool AppMotorControl_Start(void)
   }
 
   AppMotorControl_ResetId();
+  AppMotorControl_ResetCustomStart();
+  if (!app_button_profile_active)
+  {
+    AppMotorControl_BeginCustomStart(
+      fminf(app_target_speed_rpm, APP_CUSTOM_START_SPEED_RPM));
+  }
   app_active_iq_limit_a = app_iq_limit_a;
   if (app_active_iq_limit_a > APP_IQ_START_LIMIT_A)
   {
@@ -883,6 +1149,10 @@ bool AppMotorControl_Start(void)
     AppMotorControl_ResetSpeedPi();
     app_mc_overcurrent_since_ms = 0U;
     app_mc_overspeed_since_ms = 0U;
+    if (AppMotorControl_IsCustomStartActive())
+    {
+      (void)AppDatalog_SendText("#CUSTOM,START\r\n");
+    }
     return true;
   }
 
@@ -894,6 +1164,11 @@ void AppMotorControl_Stop(void)
   app_motor_start_requested = false;
   AppMotorControl_StopButtonProfile();
   MC_StopMotor1();
+  /* MC_StopMotor does not cancel a start still queued while MCSDK is IDLE. */
+  if (pMCI[M1] != NULL)
+  {
+    pMCI[M1]->DirectCommand = MCI_STOP;
+  }
   AppMotorControl_OnMotorStopped();
 
   app_mc_state = APP_MC_IDLE;
@@ -1143,6 +1418,10 @@ void AppMotorControl_Task(void)
 
     case APP_MC_RUNNING:
     {
+      if (!AppMotorControl_ServiceCustomStart(now))
+      {
+        return;
+      }
       AppMotorControl_ServiceButtonProfile(now);
       if (!AppMotorControl_ServiceVariableLoad(now))
       {

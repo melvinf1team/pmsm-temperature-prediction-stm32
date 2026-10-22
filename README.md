@@ -343,14 +343,45 @@ regardless of any earlier `LOAD` command:
 - load: 0.05 A at launch, then pseudorandom 0.05–0.25 A every 2–5 seconds.
 
 A second press stops the motor. A `CFG` received over UART disables the B2
-profile and takes control; `Custom` dashboard starts stay capped at
-50 electrical Hz/s, while `PROFILE` presets use the B2 ramp and limits.
+profile and takes control. `PROFILE` presets retain the B2 ramp and limits.
 
-UART starts also launch with a 0.05 A load command: a higher fixed setpoint is
-applied once MCSDK reaches `RUN`, and variable mode makes its first draw
-2–5 seconds later. The speed setpoint is reapplied on `RUN`, a restart
-requested during shutdown waits for `IDLE`, and overspeed protection never
-exceeds the absolute 4500 rpm ceiling.
+Custom dashboard starts now stage speed and brake load in both firmwares:
+
+1. Start at the smaller of 2000 rpm and the requested speed, with 0.05 A
+   brake command. This first leg uses the B2 acceleration (500 electrical
+   Hz/s). Wait for two continuous seconds within 5% of this speed, with a
+   minimum tolerance of 50 rpm.
+2. Increase the speed reference at up to 500 rpm/s, also respecting a lower
+   configured acceleration. Reaching 4500 rpm from 2000 rpm takes at least
+   five seconds. Hold the brake at 0.05 A; pause speed growth if the measured
+   speed falls outside the tracking tolerance.
+3. Wait one continuous second at the final speed, then raise the fixed brake
+   command at 0.04 A/s. Going from 0.05 A to 0.25 A takes five seconds.
+   Speed loss pauses brake growth; recovery needs another stable second.
+
+For 4500 rpm / 0.25 A with the usual 50 electrical Hz/s setting, the sequence
+takes about 13 seconds after the initial speed is reached, plus MCSDK startup
+and tracking delays (roughly 13–15 seconds on a motor that follows promptly).
+Lower requested speeds/loads shorten it; lower acceleration or pauses extend
+it. The `APP_CUSTOM_*` settings are in each `Inc/app_motor_control.h`.
+Id remains zero until this sequence completes. The existing Iq ceiling ramp
+is retained: 4.5 A initially, then +1.5 A/s up to the requested limit in RUN.
+These are command ramps; they do not certify the physical startup behavior.
+
+A Custom `LOAD` received during startup updates the requested endpoint without
+bypassing the ramp. Later fixed-load increases use the same stable-speed
+brake ramp; decreases are immediate. A new `CFG` during STARTING/RUN releases
+the brake to 0.05 A and stages the transition from the current speed reference.
+Custom variable load waits until the speed sequence completes, then makes its
+first random draw 2–5 seconds later. B2/PROFILE load timing is unchanged.
+
+UART events `#CUSTOM,START` and `#CUSTOM,READY` mark the sequence. A speed
+outside tolerance for five continuous seconds stops the motor, clears Id,
+and restores the 0.05 A brake command (`#FAULT,CUSTOM_SPEED_TIMEOUT`). A
+stopped MCSDK or a DAC failure also aborts it. STOP cancels the sequence and
+any queued SDK start; no automatic restart occurs. The speed setpoint is
+reapplied on `RUN`, a restart requested during shutdown waits for `IDLE`, and
+overspeed protection never exceeds the absolute 4500 rpm ceiling.
 
 > **Qualification required:** these are software ceilings, not test bench
 > certification. Before running at 4500 rpm or 30 A, verify the motor,
@@ -363,7 +394,8 @@ exceeds the absolute 4500 rpm ceiling.
 ## Progressive Id and thermal protection (both firmwares)
 
 `Inc/app_motor_control.h` in each project defines `APP_ID_TARGET_A` (2 A)
-and `APP_ID_RAMP_A_PER_S` (0.25 A/s). Id starts at zero. After `RUN`, the
+and `APP_ID_RAMP_A_PER_S` (0.25 A/s). Id starts at zero. After `RUN` (and
+completion of the speed/brake sequence for Custom starts), the
 speed must remain within 5% of the target (at least 50 rpm tolerance) for
 one second before Id increases. Reaching 2 A then takes about eight seconds
 at stable speed. A speed transition pauses the increase; a stop, fault, or
