@@ -1,0 +1,496 @@
+{
+  "runs": [
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261022_110036.csv",
+      "label": "Id demandé : 2 A",
+      "rows": 31896,
+      "duration_min": 53.15833333333333,
+      "initial_d6t_c": 20.3,
+      "initial_ds18_c": 22.68,
+      "final_minute_d6t_c": 50.1559068219634,
+      "max_d6t_c": 50.4,
+      "max_speed_rpm": 4588.764,
+      "max_abs_iq_a": 12.018,
+      "max_sampled_norm_a": 12.01981717831016,
+      "timestamp_interval_ms": [
+        93.0,
+        107.0
+      ],
+      "stopped_samples_after_first_minute": 0,
+      "full_brake_first_s": 13.5,
+      "first_10s_mean_id_ge_3_9_a_s": null,
+      "times": {
+        "5": {
+          "d6t_c": 31.2,
+          "rise_c": 10.899999999999999,
+          "ds18_c": 22.62,
+          "d6t_minus_ds18_c": 8.579999999999998
+        },
+        "10": {
+          "d6t_c": 36.9,
+          "rise_c": 16.599999999999998,
+          "ds18_c": 22.56,
+          "d6t_minus_ds18_c": 14.34
+        },
+        "15": {
+          "d6t_c": 40.9,
+          "rise_c": 20.599999999999998,
+          "ds18_c": 22.68,
+          "d6t_minus_ds18_c": 18.22
+        },
+        "20": {
+          "d6t_c": 43.5,
+          "rise_c": 23.2,
+          "ds18_c": 22.75,
+          "d6t_minus_ds18_c": 20.75
+        },
+        "25": {
+          "d6t_c": 45.5,
+          "rise_c": 25.2,
+          "ds18_c": 22.81,
+          "d6t_minus_ds18_c": 22.69
+        },
+        "30": {
+          "d6t_c": 46.8,
+          "rise_c": 26.499999999999996,
+          "ds18_c": 22.87,
+          "d6t_minus_ds18_c": 23.929999999999996
+        },
+        "35": {
+          "d6t_c": 47.8,
+          "rise_c": 27.499999999999996,
+          "ds18_c": 23.12,
+          "d6t_minus_ds18_c": 24.679999999999996
+        },
+        "40": {
+          "d6t_c": 48.8,
+          "rise_c": 28.499999999999996,
+          "ds18_c": 23.0,
+          "d6t_minus_ds18_c": 25.799999999999997
+        }
+      },
+      "windows": {
+        "1_20_min": {
+          "n": 11401,
+          "d6t_temp_c": 36.21164810104377,
+          "ds18b20_temp_c": 22.58845101306903,
+          "motor_speed_mech_rpm": 4499.87632970792,
+          "motor_id_a": 2.0191890185071486,
+          "motor_iq_a": 9.34618244013683,
+          "motor_ud_v": 0.8159643890886765,
+          "motor_uq_v": 2.8338092272607662,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 5.430978580299974,
+          "iq2_a2": 87.96747090676256,
+          "i2_a2": 93.39844948706254,
+          "sampled_dq_norm_equivalent_a": 9.664287324322602,
+          "d6t_slope_c_min": 0.9719097012163196,
+          "speed_std_rpm": 14.916349223379934,
+          "id_std_a": 1.163603474981133,
+          "iq_std_a": 0.7851106723037896
+        },
+        "1_40_min": {
+          "n": 23401,
+          "d6t_temp_c": 41.554352378103495,
+          "ds18b20_temp_c": 22.754670740566645,
+          "motor_speed_mech_rpm": 4499.799733173796,
+          "motor_id_a": 2.009861843510961,
+          "motor_iq_a": 9.072771890090166,
+          "motor_ud_v": 0.8201190120080338,
+          "motor_uq_v": 2.824609375667707,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 5.50667157818042,
+          "iq2_a2": 83.08921501487116,
+          "i2_a2": 88.59588659305157,
+          "sampled_dq_norm_equivalent_a": 9.412538796363688,
+          "d6t_slope_c_min": 0.5462657647383365,
+          "speed_std_rpm": 19.07630754454817,
+          "id_std_a": 1.2112760403442184,
+          "iq_std_a": 0.8798058440717421
+        },
+        "5_15_min": {
+          "n": 6001,
+          "d6t_temp_c": 36.58221963006166,
+          "ds18b20_temp_c": 22.56347942009665,
+          "motor_speed_mech_rpm": 4499.909510748209,
+          "motor_id_a": 2.0451224795867353,
+          "motor_iq_a": 9.337024495917348,
+          "motor_ud_v": 0.8146528911848026,
+          "motor_uq_v": 2.8336660556573903,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 5.555678330278287,
+          "iq2_a2": 87.76030776937176,
+          "i2_a2": 93.31598609965008,
+          "sampled_dq_norm_equivalent_a": 9.660019984433266,
+          "d6t_slope_c_min": 0.9601162795839157,
+          "speed_std_rpm": 14.831364374052924,
+          "id_std_a": 1.171913491899573,
+          "iq_std_a": 0.7618254692293484
+        },
+        "30_40_min": {
+          "n": 6001,
+          "d6t_temp_c": 47.84375937343776,
+          "ds18b20_temp_c": 23.010998166972172,
+          "motor_speed_mech_rpm": 4499.513367772039,
+          "motor_id_a": 1.9980378270288286,
+          "motor_iq_a": 8.701768538576903,
+          "motor_ud_v": 0.8299591734710882,
+          "motor_uq_v": 2.822313947675388,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 5.757889626895516,
+          "iq2_a2": 76.60582512097983,
+          "i2_a2": 82.36371474787536,
+          "sampled_dq_norm_equivalent_a": 9.075445705191308,
+          "d6t_slope_c_min": 0.19925802306397025,
+          "speed_std_rpm": 26.55231385896317,
+          "id_std_a": 1.3289201472381793,
+          "iq_std_a": 0.9408490475363271
+        },
+        "35_40_min": {
+          "n": 3001,
+          "d6t_temp_c": 48.33765411529491,
+          "ds18b20_temp_c": 22.97282905698101,
+          "motor_speed_mech_rpm": 4499.845595134955,
+          "motor_id_a": 1.9886607797400866,
+          "motor_iq_a": 8.693086304565146,
+          "motor_ud_v": 0.8364298567144286,
+          "motor_uq_v": 2.829214928357215,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 5.930936573475508,
+          "iq2_a2": 76.5879866617794,
+          "i2_a2": 82.51892323525492,
+          "sampled_dq_norm_equivalent_a": 9.083992692382294,
+          "d6t_slope_c_min": 0.21482086846527823,
+          "speed_std_rpm": 30.149493424185913,
+          "id_std_a": 1.4059955896888838,
+          "iq_std_a": 1.009245547698398
+        }
+      },
+      "last_5_min": {
+        "n": 3001,
+        "d6t_temp_c": 49.98750416527824,
+        "ds18b20_temp_c": 22.924548483838723,
+        "motor_speed_mech_rpm": 4500.247771742753,
+        "motor_id_a": 1.9625824725091634,
+        "motor_iq_a": 8.445243918693768,
+        "motor_ud_v": 0.8490209930023327,
+        "motor_uq_v": 2.8492629123625455,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 6.666490997001,
+        "iq2_a2": 72.85858373908697,
+        "i2_a2": 79.52507473608797,
+        "sampled_dq_norm_equivalent_a": 8.91768326058332,
+        "d6t_slope_c_min": 0.08008103626965686,
+        "speed_std_rpm": 40.46899909451944,
+        "id_std_a": 1.6780045557981513,
+        "iq_std_a": 1.2397382946212905
+      },
+      "last_10_min": {
+        "n": 6001,
+        "d6t_temp_c": 49.78846858856857,
+        "ds18b20_temp_c": 22.91390934844193,
+        "motor_speed_mech_rpm": 4499.871608731878,
+        "motor_id_a": 1.9895849025162473,
+        "motor_iq_a": 8.509217463756041,
+        "motor_ud_v": 0.8489090151641393,
+        "motor_uq_v": 2.851278620229962,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 6.8663807370438255,
+        "iq2_a2": 74.00204821763039,
+        "i2_a2": 80.86842895467423,
+        "sampled_dq_norm_equivalent_a": 8.992687526800552,
+        "d6t_slope_c_min": 0.08494859393031305,
+        "speed_std_rpm": 41.33282807212951,
+        "id_std_a": 1.7054082526378724,
+        "iq_std_a": 1.2631437961959437
+      },
+      "first_threshold_min": {
+        "40": 13.56345,
+        "45": 22.91345,
+        "48": 35.221783333333335,
+        "50": 47.66833333333334,
+        "55": null,
+        "60": null
+      },
+      "first_temperature_rise_min": {
+        "10": 4.401666666666666,
+        "20": 14.176666666666666,
+        "25": 24.321783333333332,
+        "28": 37.151666666666664
+      },
+      "matched_final_5_min": {
+        "n": 3000,
+        "d6t_temp_c": 48.899333333333345,
+        "ds18b20_temp_c": 22.918686666666666,
+        "motor_speed_mech_rpm": 4498.384569,
+        "motor_id_a": 2.039863,
+        "motor_iq_a": 8.639778,
+        "motor_ud_v": 0.836468,
+        "motor_uq_v": 2.833468333333333,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 6.403294421666668,
+        "iq2_a2": 75.88114136,
+        "i2_a2": 82.28443578166667,
+        "sampled_dq_norm_equivalent_a": 9.071076881036047,
+        "d6t_slope_c_min": 0.13662469189980522,
+        "speed_std_rpm": 33.395436845342644,
+        "id_std_a": 1.4976651928610865,
+        "iq_std_a": 1.111660649891041
+      }
+    },
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261022_150559.csv",
+      "label": "Id demandé : 4 A",
+      "rows": 25814,
+      "duration_min": 43.02166666666667,
+      "initial_d6t_c": 22.25,
+      "initial_ds18_c": 24.0,
+      "final_minute_d6t_c": 50.85590682196339,
+      "max_d6t_c": 51.0,
+      "max_speed_rpm": 4597.797,
+      "max_abs_iq_a": 12.913,
+      "max_sampled_norm_a": 12.918926967825152,
+      "timestamp_interval_ms": [
+        100.0,
+        100.0
+      ],
+      "stopped_samples_after_first_minute": 0,
+      "full_brake_first_s": 13.6,
+      "first_10s_mean_id_ge_3_9_a_s": 49.9,
+      "times": {
+        "5": {
+          "d6t_c": 33.0,
+          "rise_c": 10.75,
+          "ds18_c": 24.87,
+          "d6t_minus_ds18_c": 8.129999999999999
+        },
+        "10": {
+          "d6t_c": 38.7,
+          "rise_c": 16.450000000000003,
+          "ds18_c": 24.68,
+          "d6t_minus_ds18_c": 14.020000000000003
+        },
+        "15": {
+          "d6t_c": 42.8,
+          "rise_c": 20.549999999999997,
+          "ds18_c": 24.56,
+          "d6t_minus_ds18_c": 18.24
+        },
+        "20": {
+          "d6t_c": 45.5,
+          "rise_c": 23.25,
+          "ds18_c": 24.75,
+          "d6t_minus_ds18_c": 20.75
+        },
+        "25": {
+          "d6t_c": 47.4,
+          "rise_c": 25.15,
+          "ds18_c": 25.37,
+          "d6t_minus_ds18_c": 22.029999999999998
+        },
+        "30": {
+          "d6t_c": 48.6,
+          "rise_c": 26.35,
+          "ds18_c": 24.81,
+          "d6t_minus_ds18_c": 23.790000000000003
+        },
+        "35": {
+          "d6t_c": 49.7,
+          "rise_c": 27.450000000000003,
+          "ds18_c": 24.87,
+          "d6t_minus_ds18_c": 24.830000000000002
+        },
+        "40": {
+          "d6t_c": 50.5,
+          "rise_c": 28.25,
+          "ds18_c": 25.25,
+          "d6t_minus_ds18_c": 25.25
+        }
+      },
+      "windows": {
+        "1_20_min": {
+          "n": 11401,
+          "d6t_temp_c": 38.182010349969296,
+          "ds18b20_temp_c": 24.678702745373215,
+          "motor_speed_mech_rpm": 4499.786263924218,
+          "motor_id_a": 4.0168593982983944,
+          "motor_iq_a": 8.201588983422507,
+          "motor_ud_v": 0.919452767301114,
+          "motor_uq_v": 2.922791772651522,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 19.335973396719588,
+          "iq2_a2": 69.0352764822384,
+          "i2_a2": 88.371249878958,
+          "sampled_dq_norm_equivalent_a": 9.40059837877132,
+          "d6t_slope_c_min": 0.9859362129170409,
+          "speed_std_rpm": 43.96610302424666,
+          "id_std_a": 1.7891603461335701,
+          "iq_std_a": 1.3301766136519972
+        },
+        "1_40_min": {
+          "n": 23401,
+          "d6t_temp_c": 43.45942053758387,
+          "ds18b20_temp_c": 24.847390709798724,
+          "motor_speed_mech_rpm": 4500.251473654972,
+          "motor_id_a": 3.9837647963762235,
+          "motor_iq_a": 8.005349386778342,
+          "motor_ud_v": 0.9157639844451091,
+          "motor_uq_v": 2.900069954275459,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 18.819588145805735,
+          "iq2_a2": 65.74466591090123,
+          "i2_a2": 84.56425405670697,
+          "sampled_dq_norm_equivalent_a": 9.195882451222774,
+          "d6t_slope_c_min": 0.5423251070212011,
+          "speed_std_rpm": 42.01403750952119,
+          "id_std_a": 1.7173619966133915,
+          "iq_std_a": 1.28806754712548
+        },
+        "5_15_min": {
+          "n": 6001,
+          "d6t_temp_c": 38.57648725212464,
+          "ds18b20_temp_c": 24.769255124145975,
+          "motor_speed_mech_rpm": 4500.480959506749,
+          "motor_id_a": 3.983778703549409,
+          "motor_iq_a": 8.209579570071655,
+          "motor_ud_v": 0.9212372937843691,
+          "motor_uq_v": 2.922132477920346,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 18.913029933344443,
+          "iq2_a2": 69.10352451774705,
+          "i2_a2": 88.01655445109148,
+          "sampled_dq_norm_equivalent_a": 9.381713833361763,
+          "d6t_slope_c_min": 0.9564791739419649,
+          "speed_std_rpm": 43.17021623251607,
+          "id_std_a": 1.7444323615490853,
+          "iq_std_a": 1.3063736786907036
+        },
+        "30_40_min": {
+          "n": 6001,
+          "d6t_temp_c": 49.68528578570238,
+          "ds18b20_temp_c": 24.919028495250796,
+          "motor_speed_mech_rpm": 4501.327690718214,
+          "motor_id_a": 3.9195009165139147,
+          "motor_iq_a": 7.753033827695384,
+          "motor_ud_v": 0.9147795367438761,
+          "motor_uq_v": 2.8743984335944006,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 18.188754445092485,
+          "iq2_a2": 61.652357444425924,
+          "i2_a2": 79.84111188951842,
+          "sampled_dq_norm_equivalent_a": 8.93538538002242,
+          "d6t_slope_c_min": 0.18265919692047336,
+          "speed_std_rpm": 41.34235868053889,
+          "id_std_a": 1.6812905920871701,
+          "iq_std_a": 1.2422081340723448
+        },
+        "35_40_min": {
+          "n": 3001,
+          "d6t_temp_c": 50.13848717094302,
+          "ds18b20_temp_c": 24.963402199266916,
+          "motor_speed_mech_rpm": 4501.277345218261,
+          "motor_id_a": 3.890982672442519,
+          "motor_iq_a": 7.6713112295901364,
+          "motor_ud_v": 0.9150056647784073,
+          "motor_uq_v": 2.875864378540487,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 17.903333510496502,
+          "iq2_a2": 60.408651299900036,
+          "i2_a2": 78.31198481039654,
+          "sampled_dq_norm_equivalent_a": 8.849405901550485,
+          "d6t_slope_c_min": 0.16526326001481573,
+          "speed_std_rpm": 40.91528453543311,
+          "id_std_a": 1.6626811326989275,
+          "iq_std_a": 1.2490617266988266
+        }
+      },
+      "last_5_min": {
+        "n": 3001,
+        "d6t_temp_c": 50.59216927690769,
+        "ds18b20_temp_c": 25.272352549150284,
+        "motor_speed_mech_rpm": 4501.641867044319,
+        "motor_id_a": 3.9528613795401535,
+        "motor_iq_a": 7.680823725424859,
+        "motor_ud_v": 0.9114881706097967,
+        "motor_uq_v": 2.8676964345218257,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 18.197584904698434,
+        "iq2_a2": 60.539989840053316,
+        "i2_a2": 78.73757474475175,
+        "sampled_dq_norm_equivalent_a": 8.873419563209652,
+        "d6t_slope_c_min": 0.13731574707165112,
+        "speed_std_rpm": 39.52540603448179,
+        "id_std_a": 1.604160001198331,
+        "iq_std_a": 1.243161983780439
+      },
+      "last_10_min": {
+        "n": 6001,
+        "d6t_temp_c": 50.19805032494584,
+        "ds18b20_temp_c": 25.09352274620896,
+        "motor_speed_mech_rpm": 4500.5113302782875,
+        "motor_id_a": 3.970322279620064,
+        "motor_iq_a": 7.711207798700216,
+        "motor_ud_v": 0.9113894350941509,
+        "motor_uq_v": 2.87078970171638,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 18.43277745009165,
+        "iq2_a2": 61.012457747375436,
+        "i2_a2": 79.44523519746708,
+        "sampled_dq_norm_equivalent_a": 8.913205663366412,
+        "d6t_slope_c_min": 0.15768810718595647,
+        "speed_std_rpm": 40.27765254372741,
+        "id_std_a": 1.633941043138298,
+        "iq_std_a": 1.2449860727383675
+      },
+      "first_threshold_min": {
+        "40": 11.226666666666667,
+        "45": 18.76,
+        "48": 26.735,
+        "50": 36.07666666666667,
+        "55": null,
+        "60": null
+      },
+      "first_temperature_rise_min": {
+        "10": 4.406666666666666,
+        "20": 13.843333333333334,
+        "25": 24.435,
+        "28": 37.47666666666667
+      },
+      "matched_final_5_min": {
+        "n": 3001,
+        "d6t_temp_c": 50.59216927690769,
+        "ds18b20_temp_c": 25.272352549150284,
+        "motor_speed_mech_rpm": 4501.641867044319,
+        "motor_id_a": 3.9528613795401535,
+        "motor_iq_a": 7.680823725424859,
+        "motor_ud_v": 0.9114881706097967,
+        "motor_uq_v": 2.8676964345218257,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 18.197584904698434,
+        "iq2_a2": 60.539989840053316,
+        "i2_a2": 78.73757474475175,
+        "sampled_dq_norm_equivalent_a": 8.873419563209652,
+        "d6t_slope_c_min": 0.13731574707165112,
+        "speed_std_rpm": 39.52540603448179,
+        "id_std_a": 1.604160001198331,
+        "iq_std_a": 1.243161983780439
+      }
+    }
+  ],
+  "comparison": {
+    "shared_duration_min": 43.02166666666667,
+    "rise_difference_4_minus_2_on_1s_grid_min1_40": {
+      "mean_c": -0.04530115335326721,
+      "median_c": -0.05000000000000071,
+      "mean_absolute_c": 0.13017941050832968
+    },
+    "notes": [
+      "Initial temperature: median of the first second of each CSV.",
+      "Temperature at a given minute: median within plus/minus 5 seconds.",
+      "Current comparison: identical elapsed-time windows, not different run endpoints.",
+      "Squared-current metric uses logged 10 Hz samples and is not a PWM-bandwidth RMS measurement.",
+      "DS18B20 is a measured external reference; its location and ambient representativeness are not established by the CSV.",
+      "One run at each Id value: results do not isolate all environmental and load variations."
+    ]
+  }
+}

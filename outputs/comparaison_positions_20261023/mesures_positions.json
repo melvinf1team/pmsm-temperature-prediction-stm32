@@ -1,0 +1,378 @@
+{
+  "runs": [
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261022_150559.csv",
+      "label": "22/10, position 1, frein 0,25 A",
+      "requested_load_a": 0.25,
+      "rows": 25814,
+      "duration_min": 43.02166666666667,
+      "initial_d6t_c": 22.25,
+      "initial_ds18_c": 24.0,
+      "max_d6t_c": 51.0,
+      "final_d6t_c": 50.8,
+      "final_minute_d6t_c": 50.85590682196339,
+      "max_speed_rpm": 4597.797,
+      "max_abs_iq_a": 12.913,
+      "max_sampled_norm_a": 12.918926967825152,
+      "max_abs_id_a": 7.838,
+      "timestamp_intervals_ms": [
+        100.0,
+        100.0
+      ],
+      "stopped_samples_after_first_minute": 0,
+      "speed_within_5pct_fraction_after_first_minute": 1.0,
+      "full_requested_load_first_s": 13.6,
+      "times": {
+        "5": {
+          "d6t_temp_c": 33.0,
+          "ds18b20_temp_c": 24.87,
+          "rise_c": 10.75,
+          "d6t_minus_ds18_c": 8.129999999999999
+        },
+        "10": {
+          "d6t_temp_c": 38.7,
+          "ds18b20_temp_c": 24.68,
+          "rise_c": 16.450000000000003,
+          "d6t_minus_ds18_c": 14.020000000000003
+        },
+        "15": {
+          "d6t_temp_c": 42.8,
+          "ds18b20_temp_c": 24.56,
+          "rise_c": 20.549999999999997,
+          "d6t_minus_ds18_c": 18.24
+        },
+        "20": {
+          "d6t_temp_c": 45.5,
+          "ds18b20_temp_c": 24.75,
+          "rise_c": 23.25,
+          "d6t_minus_ds18_c": 20.75
+        },
+        "25": {
+          "d6t_temp_c": 47.4,
+          "ds18b20_temp_c": 25.37,
+          "rise_c": 25.15,
+          "d6t_minus_ds18_c": 22.029999999999998
+        },
+        "30": {
+          "d6t_temp_c": 48.6,
+          "ds18b20_temp_c": 24.81,
+          "rise_c": 26.35,
+          "d6t_minus_ds18_c": 23.790000000000003
+        }
+      },
+      "windows": {
+        "1_20_min": {
+          "n": 11401,
+          "d6t_temp_c": 38.182010349969296,
+          "ds18b20_temp_c": 24.678702745373215,
+          "motor_speed_mech_rpm": 4499.786263924218,
+          "motor_id_a": 4.0168593982983944,
+          "motor_iq_a": 8.201588983422507,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 19.335973396719588,
+          "iq2_a2": 69.0352764822384,
+          "i2_a2": 88.371249878958,
+          "d6t_minus_ds18_c": 13.50330760459609,
+          "sampled_dq_norm_equivalent_a": 9.40059837877132,
+          "speed_std_rpm": 43.96610302424666,
+          "id_std_a": 1.7891603461335701,
+          "iq_std_a": 1.3301766136519972,
+          "d6t_slope_c_min": 0.9859362129170409
+        },
+        "1_30_min": {
+          "n": 17401,
+          "d6t_temp_c": 41.31263145796219,
+          "ds18b20_temp_c": 24.822683179127637,
+          "motor_speed_mech_rpm": 4499.881875754268,
+          "motor_id_a": 4.0058697201310265,
+          "motor_iq_a": 8.092334233664731,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 19.03657094598012,
+          "iq2_a2": 67.15540056582955,
+          "i2_a2": 86.19197151180965,
+          "d6t_minus_ds18_c": 16.489948278834547,
+          "sampled_dq_norm_equivalent_a": 9.283963136064774,
+          "speed_std_rpm": 42.237325291467094,
+          "id_std_a": 1.7290895136421076,
+          "iq_std_a": 1.292138988780779,
+          "d6t_slope_c_min": 0.7142191799559752
+        },
+        "20_30_min": {
+          "n": 6001,
+          "d6t_temp_c": 47.261056490584906,
+          "ds18b20_temp_c": 25.09621229795034,
+          "motor_speed_mech_rpm": 4500.065117480421,
+          "motor_id_a": 3.98474087652058,
+          "motor_iq_a": 7.884712047992001,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 18.465624622562906,
+          "iq2_a2": 63.5827750869855,
+          "i2_a2": 82.0483997095484,
+          "d6t_minus_ds18_c": 22.16484419263456,
+          "sampled_dq_norm_equivalent_a": 9.058057170803703,
+          "speed_std_rpm": 38.740230488249495,
+          "id_std_a": 1.60869388439105,
+          "iq_std_a": 1.1892546779684414,
+          "d6t_slope_c_min": 0.30645553853875446
+        },
+        "25_30_min": {
+          "n": 3001,
+          "d6t_temp_c": 48.020393202265915,
+          "ds18b20_temp_c": 25.133305564811725,
+          "motor_speed_mech_rpm": 4498.181320893036,
+          "motor_id_a": 4.042357880706431,
+          "motor_iq_a": 7.804386871042985,
+          "load_setpoint_a": 0.25,
+          "id2_a2": 18.866838664445186,
+          "iq2_a2": 62.30957434088638,
+          "i2_a2": 81.17641300533155,
+          "d6t_minus_ds18_c": 22.887087637454187,
+          "sampled_dq_norm_equivalent_a": 9.009795391979306,
+          "speed_std_rpm": 38.457151118302995,
+          "id_std_a": 1.5896614385497436,
+          "iq_std_a": 1.1838863745932602,
+          "d6t_slope_c_min": 0.25692336620638
+        }
+      },
+      "last5": {
+        "n": 3001,
+        "d6t_temp_c": 50.59216927690769,
+        "ds18b20_temp_c": 25.272352549150284,
+        "motor_speed_mech_rpm": 4501.641867044319,
+        "motor_id_a": 3.9528613795401535,
+        "motor_iq_a": 7.680823725424859,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 18.197584904698434,
+        "iq2_a2": 60.539989840053316,
+        "i2_a2": 78.73757474475175,
+        "d6t_minus_ds18_c": 25.31981672775741,
+        "sampled_dq_norm_equivalent_a": 8.873419563209652,
+        "speed_std_rpm": 39.52540603448179,
+        "id_std_a": 1.604160001198331,
+        "iq_std_a": 1.243161983780439,
+        "d6t_slope_c_min": 0.13731574707165112
+      },
+      "first_temperature_min": {
+        "40": 11.226666666666667,
+        "45": 18.76,
+        "48": 26.735,
+        "50": 36.07666666666667,
+        "55": null,
+        "60": null
+      },
+      "matched_last5": {
+        "n": 3000,
+        "d6t_temp_c": 48.96073333333333,
+        "ds18b20_temp_c": 24.858599999999996,
+        "motor_speed_mech_rpm": 4501.707772,
+        "motor_id_a": 3.9322223333333333,
+        "motor_iq_a": 7.826313666666667,
+        "load_setpoint_a": 0.25,
+        "id2_a2": 18.29235291033333,
+        "iq2_a2": 62.73029840233333,
+        "i2_a2": 81.02265131266667,
+        "d6t_minus_ds18_c": 24.10213333333333,
+        "sampled_dq_norm_equivalent_a": 9.001258318294541,
+        "speed_std_rpm": 41.182989790770634,
+        "id_std_a": 1.6825350138780264,
+        "iq_std_a": 1.2163905603375567,
+        "d6t_slope_c_min": 0.22613458512606346
+      }
+    },
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261023_083421.csv",
+      "label": "23/10, position 2, frein 0,15 A",
+      "requested_load_a": 0.15,
+      "rows": 20277,
+      "duration_min": 33.79333333333334,
+      "initial_d6t_c": 21.1,
+      "initial_ds18_c": 21.56,
+      "max_d6t_c": 47.2,
+      "final_d6t_c": 46.8,
+      "final_minute_d6t_c": 46.8179700499168,
+      "max_speed_rpm": 4649.558,
+      "max_abs_iq_a": 15.723,
+      "max_sampled_norm_a": 15.723000795013654,
+      "max_abs_id_a": 8.488,
+      "timestamp_intervals_ms": [
+        100.0,
+        100.0
+      ],
+      "stopped_samples_after_first_minute": 0,
+      "speed_within_5pct_fraction_after_first_minute": 1.0,
+      "full_requested_load_first_s": 14.0,
+      "times": {
+        "5": {
+          "d6t_temp_c": 32.1,
+          "ds18b20_temp_c": 21.56,
+          "rise_c": 11.0,
+          "d6t_minus_ds18_c": 10.540000000000003
+        },
+        "10": {
+          "d6t_temp_c": 37.4,
+          "ds18b20_temp_c": 21.5,
+          "rise_c": 16.299999999999997,
+          "d6t_minus_ds18_c": 15.84
+        },
+        "15": {
+          "d6t_temp_c": 40.9,
+          "ds18b20_temp_c": 21.75,
+          "rise_c": 19.799999999999997,
+          "d6t_minus_ds18_c": 19.15
+        },
+        "20": {
+          "d6t_temp_c": 43.3,
+          "ds18b20_temp_c": 21.75,
+          "rise_c": 22.199999999999996,
+          "d6t_minus_ds18_c": 21.549999999999997
+        },
+        "25": {
+          "d6t_temp_c": 45.1,
+          "ds18b20_temp_c": 21.75,
+          "rise_c": 24.0,
+          "d6t_minus_ds18_c": 23.35
+        },
+        "30": {
+          "d6t_temp_c": 46.3,
+          "ds18b20_temp_c": 22.25,
+          "rise_c": 25.199999999999996,
+          "d6t_minus_ds18_c": 24.119999999999997
+        }
+      },
+      "windows": {
+        "1_20_min": {
+          "n": 11401,
+          "d6t_temp_c": 36.70935882817297,
+          "ds18b20_temp_c": 21.62938777300237,
+          "motor_speed_mech_rpm": 4500.533899043943,
+          "motor_id_a": 3.9809854398736957,
+          "motor_iq_a": 10.249251469169371,
+          "load_setpoint_a": 0.14999999999999997,
+          "id2_a2": 18.932393606438033,
+          "iq2_a2": 106.7426667883519,
+          "i2_a2": 125.67506039478995,
+          "d6t_minus_ds18_c": 15.0799710551706,
+          "sampled_dq_norm_equivalent_a": 11.210488856191327,
+          "speed_std_rpm": 44.88620765496492,
+          "id_std_a": 1.7562514265607745,
+          "iq_std_a": 1.3021750416615006,
+          "d6t_slope_c_min": 0.902393827169552
+        },
+        "1_30_min": {
+          "n": 17401,
+          "d6t_temp_c": 39.564329636227804,
+          "ds18b20_temp_c": 21.706370323544625,
+          "motor_speed_mech_rpm": 4500.243149359232,
+          "motor_id_a": 3.988036262283776,
+          "motor_iq_a": 9.9554842825125,
+          "load_setpoint_a": 0.14999999999999997,
+          "id2_a2": 18.929492051548763,
+          "iq2_a2": 100.90613503430838,
+          "i2_a2": 119.83562708585714,
+          "d6t_minus_ds18_c": 17.857959312683178,
+          "sampled_dq_norm_equivalent_a": 10.946946016394579,
+          "speed_std_rpm": 44.607123489336544,
+          "id_std_a": 1.73931960151483,
+          "iq_std_a": 1.3396159394709202,
+          "d6t_slope_c_min": 0.6518941800242839
+        },
+        "20_30_min": {
+          "n": 6001,
+          "d6t_temp_c": 44.98896850524913,
+          "ds18b20_temp_c": 21.85263289451758,
+          "motor_speed_mech_rpm": 4499.6806585569075,
+          "motor_id_a": 4.0015900683219465,
+          "motor_iq_a": 9.397453091151474,
+          "load_setpoint_a": 0.14999999999999997,
+          "id2_a2": 18.9248884395934,
+          "iq2_a2": 89.81898253257792,
+          "i2_a2": 108.74387097217131,
+          "d6t_minus_ds18_c": 23.136335610731543,
+          "sampled_dq_norm_equivalent_a": 10.428032938774757,
+          "speed_std_rpm": 44.073542378017414,
+          "id_std_a": 1.7066489755057068,
+          "iq_std_a": 1.22764370856295,
+          "d6t_slope_c_min": 0.2707699000072231
+        },
+        "25_30_min": {
+          "n": 3001,
+          "d6t_temp_c": 45.6414195268244,
+          "ds18b20_temp_c": 21.94561146284572,
+          "motor_speed_mech_rpm": 4499.09567977341,
+          "motor_id_a": 4.007447184271909,
+          "motor_iq_a": 9.262221259580139,
+          "load_setpoint_a": 0.15,
+          "id2_a2": 19.140352418860378,
+          "iq2_a2": 87.33142904298568,
+          "i2_a2": 106.47178146184606,
+          "d6t_minus_ds18_c": 23.69580806397867,
+          "sampled_dq_norm_equivalent_a": 10.318516437058483,
+          "speed_std_rpm": 45.655007866210624,
+          "id_std_a": 1.7554903561757995,
+          "iq_std_a": 1.242256257927974,
+          "d6t_slope_c_min": 0.22162688386571539
+        }
+      },
+      "last5": {
+        "n": 3000,
+        "d6t_temp_c": 46.61026666666666,
+        "ds18b20_temp_c": 22.263813333333335,
+        "motor_speed_mech_rpm": 4497.205074333334,
+        "motor_id_a": 4.100910666666667,
+        "motor_iq_a": 9.240263333333333,
+        "load_setpoint_a": 0.15,
+        "id2_a2": 21.29662190866667,
+        "iq2_a2": 87.78156052066667,
+        "i2_a2": 109.07818242933334,
+        "d6t_minus_ds18_c": 24.346453333333333,
+        "sampled_dq_norm_equivalent_a": 10.44405009703292,
+        "speed_std_rpm": 55.59687633784518,
+        "id_std_a": 2.1167539209223483,
+        "iq_std_a": 1.549159131914543,
+        "d6t_slope_c_min": 0.20901588989065353
+      },
+      "first_temperature_min": {
+        "40": 13.001666666666667,
+        "45": 23.481666666666666,
+        "48": null,
+        "50": null,
+        "55": null,
+        "60": null
+      },
+      "matched_last5": {
+        "n": 3000,
+        "d6t_temp_c": 46.61026666666666,
+        "ds18b20_temp_c": 22.263813333333335,
+        "motor_speed_mech_rpm": 4497.205074333334,
+        "motor_id_a": 4.100910666666667,
+        "motor_iq_a": 9.240263333333333,
+        "load_setpoint_a": 0.15,
+        "id2_a2": 21.29662190866667,
+        "iq2_a2": 87.78156052066667,
+        "i2_a2": 109.07818242933334,
+        "d6t_minus_ds18_c": 24.346453333333333,
+        "sampled_dq_norm_equivalent_a": 10.44405009703292,
+        "speed_std_rpm": 55.59687633784518,
+        "id_std_a": 2.1167539209223483,
+        "iq_std_a": 1.549159131914543,
+        "d6t_slope_c_min": 0.20901588989065353
+      }
+    }
+  ],
+  "comparison": {
+    "common_end_min": 33.79333333333334,
+    "iq_mean_change_percent_min1_30": 23.02364182014285,
+    "sampled_i2_change_percent_min1_30": 39.033398336221815,
+    "copper_loss_increment_if_phase_Rs_0_01_ohm_and_peak_dq_convention_w": 0.5046548336107123,
+    "new_temperature_shortfall_at30min_c": 13.700000000000003,
+    "notes": [
+      "Protocol supplied by user: 4500 motor rpm, Id setpoint 4 A, Iq ceiling 28 A, total ceiling 30 A.",
+      "User confirmed blocked air outlets and unchanged D6T view of winding copper.",
+      "TB-200S values are commands; actual brake current and shaft torque are not logged.",
+      "Temperature at each minute is the median within plus/minus five seconds; initial temperature is median of first second.",
+      "DS18B20 is an external measured reference, not a validated ambient-air measurement.",
+      "10 Hz samples do not capture the full PWM current RMS; no input DC power or mechanical shaft power is recorded.",
+      "The optional copper-loss estimate assumes the configured resistance is the actual phase resistance; it is not measured total motor heating."
+    ]
+  }
+}
