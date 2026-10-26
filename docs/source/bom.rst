@@ -47,6 +47,11 @@ They may vary with shipping costs, VAT, and USD-to-EUR exchange rates.
      - 1
      - EUR 55.03
      - `Farnell, order code 3406470 <https://fr.farnell.com/omron/d6t-44l-06h/capteur-ir-therm-5-200-c-i2c/dp/3406470>`__
+   * - D6T sensor cable harness
+     - D6T-HARNESS-02
+     - 1
+     - EUR 11.24
+     - `Mouser, D6T-HARNESS-02 <https://www.mouser.fr/fr/ProductDetail/Aratas/D6T-HARNESS-02?qs=wd5RIQLrsJgUcCB1RCLBDA%3D%3D>`__
    * - External temperature sensor
      - Analog Devices DS18B20
      - 1
@@ -96,7 +101,7 @@ They may vary with shipping costs, VAT, and USD-to-EUR exchange rates.
 Cost summary
 ------------
 
-The **14 components** listed above have a priced subtotal of **EUR 687.10**.
+The **15 components** listed above have a priced subtotal of **EUR 698.34**.
 The two ST boards have unspecified internal prices and are excluded from
 this amount. Additional construction and wiring materials are also excluded.
 
