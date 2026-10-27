@@ -29,7 +29,13 @@ The expected firmware serial protocol is line-oriented text::
     #CSV_HEADER,<column_1>,<column_2>,...
     #PROFILE,START,<TOKEN>,...
     #FAULT,<reason>,t_ms=...,speed_mrpm=...,speed_limit_rpm=...,iq_ma=...,id_ma=...,hard_ma=...,load_ma=...,mc_now=0x...,mc_occurred=0x...
+    #FAULT_DIAG,break=<0|1>,bkin_low=...,comp=0x...,peak_run_da=...,peak_recent_da=...,ocp_da=...,trace_n=...,...
+    #FAULT_TRACE,<first index>,<u>:<v>:<w>:<vbus>,...   (0.1 A / 0.1 V, last 2 ms before the break)
     DATA,<value_1>,<value_2>,...
+
+After a TIM8 break (mc_now=0x0040), the dashboard combines #FAULT_DIAG and
+#FAULT_TRACE to tell a power-board fault line (PB7), a real comparator
+overcurrent and a short glitch apart, logs the verdict and saves a report.
 """
 
 import csv
@@ -105,7 +111,7 @@ MOTOR_FAULT_DESCRIPTIONS = {
 MCSDK_FAULT_BITS = {
     0x0001: "FOC duration", 0x0002: "overvoltage", 0x0004: "undervoltage",
     0x0008: "power-board overtemperature", 0x0010: "startup failure",
-    0x0020: "speed feedback", 0x0040: "hardware overcurrent",
+    0x0020: "speed feedback", 0x0040: "TIM8 break: comparator OCP or power-board fault line",
     0x0080: "software error", 0x0100: "current-sampling fault",
     0x0200: "software overcurrent", 0x0400: "driver protection",
 }
@@ -142,6 +148,143 @@ def describe_motor_fault(line):
                 names.append(f"unknown bits 0x{unknown:04X}")
             detail.append(f"{key}=0x{mask:04X} ({', '.join(names)})")
     return reason, " | ".join(detail)
+
+
+# Hardware-break diagnostics (app_fault_diag.c). Board values come from the
+# Workbench project: OCP threshold, LS in pmsm_motor_parameters.h, regen limit.
+OCP_THRESHOLD_FALLBACK_A = 110.0
+MOTOR_LS_H = 17e-6
+VBUS_REGEN_HIGH_V = 19.44
+VBUS_SAG_V = 10.0
+BREAK_PROBABLE_OCP_RATIO = 0.80
+COMPARATOR_PHASES = ((0x1, "U (COMP4)"), (0x2, "V (COMP6)"), (0x4, "W (COMP7)"))
+TIM_SR_BREAK_FLAGS = ((0x0080, "BIF"), (0x0100, "B2IF"), (0x2000, "SBIF"))
+FAULT_VERDICT_BOARD = "Power-board fault line (PB7)"
+FAULT_VERDICT_COMPARATOR = "Real phase overcurrent (comparator)"
+FAULT_VERDICT_PROBABLE_OCP = "Probable real overcurrent"
+FAULT_VERDICT_GLITCH = "Probable glitch (noise on the break inputs)"
+FAULT_VERDICT_UNDETERMINED = "Undetermined break source"
+FAULT_VERDICT_NO_BREAK = "No hardware break"
+
+
+def parse_fault_trace(line):
+    """Parse ``#FAULT_TRACE,<first>,u:v:w:vbus,...`` into amps and volts.
+
+    Returns:
+        tuple[int, list[tuple[float, float, float, float]]]: Index of the first
+        sample relative to the break (-1 is the last one) and the samples.
+    """
+    parts = line.strip().split(",")
+    first = int(parts[1])
+    samples = []
+    for item in parts[2:]:
+        values = item.split(":")
+        if len(values) != 4:
+            raise ValueError(f"Invalid trace sample: {item}")
+        samples.append(tuple(int(value) / 10.0 for value in values))
+    return first, samples
+
+
+def _mask_names(mask, names):
+    return ", ".join(name for bit, name in names if mask & bit) or "none"
+
+
+def diagnose_fault_source(diag_line, trace=()):
+    """Identify which protection cut the PWM from ``#FAULT_DIAG`` and its trace.
+
+    The MCSDK reports both break sources as MC_OVER_CURR. The firmware reads
+    them at the start of the break IRQ: the external BKIN pin PB7 (power-board
+    fault line, active low) and the COMP4/6/7 outputs (phase overcurrent). If
+    both are already released, the phase currents sampled every FOC period
+    decide: with ``LS`` and Vbus, the current cannot rise by more than
+    ``Vbus / LS * period`` between two samples, so a last sample far below the
+    threshold rules out a real overcurrent.
+
+    Args:
+        diag_line: Raw ``#FAULT_DIAG`` line.
+        trace: ``(u, v, w, vbus)`` samples, oldest first, in A and V.
+
+    Returns:
+        tuple[str, list[str]]: Verdict label and the evidence lines.
+    """
+    fields = dict(part.split("=", 1) for part in diag_line.strip().split(",")[1:] if "=" in part)
+
+    def number(key, default=0.0, scale=1.0):
+        try:
+            return int(fields[key], 0) / scale
+        except (KeyError, ValueError):
+            return default
+
+    ocp_a = number("ocp_da", OCP_THRESHOLD_FALLBACK_A * 10.0, 10.0)
+    peak_run_a = number("peak_run_da", math.nan, 10.0)
+    peak_recent_a = number("peak_recent_da", math.nan, 10.0)
+    period_us = number("trace_period_us", 62.0)
+    details = [
+        f"Phase-current peak since START {peak_run_a:.1f} A, last 20 ms {peak_recent_a:.1f} A "
+        f"(OCP threshold {ocp_a:.0f} A)."
+    ]
+    if not int(number("break")):
+        details.insert(0, "No TIM8 break captured: another protection stopped the motor.")
+        return FAULT_VERDICT_NO_BREAK, details
+
+    bkin_low = bool(number("bkin_low"))
+    comp = int(number("comp"))
+    irq_count = int(number("irq_count"))
+    tim_sr = int(number("tim_sr"))
+    details.append(
+        f"At the break IRQ: PB7 {'LOW (board fault asserted)' if bkin_low else 'high'}, "
+        f"comparators above threshold: {_mask_names(comp, COMPARATOR_PHASES)}, "
+        f"TIM8 flags: {_mask_names(tim_sr, TIM_SR_BREAK_FLAGS)}."
+    )
+    if number("bkin_now_low"):
+        details.append("PB7 is still LOW when the report is sent: the board keeps its fault asserted "
+                       "(driver supply/UVLO, board protection or wiring).")
+    if irq_count > 1:
+        details.append(f"The break IRQ fired {irq_count} times: the source chatters.")
+
+    last_peak_a = math.nan
+    max_rise_a = math.nan
+    if trace:
+        peaks = [max(abs(u), abs(v), abs(w)) for u, v, w, _ in trace]
+        vbus = [sample[3] for sample in trace]
+        last_peak_a = peaks[-1]
+        max_rise_a = max(vbus) / MOTOR_LS_H * period_us * 1e-6
+        u, v, w, _ = trace[-1]
+        details.append(
+            f"Last FOC sample before the break: U {u:.1f} A, V {v:.1f} A, W {w:.1f} A; "
+            f"max |I| over the last {len(trace) * period_us / 1000.0:.1f} ms {max(peaks):.1f} A."
+        )
+        details.append(f"Vbus over the trace: {min(vbus):.1f}-{max(vbus):.1f} V.")
+        if max(vbus) > VBUS_REGEN_HIGH_V:
+            details.append(f"Vbus exceeded {VBUS_REGEN_HIGH_V:.2f} V: regenerative braking pumped the bus.")
+        if min(vbus) < VBUS_SAG_V:
+            details.append(f"Vbus fell below {VBUS_SAG_V:.0f} V: supply sag, the driver may have hit UVLO.")
+
+    if comp:
+        verdict = FAULT_VERDICT_COMPARATOR
+        details.append(f"Phase {_mask_names(comp, COMPARATOR_PHASES)} crossed ~{ocp_a:.0f} A: "
+                       "check angle estimation, current-loop stability and speed/load steps.")
+    elif bkin_low:
+        verdict = FAULT_VERDICT_BOARD
+        details.append("The STDES-LVHP01 / L6491 fault line cut the PWM, not the MCU comparators: "
+                       "check the driver supply, board protections and the PB7 wiring.")
+    elif trace and last_peak_a + max_rise_a < ocp_a:
+        verdict = FAULT_VERDICT_GLITCH
+        details.append(
+            f"Both sources had already released and the last sample ({last_peak_a:.1f} A) could rise by at "
+            f"most ~{max_rise_a:.0f} A in one {period_us:.0f} us period: the current never reached "
+            f"{ocp_a:.0f} A. Suspect EMI on PB7/BKIN or the comparator inputs; raise the break filter "
+            "or improve wiring/grounding."
+        )
+    elif max(last_peak_a if trace else 0.0, peak_recent_a if math.isfinite(peak_recent_a) else 0.0) \
+            >= BREAK_PROBABLE_OCP_RATIO * ocp_a:
+        verdict = FAULT_VERDICT_PROBABLE_OCP
+        details.append("The source released before the IRQ read, but the sampled current was already "
+                       f"near {ocp_a:.0f} A: treat it as a real overcurrent.")
+    else:
+        verdict = FAULT_VERDICT_UNDETERMINED
+        details.append("The source released before the IRQ read and no trace allows a conclusion.")
+    return verdict, details
 
 
 ACQUISITION_MODE_MOTOR = "Motor + logging"
@@ -188,6 +331,8 @@ PRESET_HARD_LIMIT_A = 30.0
 PRESET_ACCEL_ELEC_HZ_S = 500.0
 PRESET_CHANGE_PERIOD_TEXT = "2–5 s"
 STALE_DATA_S = 2.0
+FAULT_TRACE_TIMEOUT_MS = 1500
+STATUS_DETAIL_MAX_CHARS = 170
 
 # Columns written to the final CSV. Additional board columns may be displayed
 # live, but only preprocessing inputs and the requested load are retained.
@@ -668,7 +813,10 @@ class MotorDatalogGui(tk.Tk):
         super().__init__()
 
         self.title("STM32 PMSM Dark Bench Dashboard")
-        self.geometry("1540x960")
+        # Fit small laptop screens; 1540x960 stays the target on a desktop.
+        width = min(1540, self.winfo_screenwidth() - 40)
+        height = min(960, self.winfo_screenheight() - 80)
+        self.geometry(f"{width}x{height}+10+10")
         self.minsize(1120, 720)
         self.configure(bg=COLORS["bg"])
         self.paths = paths or parse_dashboard_args()
@@ -736,6 +884,7 @@ class MotorDatalogGui(tk.Tk):
         self.csv_path_var = tk.StringVar(value=str(self.paths.csv_path or self.default_csv_path()))
         self.status_var = tk.StringVar(value="Ready")
         self.status_detail_var = tk.StringVar(value="Select a COM port and settings.")
+        self.status_detail_short_var = tk.StringVar(value=self.status_detail_var.get())
         self.warning_var = tk.StringVar(value="")
         self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
         self.active_quick_profile = None
@@ -753,6 +902,17 @@ class MotorDatalogGui(tk.Tk):
         self.session_detail_var = tk.StringVar(value="No session yet")
         self.session_detail_label = None
         self.show_data_frames_var = tk.BooleanVar(value=False)
+        self.deck_badges = {}
+        self.deck_logging_detail_var = tk.StringVar(value="")
+        self.deck_link_detail_var = tk.StringVar(value="")
+
+        # Fault-source report assembled from #FAULT, #FAULT_DIAG and #FAULT_TRACE.
+        self.last_fault_line = ""
+        self.fault_diag_line = ""
+        self.fault_trace_lines = []
+        self.fault_trace_samples = []
+        self.fault_trace_expected = 0
+        self.fault_report_after_id = None
 
         self.load_mode_var = tk.StringVar(value=LOAD_MODE_FIXED)
         self.load_setpoint_var = tk.StringVar(value=self.format_float(MIN_LOAD_SETPOINT_A))
@@ -853,7 +1013,7 @@ class MotorDatalogGui(tk.Tk):
         style.configure("CardMuted.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=(font_ui, 9))
         style.configure("CardTitle.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=(font_title, 12))
         style.configure("Section.TLabel", background=COLORS["panel"], foreground=COLORS["accent"], font=(font_title, 9))
-        style.configure("Hero.TLabel", background=COLORS["panel_soft"], foreground=COLORS["text"], font=(font_title, 24))
+        style.configure("Hero.TLabel", background=COLORS["panel_soft"], foreground=COLORS["text"], font=(font_title, 20))
         style.configure("HeroSub.TLabel", background=COLORS["panel_soft"], foreground=COLORS["muted"], font=(font_ui, 10))
         style.configure("Value.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=(font_value, 21))
         style.configure("Unit.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=(font_ui, 9))
@@ -1052,54 +1212,160 @@ class MotorDatalogGui(tk.Tk):
         return "break"
 
     def build_header(self, parent):
-        """Build the motor test bench command header."""
+        """Build the title, the control deck and a one-line status strip.
+
+        Motor, CSV logging and the serial link are independent on the firmware
+        side, so each one gets its own group with a state badge, its START
+        action on the left and its STOP action on the right. The whole deck
+        sits on a single row to leave the height to the chart.
+        """
         header = tk.Frame(parent, bg=COLORS["panel_soft"], highlightbackground=COLORS["border"], highlightthickness=1)
         header.pack(fill=tk.X)
-        header.grid_columnconfigure(0, weight=1)
-        header.grid_columnconfigure(1, weight=0)
-        header.grid_columnconfigure(2, weight=0)
+        header.grid_columnconfigure(1, weight=1)
 
         accent = tk.Frame(header, bg=COLORS["accent"], width=5)
-        accent.grid(row=0, column=0, sticky="nsw")
+        accent.grid(row=0, column=0, rowspan=2, sticky="nsw")
 
-        title_block = tk.Frame(header, bg=COLORS["panel_soft"])
-        title_block.grid(row=0, column=0, sticky="w", padx=(24, 16), pady=14)
+        deck = tk.Frame(header, bg=COLORS["panel_soft"])
+        deck.grid(row=0, column=1, sticky="ew", padx=(18, 14), pady=(12, 8))
+        deck.grid_columnconfigure(1, weight=4, uniform="deck")
+        deck.grid_columnconfigure(2, weight=4, uniform="deck")
+        deck.grid_columnconfigure(3, weight=3, uniform="deck")
+
+        title_block = tk.Frame(deck, bg=COLORS["panel_soft"])
+        title_block.grid(row=0, column=0, sticky="w", padx=(0, 18))
         ttk.Label(title_block, text="STM32 PMSM Bench", style="Hero.TLabel").pack(anchor="w")
-        ttk.Label(title_block, text="Motor control, CSV logging and live monitoring", style="HeroSub.TLabel").pack(anchor="w", pady=(3, 0))
+        ttk.Label(title_block, text="Motor control, CSV logging\nand live monitoring", style="HeroSub.TLabel").pack(anchor="w", pady=(2, 0))
 
-        status_card = tk.Frame(header, bg=COLORS["panel_lift"], highlightbackground=COLORS["border"], highlightthickness=1)
-        status_card.grid(row=0, column=1, sticky="e", padx=(8, 14), pady=14)
-        status_card.grid_columnconfigure(1, weight=1)
+        motor = self.control_group(deck, "Motor", COLORS["lime"], "motor")
+        motor.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+        self.apply_board_button = self.small_button(motor.top, "Apply profile only", self.apply_board_profile, COLORS["violet"])
+        self.apply_board_button.configure(pady=1, padx=8, font=("Segoe UI", 8))
+        self.apply_board_button.grid(row=0, column=1, sticky="e", padx=(0, 8))
+        self.start_button = self.action_button(motor.body, "▶  START MOTOR", self.start_motor, COLORS["lime"], "#062712", filled=True)
+        self.start_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.stop_button = self.action_button(motor.body, "■  STOP MOTOR  (Esc)", self.stop_motor, COLORS["danger"], "#3A1018")
+        self.stop_button.grid(row=0, column=1, sticky="ew")
 
-        self.status_dot = tk.Canvas(status_card, width=20, height=20, bg=COLORS["panel_lift"], highlightthickness=0)
-        self.status_dot.grid(row=0, column=0, rowspan=2, padx=(14, 9), pady=12)
-        self.status_dot_id = self.status_dot.create_oval(4, 4, 16, 16, fill=COLORS["warning"], outline="")
-        ttk.Label(status_card, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 18), pady=(10, 0))
-        ttk.Label(status_card, textvariable=self.status_detail_var, style="StatusDetail.TLabel", wraplength=260).grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
+        logging = self.control_group(deck, "CSV logging", COLORS["cyan"], "logging", detail_var=self.deck_logging_detail_var)
+        logging.grid(row=0, column=2, sticky="nsew", padx=(0, 10))
+        self.logging_start_button = self.action_button(logging.body, "●  START LOGGING", self.start_logging, COLORS["cyan"], "#082A35", filled=True)
+        self.logging_start_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.logging_stop_button = self.action_button(logging.body, "■  STOP LOGGING", self.stop_logging, COLORS["amber"], "#35260B")
+        self.logging_stop_button.grid(row=0, column=1, sticky="ew")
 
-        control_card = tk.Frame(header, bg=COLORS["panel_soft"])
-        control_card.grid(row=0, column=2, sticky="e", padx=(0, 16), pady=14)
-        control_card.grid_columnconfigure(0, weight=1)
-        control_card.grid_columnconfigure(1, weight=1)
+        link = self.control_group(deck, "Serial link", COLORS["violet"], "link", detail_var=self.deck_link_detail_var)
+        link.grid(row=0, column=3, sticky="nsew")
+        self.disconnect_button = self.action_button(link.body, "⏏  DISCONNECT", self.stop_run, COLORS["muted"], COLORS["panel_3"])
+        self.disconnect_button.grid(row=0, column=0, columnspan=2, sticky="ew")
 
-        self.start_button = self.action_button(control_card, "START MOTOR", self.start_motor, COLORS["lime"], "#062712")
-        self.start_button.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        # One-line status strip: long fault texts are shortened here and kept
+        # in full in the UART log, so the header height never changes.
+        status = tk.Frame(header, bg=COLORS["panel_lift"])
+        status.grid(row=1, column=1, sticky="ew", padx=(18, 14), pady=(0, 12))
+        status.grid_columnconfigure(2, weight=1)
+        self.status_dot = tk.Canvas(status, width=16, height=16, bg=COLORS["panel_lift"], highlightthickness=0)
+        self.status_dot.grid(row=0, column=0, padx=(10, 6), pady=5)
+        self.status_dot_id = self.status_dot.create_oval(3, 3, 13, 13, fill=COLORS["warning"], outline="")
+        ttk.Label(status, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 10))
+        ttk.Label(status, textvariable=self.status_detail_short_var, style="StatusDetail.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 10))
 
-        self.stop_button = self.action_button(control_card, "STOP MOTOR", self.stop_motor, COLORS["danger"], "#3A1018")
-        self.stop_button.configure(state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=1, sticky="nsew")
-        self.logging_start_button = self.action_button(control_card, "START LOGGING", self.start_logging, COLORS["cyan"], "#082A35")
-        self.logging_start_button.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(8, 0))
-        self.logging_stop_button = self.action_button(control_card, "STOP LOGGING", self.stop_logging, COLORS["amber"], "#35260B")
-        self.logging_stop_button.grid(row=1, column=1, sticky="nsew", pady=(8, 0))
-        self.apply_board_button = self.small_button(control_card, "Apply profile", self.apply_board_profile, COLORS["violet"])
-        self.apply_board_button.grid(row=2, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
-        self.disconnect_button = self.small_button(control_card, "Disconnect", self.stop_run, COLORS["muted"])
-        self.disconnect_button.grid(row=2, column=1, sticky="ew", pady=(8, 0))
+        self.bind("<Escape>", self.on_escape_stop_motor)
 
-    def action_button(self, parent, text, command, accent, base_bg):
-        """Create a large motor-control button."""
-        return tk.Button(
+    def control_group(self, parent, title, accent, key, detail_var=None):
+        """Create one control-deck group: title row with state badge, then buttons.
+
+        The title row (``group.top``) can host an optional muted detail text and
+        extra widgets in column 1; ``group.body`` receives the buttons.
+        """
+        group = tk.Frame(parent, bg=COLORS["panel"], highlightbackground=COLORS["border"], highlightthickness=1)
+        group.grid_columnconfigure(0, weight=1)
+        tk.Frame(group, bg=accent, height=3).grid(row=0, column=0, sticky="ew")
+
+        top = tk.Frame(group, bg=COLORS["panel"])
+        top.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 6))
+        top.grid_columnconfigure(0, weight=1)
+        heading = tk.Frame(top, bg=COLORS["panel"])
+        heading.grid(row=0, column=0, sticky="w")
+        tk.Label(heading, text=title.upper(), bg=COLORS["panel"], fg=COLORS["muted"], font=("Segoe UI Semibold", 9)).pack(side=tk.LEFT)
+        if detail_var is not None:
+            tk.Label(heading, textvariable=detail_var, bg=COLORS["panel"], fg=COLORS["text_dim"], font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(8, 0))
+
+        badge = tk.Frame(top, bg=COLORS["panel_2"])
+        badge.grid(row=0, column=2, sticky="e")
+        dot = tk.Canvas(badge, width=10, height=10, bg=COLORS["panel_2"], highlightthickness=0)
+        dot.pack(side=tk.LEFT, padx=(7, 4), pady=3)
+        dot_id = dot.create_oval(1, 1, 9, 9, fill=COLORS["muted"], outline="")
+        label = tk.Label(badge, text="—", bg=COLORS["panel_2"], fg=COLORS["muted"], font=("Segoe UI Semibold", 8))
+        label.pack(side=tk.LEFT, padx=(0, 7), pady=1)
+        self.deck_badges[key] = (dot, dot_id, label)
+
+        body = tk.Frame(group, bg=COLORS["panel"])
+        body.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        body.grid_columnconfigure(0, weight=1, uniform="buttons")
+        body.grid_columnconfigure(1, weight=1, uniform="buttons")
+        group.top = top
+        group.body = body
+        return group
+
+    def set_deck_badge(self, key, text, color):
+        """Update the state badge of a control-deck group."""
+        badge = getattr(self, "deck_badges", {}).get(key)
+        if badge is None:
+            return
+        dot, dot_id, label = badge
+        dot.itemconfig(dot_id, fill=color)
+        label.configure(text=text, fg=color)
+
+    def refresh_control_deck(self):
+        """Show the motor, logging and link states next to their buttons."""
+        if not getattr(self, "deck_badges", None):
+            return
+        if self.motor_fault_message:
+            motor = ("FAULT", COLORS["danger"])
+        elif self.is_stopping:
+            motor = ("STOPPING", COLORS["warning"])
+        elif self.motor_running and self.motor_start_confirmed:
+            motor = ("RUNNING", COLORS["lime"])
+        elif self.motor_running or (self.is_launching and self.current_action == "motor_start"):
+            motor = ("STARTING", COLORS["warning"])
+        else:
+            motor = ("STOPPED", COLORS["muted"])
+        self.set_deck_badge("motor", *motor)
+
+        if self.is_running and self.csv_writer is not None:
+            logging = ("RECORDING", COLORS["cyan"])
+            detail = f"{self.session_rows:,} rows"
+        elif self.is_running or self.logging_requested:
+            logging = ("ARMED", COLORS["warning"])
+            detail = "LOG_START sent"
+        else:
+            logging = ("IDLE", COLORS["muted"])
+            detail = ""
+        self.set_deck_badge("logging", *logging)
+        self.deck_logging_detail_var.set(detail)
+
+        if self.serial_obj is not None:
+            port = getattr(self.serial_obj, "port", "") or ""
+            self.set_deck_badge("link", "CONNECTED", COLORS["accent"])
+            self.deck_link_detail_var.set(port)
+        else:
+            self.set_deck_badge("link", "OFFLINE", COLORS["muted"])
+            self.deck_link_detail_var.set("")
+
+    def on_escape_stop_motor(self, _event=None):
+        """Keyboard stop: acts only when STOP MOTOR is available."""
+        if str(self.stop_button.cget("state")) == tk.NORMAL:
+            self.stop_motor()
+
+    def action_button(self, parent, text, command, accent, base_bg, filled=False):
+        """Create a large control-deck button.
+
+        ``filled`` buttons (START actions) use their accent as background when
+        enabled; outlined buttons (STOP actions) keep a dark tinted background
+        with accent text, so the two actions of a group never look alike.
+        """
+        button = tk.Button(
             parent,
             text=text,
             command=command,
@@ -1107,16 +1373,29 @@ class MotorDatalogGui(tk.Tk):
             fg=COLORS["text"],
             activebackground=accent,
             activeforeground="#061016",
-            disabledforeground=COLORS["muted"],
+            disabledforeground=COLORS["text_dim"],
             relief="flat",
-            padx=24,
-            pady=16,
+            padx=14,
+            pady=12,
             cursor="hand2",
-            font=("Segoe UI Semibold", 11),
+            font=("Segoe UI Semibold", 10),
             bd=0,
             highlightthickness=1,
             highlightbackground=accent,
         )
+        button.deck_style = (accent, base_bg, filled)
+        return button
+
+    @staticmethod
+    def set_action_enabled(button, enabled):
+        """Enable or disable a control-deck button and restyle it to match."""
+        accent, base_bg, filled = getattr(button, "deck_style", (COLORS["accent"], COLORS["panel_3"], False))
+        if not enabled:
+            button.configure(state=tk.DISABLED, bg=COLORS["panel_2"], highlightbackground=COLORS["border"], cursor="arrow")
+        elif filled:
+            button.configure(state=tk.NORMAL, bg=accent, fg="#061016", highlightbackground=accent, cursor="hand2")
+        else:
+            button.configure(state=tk.NORMAL, bg=base_bg, fg=accent, highlightbackground=accent, cursor="hand2")
 
     def small_button(self, parent, text, command, accent=None):
         """Create a compact button for configuration cards."""
@@ -1698,6 +1977,9 @@ class MotorDatalogGui(tk.Tk):
             bd=0,
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
+        self.log_text.tag_configure("error", foreground=COLORS["danger"])
+        self.log_text.tag_configure("verdict", foreground=COLORS["warning"], font=("Cascadia Mono", 9, "bold"))
+        self.log_text.tag_configure("diag", foreground="#FDE68A")
         scroll = ttk.Scrollbar(log_content, command=self.log_text.yview, style="Dark.Vertical.TScrollbar")
         scroll.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scroll.set)
@@ -2173,12 +2455,14 @@ class MotorDatalogGui(tk.Tk):
         except (ValueError, OSError):
             motor_valid = False
         motor_ready = motor_valid and not self.motor_running and not busy
-        self.start_button.configure(state=tk.NORMAL if motor_ready else tk.DISABLED)
+        connected_idle = self.serial_obj is not None and not self.is_stopping
+        self.set_action_enabled(self.start_button, motor_ready)
         self.apply_board_button.configure(state=tk.NORMAL if motor_ready else tk.DISABLED)
-        self.stop_button.configure(state=tk.NORMAL if self.serial_obj is not None and not self.is_stopping else tk.DISABLED)
-        self.logging_start_button.configure(state=tk.NORMAL if logging_valid and not self.is_running and not busy else tk.DISABLED)
-        self.logging_stop_button.configure(state=tk.NORMAL if self.is_running and not busy else tk.DISABLED)
-        self.disconnect_button.configure(state=tk.NORMAL if self.serial_obj is not None and not self.is_stopping else tk.DISABLED)
+        self.set_action_enabled(self.stop_button, connected_idle)
+        self.set_action_enabled(self.logging_start_button, logging_valid and not self.is_running and not busy)
+        self.set_action_enabled(self.logging_stop_button, self.is_running and not busy)
+        self.set_action_enabled(self.disconnect_button, connected_idle)
+        self.refresh_control_deck()
 
     def on_load_mode_changed(self, *_args):
         """Update the load field and profile state after a fixed/variable change."""
@@ -2370,6 +2654,10 @@ class MotorDatalogGui(tk.Tk):
         """
         self.status_var.set(state)
         self.status_detail_var.set(detail)
+        flat = " ".join(str(detail).split())
+        if len(flat) > STATUS_DETAIL_MAX_CHARS:
+            flat = flat[:STATUS_DETAIL_MAX_CHARS - 1].rstrip() + "…"
+        self.status_detail_short_var.set(flat)
         lowered = state.lower()
         color = COLORS["warning"]
         if lowered.startswith(("error", "failed")) or " error" in lowered or lowered.endswith("failed"):
@@ -2382,14 +2670,18 @@ class MotorDatalogGui(tk.Tk):
             color = COLORS["accent_2"]
         self.status_dot.itemconfig(self.status_dot_id, fill=color)
 
-    def log(self, msg):
+    def log(self, msg, tag=None):
         """Add a timestamped line to the interface log.
 
         Args:
             msg: Message to display.
+            tag: Optional color tag (``error``, ``verdict``, ``diag``); lines
+                starting with ``ERROR`` are tagged ``error`` automatically.
         """
         stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self.log_text.insert(tk.END, f"[{stamp}] {msg}\n")
+        if tag is None and msg.startswith("ERROR"):
+            tag = "error"
+        self.log_text.insert(tk.END, f"[{stamp}] {msg}\n", tag or ())
         self.log_line_count += 1
 
         if self.log_line_count > LOG_MAX_LINES:
@@ -2875,10 +3167,8 @@ class MotorDatalogGui(tk.Tk):
 
         if not self.controls_locked():
             if is_valid:
-                self.start_button.configure(bg=COLORS["accent_2"], fg="#062712")
                 self.set_status("Ready", self.ready_status_detail(quick_profile))
             else:
-                self.start_button.configure(bg=COLORS["panel_3"])
                 self.set_status("Configuration error", errors[0])
 
         self.update_action_buttons()
@@ -3137,7 +3427,7 @@ class MotorDatalogGui(tk.Tk):
             return
 
         self.is_stopping = True
-        self.stop_button.configure(state=tk.DISABLED)
+        self.set_action_enabled(self.stop_button, False)
         self.launch_cancel_event.set()
         self.refresh_quick_profile_cards()
         self.set_status("Stopping", "Sending STOP...")
@@ -3492,7 +3782,11 @@ class MotorDatalogGui(tk.Tk):
 
     def handle_firmware_event(self, line):
         """Track the physical motor even when no CSV is being recorded."""
+        if line.startswith(("#FAULT_DIAG,", "#FAULT_TRACE,")):
+            self.collect_fault_diagnostics(line)
+            return
         if line.startswith("#FAULT,"):
+            self.last_fault_line = line
             reason, detail = describe_motor_fault(line)
             self.motor_running = self.motor_start_confirmed = False
             self.board_motor_running = False
@@ -3536,6 +3830,91 @@ class MotorDatalogGui(tk.Tk):
             self.show_running_status()
         self.board_motor_running = self.motor_running
         self.update_controls_state()
+
+    def collect_fault_diagnostics(self, line):
+        """Gather ``#FAULT_DIAG`` and its ``#FAULT_TRACE`` lines, then report.
+
+        The verdict is produced once every announced trace sample arrived, or
+        after ``FAULT_TRACE_TIMEOUT_MS`` with whatever was received.
+        """
+        if line.startswith("#FAULT_DIAG,"):
+            self.cancel_fault_report_timer()
+            fields = dict(part.split("=", 1) for part in line.split(",")[1:] if "=" in part)
+            self.fault_diag_line = line
+            self.fault_trace_lines = []
+            self.fault_trace_samples = []
+            try:
+                self.fault_trace_expected = max(0, int(fields.get("trace_n", "0")))
+            except ValueError:
+                self.fault_trace_expected = 0
+            if self.fault_trace_expected == 0:
+                self.report_fault_source()
+            else:
+                self.fault_report_after_id = self.after(FAULT_TRACE_TIMEOUT_MS, self.report_fault_source)
+            return
+        if not self.fault_diag_line:
+            return
+        try:
+            _first, samples = parse_fault_trace(line)
+        except (ValueError, IndexError):
+            self.log(f"Invalid fault trace ignored: {line}", "error")
+            return
+        self.fault_trace_lines.append(line)
+        self.fault_trace_samples.extend(samples)
+        if len(self.fault_trace_samples) >= self.fault_trace_expected:
+            self.report_fault_source()
+
+    def cancel_fault_report_timer(self):
+        if self.fault_report_after_id is not None:
+            try:
+                self.after_cancel(self.fault_report_after_id)
+            except tk.TclError:
+                pass
+            self.fault_report_after_id = None
+
+    def report_fault_source(self):
+        """Log which protection stopped the motor and save the evidence."""
+        self.cancel_fault_report_timer()
+        if not self.fault_diag_line:
+            return
+        verdict, details = diagnose_fault_source(self.fault_diag_line, self.fault_trace_samples)
+        if len(self.fault_trace_samples) < self.fault_trace_expected:
+            details.append(f"Trace incomplete: {len(self.fault_trace_samples)}/{self.fault_trace_expected} samples received.")
+        self.log(f"FAULT SOURCE → {verdict}", "verdict")
+        for line in details:
+            self.log(f"    • {line}", "diag")
+        self.save_fault_report(verdict, details)
+        if self.motor_fault_message and verdict != FAULT_VERDICT_NO_BREAK:
+            # Source first: the header status shows only the start of the message.
+            reason, separator, rest = self.motor_fault_message.partition(": ")
+            self.motor_fault_message = f"{reason} — source: {verdict}{separator}{rest}"
+            self.show_running_status()
+        self.fault_diag_line = ""
+
+    def save_fault_report(self, verdict, details):
+        """Write the verdict and the raw firmware lines next to the CSV."""
+        now = datetime.now()
+        if self.is_running and self.csv_path:
+            base = Path(self.csv_path).with_suffix("")
+            path = Path(f"{base}_fault_{now:%H%M%S}.txt")
+        else:
+            path = self.paths.log_dir / f"fault_{now:%Y%m%d_%H%M%S}.txt"
+        content = [
+            f"Fault report {now.isoformat(timespec='seconds')}",
+            f"Verdict: {verdict}",
+            *(f"- {line}" for line in details),
+            "",
+            "Raw firmware lines:",
+            self.last_fault_line,
+            self.fault_diag_line,
+            *self.fault_trace_lines,
+        ]
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(content) + "\n", encoding="utf-8")
+            self.log(f"Fault report saved: {path}")
+        except OSError as exc:
+            self.log(f"Fault report not saved: {exc}", "error")
 
     def show_running_status(self):
         """Report motor and acquisition as independent states."""
@@ -3584,6 +3963,7 @@ class MotorDatalogGui(tk.Tk):
             self.session_detail_var.set(detail)
             if self.session_detail_label is not None:
                 self.session_detail_label.configure(fg=color)
+            self.refresh_control_deck()
         finally:
             if reschedule:
                 self.after(500, self.refresh_session_stats)

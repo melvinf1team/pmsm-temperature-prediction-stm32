@@ -17,11 +17,13 @@ Recommended sequence
    firmware presets (`Stable`, `Variable load`, `Variable speed`,
    `All variable`), or `Custom`, where you choose or create a saved profile
    with a fixed TB-200S load or `Variable`.
-9. Use **Apply profile** to prepare the board, then **START MOTOR** to run it.
+9. Use **Apply profile only** to prepare the board, then **START MOTOR** to run it.
    Check the CSV path and use **START LOGGING** independently, before or after
    starting the motor.
 10. **STOP MOTOR** keeps recording in the same CSV for cooldown.
     **STOP LOGGING** closes only the CSV. **Disconnect** stops both subsystems.
+    The Esc key also stops the motor. Each group of the header shows its own
+    state (motor, CSV logging, serial link).
 11. Inspect the raw CSV file before running preprocessing.
 
 Wiring check
@@ -240,6 +242,13 @@ and inspect the dashboard log. Close other software using the port, restore
 the connection, then start a full new session from `SYNC`. Do not concatenate
 an incomplete file manually with a new acquisition; separate sessions make
 timestamp checks easier.
+
+If the motor stops by itself, the log shows `ERROR: Motor stopped` with the
+decoded reason. For a hardware break (`mc_now=0x0040`), also read the
+`FAULT SOURCE` line that follows: it says whether the power-board fault line,
+a phase comparator or noise on the break inputs cut the PWM, and a
+`fault_*.txt` report is saved next to the CSV. See :doc:`datalogging`. The
+motor stays stopped until a new explicit **START MOTOR**; logging continues.
 
 Before preprocessing, check at least:
 

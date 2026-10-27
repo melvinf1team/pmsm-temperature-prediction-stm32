@@ -1,0 +1,124 @@
+{
+  "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261027_092837.csv",
+  "baseline": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\old_test_logs\\daq_log_20261026_103931.csv",
+  "source_sha256": "c20189f798cff74924f0cce27d71fcf5962e7ff1da856ab28f6f61c3404b31bb",
+  "rows": 9306,
+  "period_ms": 100,
+  "fault_from_console": {
+    "t_ms": 406684,
+    "mc_now": "0x0040",
+    "speed_rpm": 3183.701,
+    "iq_a": 6.997,
+    "id_a": 0.84,
+    "brake_command_a": 0.196
+  },
+  "first_powered_sample_ms": 162257,
+  "seconds_first_powered_sample_to_fault": 244.427,
+  "last_pre_fault_sample": {
+    "stm32_time_ms": 406657.0,
+    "d6t_temp_c": 32.1,
+    "ds18b20_temp_c": 22.31,
+    "motor_ud_v": 0.713,
+    "motor_uq_v": 2.454,
+    "motor_speed_mech_rpm": 3243.329,
+    "motor_id_a": -1.522,
+    "motor_iq_a": 8.566,
+    "load_setpoint_a": 0.196,
+    "norm_a": 8.700163216859785
+  },
+  "first_post_fault_sample": {
+    "stm32_time_ms": 406757.0,
+    "d6t_temp_c": 32.1,
+    "ds18b20_temp_c": 22.31,
+    "motor_ud_v": 0.0,
+    "motor_uq_v": 0.0,
+    "motor_speed_mech_rpm": 0.0,
+    "motor_id_a": 0.0,
+    "motor_iq_a": 0.0,
+    "load_setpoint_a": 0.05,
+    "norm_a": 0.0
+  },
+  "last_pre_fault_sample_age_ms": 27,
+  "max_iq_sampled_a": 12.789,
+  "max_norm_sampled_a": 14.62429006823921,
+  "max_speed_sampled_rpm": 4188.131,
+  "max_temperature_while_powered_c": 32.2,
+  "last_window_ms": [
+    399957,
+    406684
+  ],
+  "last_window_rpm_range": [
+    2997.619,
+    3442.508
+  ],
+  "last_window_id_range_a": [
+    -7.906,
+    8.096
+  ],
+  "last_window_iq_range_a": [
+    3.892,
+    12.789
+  ],
+  "last_load_changes": [
+    {
+      "stm32_time_ms": 397857,
+      "d6t_temp_c": 30.6,
+      "ds18b20_temp_c": 22.31,
+      "motor_ud_v": 0.725,
+      "motor_uq_v": 2.536,
+      "motor_speed_mech_rpm": 3833.255,
+      "motor_id_a": 0.263,
+      "motor_iq_a": 4.03,
+      "load_setpoint_a": 0.17,
+      "norm_a": 4.0385726438928895
+    },
+    {
+      "stm32_time_ms": 399957,
+      "d6t_temp_c": 30.7,
+      "ds18b20_temp_c": 22.31,
+      "motor_ud_v": 1.086,
+      "motor_uq_v": 2.09,
+      "motor_speed_mech_rpm": 3347.445,
+      "motor_id_a": -5.352,
+      "motor_iq_a": 9.684,
+      "load_setpoint_a": 0.175,
+      "norm_a": 11.064527102411562
+    },
+    {
+      "stm32_time_ms": 402957,
+      "d6t_temp_c": 31.1,
+      "ds18b20_temp_c": 22.31,
+      "motor_ud_v": 0.776,
+      "motor_uq_v": 2.101,
+      "motor_speed_mech_rpm": 3182.329,
+      "motor_id_a": 1.384,
+      "motor_iq_a": 9.019,
+      "load_setpoint_a": 0.195,
+      "norm_a": 9.12457215435332
+    },
+    {
+      "stm32_time_ms": 406657,
+      "d6t_temp_c": 32.1,
+      "ds18b20_temp_c": 22.31,
+      "motor_ud_v": 0.713,
+      "motor_uq_v": 2.454,
+      "motor_speed_mech_rpm": 3243.329,
+      "motor_id_a": -1.522,
+      "motor_iq_a": 8.566,
+      "load_setpoint_a": 0.196,
+      "norm_a": 8.700163216859785
+    }
+  ],
+  "baseline_duration_s": 2019.5,
+  "baseline_max_iq_sampled_a": 24.058,
+  "baseline_mean_iq_min1_30_a": 17.829020171254527,
+  "baseline_max_norm_sampled_a": 24.068474484270915,
+  "notes": [
+    "Motor fields are explicitly zeroed by firmware outside RUN; zero does not establish physical stop time.",
+    "10 Hz samples are not a high-speed peak-current measurement and cannot exclude short overcurrent events.",
+    "Brake values are commands, not measurements of actual excitation current or torque.",
+    "The CSV does not contain speed references, bus voltage, board temperature or a latched hardware fault source.",
+    "The final 0.195 to 0.196 A brake step is near the fault, but its proximity does not prove causation.",
+    "User confirmed unchanged gear 2, blocked outlets and D6T view relative to 26 October."
+  ]
+}

@@ -9305,30 +9305,3 @@ stm32_time_ms;d6t_temp_c;ds18b20_temp_c;motor_ud_v;motor_uq_v;motor_speed_mech_r
 966757;26.0;22.43;0.000;0.000;0.000;0.000;0.000;0.050
 966857;26.0;22.43;0.000;0.000;0.000;0.000;0.000;0.050
 966957;26.0;22.43;0.000;0.000;0.000;0.000;0.000;0.050
-
-
-[09:28:38.163] STMicroelectronics port detected: COM5 — STMicroelectronics STLink Virtual COM Port 2 (COM5)
-[09:30:24.631] Serial port opened: COM6.
-[09:30:24.643] TX → HELLO\n
-[09:30:24.697] RX ← #CONTROL,independent=1,motor=0,logging=0
-[09:30:24.705] RX ← ACK,HELLO
-[09:30:24.705] TX → PROFILE_SET,VARIABLE_ALL\n
-[09:30:24.824] RX ← ACK,PROFILE_SET,VARIABLE_ALL
-[09:30:35.491] TX → LOG_START,100,1000\n
-[09:30:35.545] RX ← #LOG_ARMED
-[09:30:35.551] RX ← ACK,LOG_START
-[09:30:35.552] RX ← #LOG_START
-[09:30:35.556] RX ← #CSV_HEADER,stm32_time_ms,d6t_temp_c,ds18b20_temp_c,motor_ud_v,motor_uq_v,motor_speed_mech_rpm,motor_id_a,motor_iq_a,load_setpoint_a
-[09:30:35.559] CSV created: C:\Users\pellegr6\OneDrive - STMicroelectronics\Documents\PMSM_project\pmsm-temperature-prediction-stm32\datalogging\logs\daq_log_20261027_092837.csv
-[09:30:35.560] First DATA row written to the CSV (DATA frames hidden in this log).
-[09:32:40.521] TX → PROFILE_SET,VARIABLE_ALL\n
-[09:32:40.650] RX ← ACK,PROFILE_SET,VARIABLE_ALL
-[09:32:40.651] TX → MOTOR_START\n
-[09:32:40.722] RX ← ACK,MOTOR_START
-[09:32:40.722] RX ← #PROFILE,START,VARIABLE_ALL,random_rpm=3000-4000,change_ms=2000-5000,load_a=0.10-0.20,load_change_ms=2000-5000,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500
-[09:36:44.577] RX ← #FAULT,MCSDK_FAULT,t_ms=406684,speed_mrpm=3183701,speed_limit_rpm=4478,iq_ma=6997,id_ma=840,hard_ma=30000,load_ma=196,mc_now=0x0040,mc_occurred=0x0040
-[09:36:44.580] ERROR: Motor stopped — MCSDK_FAULT: The motor-control SDK reported a protection fault. | speed 3183.701 rpm | shutdown speed 4478.000 rpm | Iq 6.997 A | Id 0.840 A | hard current limit 30.000 A | brake command 0.196 A | mc_now=0x0040 (hardware overcurrent) | mc_occurred=0x0040 (hardware overcurrent)
-[09:46:02.987] TX → LOG_STOP\n
-[09:46:03.063] RX ← #LOG_STOP
-[09:46:03.068] RX ← ACK,LOG_STOP
-[09:46:03.068] CSV closed: C:\Users\pellegr6\OneDrive - STMicroelectronics\Documents\PMSM_project\pmsm-temperature-prediction-stm32\datalogging\logs\daq_log_20261027_092837.csv

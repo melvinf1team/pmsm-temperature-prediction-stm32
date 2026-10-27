@@ -24,6 +24,17 @@ Verification status
 Open points
 -----------
 
+0. Fault source diagnostic on target
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**High priority.** The `#FAULT_DIAG` / `#FAULT_TRACE` diagnostic of the
+acquisition firmware (`app_fault_diag.c`) and its dashboard analysis compile
+with the STM32CubeIDE toolchain and pass the unit tests with synthetic data,
+but have not been run on the programmed board. The 27 October 2026 session
+stopped with `mc_now=0x0040` at 3184 rpm while the sampled Id/Iq were far
+below 110 A, and its source is still unknown. Flash the firmware, repeat the
+`All variable` profile, and record the verdict before concluding on the cause.
+
 1. Test bench qualification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

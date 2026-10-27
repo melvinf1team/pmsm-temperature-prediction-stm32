@@ -61,6 +61,9 @@ bool AppDatalog_SendText(const char *t)
   mock_events_length += length;
   return true;
 }
+void AppFaultDiag_Arm(void) {}
+void AppFaultDiag_PrepareReport(void) {}
+bool AppFaultDiag_SendPendingReport(void) { return true; }
 bool D6TIR_GetFreshTemperatureC(float *t, uint32_t max_age)
 { mock_max_age = max_age; *t = mock_temperature; return mock_d6t_valid; }
 

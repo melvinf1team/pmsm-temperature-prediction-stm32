@@ -417,6 +417,24 @@ red `Motor error` state; logging continues until the operator presses **STOP LOG
 A late header/launch ACK does not hide this state. A new explicit start
 clears the display once accepted by the firmware.
 
+The acquisition firmware follows every `#FAULT` with a source diagnostic
+(`app_fault_diag.c`). `mc_now=0x0040` means a TIM8 break, which merges two
+sources: the power-board fault line on PB7 (BKIN, active low) and the
+COMP4/6/7 phase comparators (~110 A). The break IRQ reads both before the
+MCSDK handler runs and freezes the last 32 FOC samples (2 ms) of phase
+currents and Vbus:
+
+```text
+#FAULT_DIAG,break=1,t_break_ms=406671,t_now_ms=406684,irq_count=1,tim_sr=0x0081,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=168,peak_recent_da=131,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62
+#FAULT_TRACE,-32,118:-61:-57:181,...   (u:v:w:vbus in 0.1 A / 0.1 V, oldest first, 8 samples per line)
+```
+
+The dashboard prints a `FAULT SOURCE →` verdict with its evidence (power-board
+fault line, real comparator overcurrent, probable overcurrent, or glitch when
+the last sample could not reach the threshold within one FOC period), and saves
+the verdict with the raw lines in `<csv>_fault_HHMMSS.txt`, or
+`fault_<timestamp>.txt` in the log folder when no CSV is open.
+
 At a 4500 rpm target, the current overspeed shutdown threshold is
 5000 rpm: any measured speed above it for 100 ms trips `OVERSPEED`. Reaching
 the target itself does not request a stop. Use the fault report to identify

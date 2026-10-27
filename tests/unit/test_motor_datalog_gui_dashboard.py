@@ -36,7 +36,14 @@ from motor_datalog_gui_dashboard import (
     build_load_command,
     build_profile_command,
     describe_motor_fault,
+    diagnose_fault_source,
+    FAULT_VERDICT_BOARD,
+    FAULT_VERDICT_COMPARATOR,
+    FAULT_VERDICT_GLITCH,
+    FAULT_VERDICT_NO_BREAK,
+    FAULT_VERDICT_PROBABLE_OCP,
     normalize_quick_profile,
+    parse_fault_trace,
     preset_load_settings,
 )
 
@@ -480,6 +487,85 @@ class FirmwareEventTests(unittest.TestCase):
         )
         self.assertEqual(reason, "NEW_REASON")
         self.assertEqual(detail, "The firmware stopped the motor.")
+
+
+def fault_diag(**overrides) -> str:
+    fields = {
+        "break": "1", "t_break_ms": "406684", "t_now_ms": "406690", "irq_count": "1",
+        "tim_sr": "0x0080", "bkin_low": "0", "comp": "0x0", "bkin_now_low": "0",
+        "comp_now": "0x0", "peak_run_da": "160", "peak_recent_da": "120",
+        "ocp_da": "1100", "vbus_dv": "180", "trace_n": "8", "trace_period_us": "62",
+    }
+    fields.update(overrides)
+    return "#FAULT_DIAG," + ",".join(f"{key}={value}" for key, value in fields.items())
+
+
+def flat_trace(peak_a: float, vbus_v: float = 18.0, count: int = 8):
+    return [(peak_a, -peak_a / 2, -peak_a / 2, vbus_v)] * count
+
+
+class FaultSourceTests(unittest.TestCase):
+    def test_trace_line_is_parsed_in_amps_and_volts(self) -> None:
+        first, samples = parse_fault_trace("#FAULT_TRACE,-8,123:-45:-78:180,0:1:-1:179")
+        self.assertEqual(first, -8)
+        self.assertEqual(samples, [(12.3, -4.5, -7.8, 18.0), (0.0, 0.1, -0.1, 17.9)])
+        with self.assertRaises(ValueError):
+            parse_fault_trace("#FAULT_TRACE,-8,123:-45")
+
+    def test_low_current_without_source_is_a_glitch(self) -> None:
+        verdict, details = diagnose_fault_source(fault_diag(), flat_trace(12.0))
+        self.assertEqual(verdict, FAULT_VERDICT_GLITCH)
+        self.assertTrue(any("never reached 110 A" in line for line in details))
+
+    def test_board_fault_line_is_identified(self) -> None:
+        verdict, details = diagnose_fault_source(
+            fault_diag(bkin_low="1", bkin_now_low="1"), flat_trace(12.0))
+        self.assertEqual(verdict, FAULT_VERDICT_BOARD)
+        self.assertTrue(any("still LOW" in line for line in details))
+
+    def test_comparator_phase_is_identified(self) -> None:
+        verdict, details = diagnose_fault_source(fault_diag(comp="0x2"), flat_trace(100.0))
+        self.assertEqual(verdict, FAULT_VERDICT_COMPARATOR)
+        self.assertTrue(any("V (COMP6)" in line for line in details))
+
+    def test_released_source_near_threshold_is_a_probable_overcurrent(self) -> None:
+        verdict, _ = diagnose_fault_source(fault_diag(), flat_trace(95.0))
+        self.assertEqual(verdict, FAULT_VERDICT_PROBABLE_OCP)
+
+    def test_bus_excursions_are_reported(self) -> None:
+        _, details = diagnose_fault_source(fault_diag(), flat_trace(12.0, vbus_v=21.0))
+        self.assertTrue(any("regenerative" in line for line in details))
+        _, details = diagnose_fault_source(fault_diag(), flat_trace(12.0, vbus_v=8.0))
+        self.assertTrue(any("UVLO" in line for line in details))
+
+    def test_software_fault_has_no_break(self) -> None:
+        verdict, _ = diagnose_fault_source(fault_diag(**{"break": "0", "trace_n": "0"}))
+        self.assertEqual(verdict, FAULT_VERDICT_NO_BREAK)
+
+    def test_dashboard_reports_once_the_trace_is_complete(self) -> None:
+        app = object.__new__(MotorDatalogGui)
+        app.fault_diag_line = ""
+        app.fault_trace_lines = []
+        app.fault_trace_samples = []
+        app.fault_trace_expected = 0
+        app.fault_report_after_id = None
+        app.motor_fault_message = "MCSDK_FAULT: protection fault"
+        app.after = mock.Mock(return_value="after#1")
+        app.after_cancel = mock.Mock()
+        app.log = mock.Mock()
+        app.save_fault_report = mock.Mock()
+        app.show_running_status = mock.Mock()
+
+        app.handle_firmware_event(fault_diag())
+        app.save_fault_report.assert_not_called()
+        app.handle_firmware_event("#FAULT_TRACE,-8," + ",".join(["120:-60:-60:180"] * 8))
+
+        app.save_fault_report.assert_called_once()
+        self.assertEqual(app.save_fault_report.call_args.args[0], FAULT_VERDICT_GLITCH)
+        self.assertIn(FAULT_VERDICT_GLITCH, app.log.call_args_list[0].args[0])
+        self.assertTrue(app.motor_fault_message.startswith(
+            f"MCSDK_FAULT — source: {FAULT_VERDICT_GLITCH}: "))
+        self.assertEqual(app.fault_diag_line, "")
 
 
 class SessionPathTests(unittest.TestCase):

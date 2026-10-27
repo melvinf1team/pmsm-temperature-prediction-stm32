@@ -23,6 +23,11 @@ The main application modules are:
 `app_datalog.c`
    USART ownership, nonblocking TX queue, CSV header, and `DATA` rows.
 
+`app_fault_diag.c`
+   Source diagnostic of a hardware break (acquisition firmware only): reads
+   the break sources in the TIM8 break interrupt and keeps the last 2 ms of
+   phase currents (see `Hardware break diagnostic`_).
+
 `app_wiring_diag.c`
    Wiring diagnostics of the sensor and TB-200S lines (`DIAG`) and motor
    status report (`STATUS`).
@@ -178,6 +183,66 @@ faults do not flood the link. The dashboard explains these lines in the
 console and retains a red motor-error state while logging continues.
 The current 5000 rpm absolute overspeed cap also applies to a 4500 rpm
 target: exceeding it for 100 ms stops the motor.
+
+Hardware break diagnostic
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``mc_now=0x0040`` (``MC_OVER_CURR``) only says that TIM8 received a break.
+The generated project merges two sources on that break input: the external
+``BKIN`` pin ``PB7``, active low, wired to the fault line of the STDES-LVHP01
+power board (L6491 drivers), and the internal comparators ``COMP4``,
+``COMP6`` and ``COMP7`` (phases U, V, W) compared with the DAC threshold of
+about 110 A (``WB_UI_OCP_THRESHOLD``). The MCSDK does not record which source
+fired.
+
+The acquisition firmware adds ``app_fault_diag.c`` for this. It is called
+from three places, the first two inside ``USER CODE`` sections so that a
+Workbench regeneration keeps them:
+
+* ``TIMx_BRK_M1_IRQHandler`` (``Src/stm32g4xx_mc_it.c``) calls
+  ``AppFaultDiag_OnBreakIrq()`` first, before the MCSDK handler. It latches
+  the ``PB7`` level, the three comparator outputs, ``TIM8->SR`` and the time.
+* ``TSK_HighFrequencyTask`` (``Src/mc_tasks.c``) calls
+  ``AppFaultDiag_OnHighFrequencyTask()`` once per FOC period (16 kHz). It
+  stores the phase currents and Vbus in a 32-sample ring buffer (2 ms), keeps
+  the peak since the start and two alternating 10 ms peak windows. The ring
+  buffer freezes when the break is latched.
+* ``app_motor_control.c`` calls ``AppFaultDiag_Arm()`` before each motor start,
+  ``AppFaultDiag_PrepareReport()`` when it builds the ``#FAULT`` line, and
+  sends the prepared lines right after it.
+
+Each ``#FAULT`` is followed by one ``#FAULT_DIAG`` line and, when a break was
+captured, four ``#FAULT_TRACE`` lines:
+
+.. code-block:: text
+
+   #FAULT_DIAG,break=1,t_break_ms=406671,t_now_ms=406684,irq_count=1,tim_sr=0x0081,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=168,peak_recent_da=131,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62
+   #FAULT_TRACE,-32,118:-61:-57:181,...
+
+.. csv-table:: ``#FAULT_DIAG`` fields
+   :header: "Field", "Meaning"
+   :widths: 25, 75
+
+   "break", "1 if the TIM8 break interrupt ran since the last start, 0 for an application fault"
+   "bkin_low / bkin_now_low", "``PB7`` low (board fault asserted) at the interrupt / when the report is built"
+   "comp / comp_now", "Bit mask of comparators above threshold (1 = U, 2 = V, 4 = W), same two instants"
+   "tim_sr", "``TIM8->SR`` read at the interrupt (``BIF`` 0x0080, ``B2IF`` 0x0100, ``SBIF`` 0x2000)"
+   "irq_count", "Number of break interrupts since the start; more than 1 means a chattering source"
+   "peak_run_da, peak_recent_da", "Largest phase current since the start / in the last 10-20 ms, in 0.1 A"
+   "ocp_da", "Hardware threshold, 0.1 A (``APP_FAULT_DIAG_OCP_THRESHOLD_A``)"
+   "vbus_dv", "Bus voltage when the report is built, 0.1 V"
+   "trace_n, trace_period_us", "Number of trace samples and the period between them"
+
+``#FAULT_TRACE,<first>,u:v:w:vbus,...`` carries up to 8 samples per line from
+the oldest to the newest; ``<first>`` is the index of the first sample
+relative to the break (-1 is the last sample before it). Currents are in
+0.1 A, voltages in 0.1 V. The phase currents are the values reconstructed
+from the three shunts at the FOC rate, so a spike shorter than a PWM period
+may not appear in them even when the comparator saw it.
+
+The phase current and bus voltage scales come from ``CURRENT_SCALE`` and
+``VOLTAGE_SCALE`` in ``drive_parameters.h``. ``firmware_validation`` does not
+contain this module and keeps the plain ``#FAULT`` line.
 
 Both projects define the heating settings in ``Inc/app_motor_control.h``:
 ``APP_ID_TARGET_A=0.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Heating injection

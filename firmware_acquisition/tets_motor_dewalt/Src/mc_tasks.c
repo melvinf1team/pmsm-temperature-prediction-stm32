@@ -50,6 +50,7 @@
 
 /* USER CODE BEGIN Includes */
 #include "app_config.h"
+#include "app_fault_diag.h"
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN Private define */
@@ -756,7 +757,7 @@ __weak uint8_t TSK_HighFrequencyTask(void)
   }
 
   /* USER CODE BEGIN HighFrequencyTask 1 */
-
+  AppFaultDiag_OnHighFrequencyTask();
   /* USER CODE END HighFrequencyTask 1 */
 
   return M1;

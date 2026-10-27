@@ -95,7 +95,24 @@ module constants `PRESET_*` mirror the firmware defines;
 projects and the validation GUI. `Collect only` is the default so that no
 motor command is sent until a motor profile is chosen.
 
-**Apply profile** prepares the selected motor settings on the board without
+The header holds a control deck with one group per subsystem, each with a
+state badge, its START action on the left (filled) and its STOP action on the
+right (outlined):
+
+.. csv-table:: Control deck
+   :header: "Group", "Badge states", "Buttons"
+   :widths: 18, 40, 42
+
+   "Motor", "STOPPED, STARTING, RUNNING, STOPPING, FAULT", "**START MOTOR**, **STOP MOTOR** (also the Esc key), and a small **Apply profile only** button"
+   "CSV logging", "IDLE, ARMED (LOG_START sent), RECORDING with the row count", "**START LOGGING**, **STOP LOGGING**"
+   "Serial link", "OFFLINE, CONNECTED with the port", "**DISCONNECT**"
+
+A disabled button is greyed. A one-line status strip under the deck shows the
+current state and the start of its detail; long texts such as a fault
+description are shortened there and kept in full in the UART log, so the
+header height never changes. The window size is limited to the screen size.
+
+**Apply profile only** prepares the selected motor settings on the board without
 starting either subsystem. **START MOTOR** and **STOP MOTOR** are independent
 of **START LOGGING** and **STOP LOGGING**. Motor settings are locked only
 while the motor runs; CSV settings are locked while logging runs. A motor
@@ -218,6 +235,38 @@ Behavior is therefore the same from VS Code, PowerShell, or a shortcut. The
 **New** button proposes such a name; after a session that wrote an auto-named
 file, a fresh name is proposed automatically, while a user-chosen name is kept.
 
+Fault source diagnostic
+-----------------------
+
+A motor stop is shown in the UART log as `ERROR: Motor stopped`, decoded from
+`#FAULT`. When the mask is `0x0040`, the MCSDK only reports a TIM8 break, which
+is either the power-board fault line on `PB7` or a phase comparator at about
+110 A. The dashboard collects the `#FAULT_DIAG` and `#FAULT_TRACE` lines that
+the acquisition firmware sends next (see :doc:`firmware`) and
+`diagnose_fault_source` turns them into a verdict, printed in the log in
+yellow as `FAULT SOURCE → ...`, followed by its evidence lines.
+
+.. csv-table:: Verdicts
+   :header: "Verdict", "Condition", "What to check"
+   :widths: 28, 40, 32
+
+   "Power-board fault line (PB7)", "`PB7` was low at the interrupt and no comparator was active", "Driver supply and protections of the STDES-LVHP01, PB7 wiring"
+   "Real phase overcurrent (comparator)", "At least one comparator was above threshold; the phase is named", "Angle estimation, current-loop stability, speed and load steps"
+   "Probable real overcurrent", "Both sources already released, but the sampled current was at least 80% of the threshold", "Treated as a real overcurrent"
+   "Probable glitch (noise on the break inputs)", "Both sources released and the last sample plus the largest possible rise in one FOC period (`Vbus / Ls x period`, about 66 A) stays under the threshold", "Grounding and routing of PB7 and the comparator inputs; filter of the break input"
+   "Undetermined break source", "Sources released and no trace received", "Capture again, or measure with a current probe"
+   "No hardware break", "`break=0`: another protection stopped the motor", "Use the decoded `#FAULT` reason"
+
+The evidence lines also report a Vbus above 19.44 V (regenerative braking
+charging the bus), a Vbus below 10 V (possible driver undervoltage), and a
+break interrupt that ran several times. If the trace is incomplete after
+1.5 s, the verdict is given with the received samples and says so.
+
+The status strip and the motor state keep the source first, for example
+`MCSDK_FAULT — source: Probable glitch ...`. The verdict and the raw
+firmware lines are also saved next to the CSV in `<csv>_fault_HHMMSS.txt`, or
+in `fault_<timestamp>.txt` in the log folder when no CSV is open.
+
 Troubleshooting
 ---------------
 
@@ -229,6 +278,12 @@ Troubleshooting
 * No `ACK,PROFILE_SET,...` with a preset: the board runs an acquisition firmware
   without the independent commands; rebuild and flash it before using this dashboard.
 * `DATA` without a CSV file: look for `#CSV_HEADER` in the log first.
+* `Motor error` with `mc_now=0x0040`: read the `FAULT SOURCE` line below it.
+  No such line means the board runs an older acquisition firmware without
+  `#FAULT_DIAG`; rebuild and flash it.
+* A `Probable glitch` verdict does not mean the motor is healthy. A
+  current spike shorter than the 62 us FOC period is not in the trace; compare
+  with a current probe on the scope if the fault repeats.
 * D6T readings of `NaN`: check power, pull-ups, and the I2C PEC, or run
   `tests/bench/check_wiring.py` to locate the fault.
 * Abrupt program exit: treat the last buffered block as potentially incomplete

@@ -56,6 +56,9 @@ Application modules are in
   value, and schedules fixed or variable load operation;
 * `app_datalog.c` schedules the sensors and feeds a nonblocking UART
   transmit queue;
+* `app_fault_diag.c` latches the sources of a TIM8 hardware break and the
+  last 2 ms of phase currents, and sends them as `#FAULT_DIAG` and
+  `#FAULT_TRACE` after `#FAULT`;
 * `app_wiring_diag.c` answers `DIAG` and `STATUS` for
   `tests/bench/check_wiring.py`;
 * `d6t_ir.c` and `ds18b20.c` isolate sensor protocols; `d6t_ir.c` also keeps

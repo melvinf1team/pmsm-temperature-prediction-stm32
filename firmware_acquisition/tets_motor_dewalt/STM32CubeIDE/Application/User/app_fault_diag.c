@@ -1,0 +1,289 @@
+#include "app_fault_diag.h"
+
+#include "main.h"
+#include "app_datalog.h"
+#include "mc_config.h"
+#include "drive_parameters.h"
+#include "fixpmath.h"
+
+#include "stm32g4xx_ll_comp.h"
+#include "stm32g4xx_ll_gpio.h"
+
+#include <stdint.h>
+#include <stdio.h>
+
+/*
+ * Le break TIM8 (MC_OVER_CURR, 0x0040) regroupe deux sources :
+ *  - BKIN externe PB7, active à l'état bas : ligne défaut de la carte
+ *    STDES-LVHP01 / driver L6491 ;
+ *  - BKIN interne COMP4/6/7 (phases U/V/W) contre le seuil DAC (~110 A).
+ * Le MCSDK ne dit pas laquelle a déclenché : on lit leur état dans l'IRQ
+ * break, puis on garde les 2 ms de courants de phase qui précèdent.
+ */
+#define APP_FAULT_DIAG_BKIN_PORT             GPIOB
+#define APP_FAULT_DIAG_BKIN_PIN              LL_GPIO_PIN_7
+#define APP_FAULT_DIAG_COMP_U                0x01U
+#define APP_FAULT_DIAG_COMP_V                0x02U
+#define APP_FAULT_DIAG_COMP_W                0x04U
+/* Pic récent : deux fenêtres de 10 ms alternées (160 périodes FOC). */
+#define APP_FAULT_DIAG_PEAK_BUCKET_CYCLES    160U
+#define APP_FAULT_DIAG_TRACE_PER_LINE        8U
+#define APP_FAULT_DIAG_TRACE_LINES           (APP_FAULT_DIAG_TRACE_LEN / APP_FAULT_DIAG_TRACE_PER_LINE)
+#define APP_FAULT_DIAG_LINE_COUNT            (1U + APP_FAULT_DIAG_TRACE_LINES)
+#define APP_FAULT_DIAG_LINE_SIZE             320U
+
+typedef struct
+{
+  fixp30_t u;
+  fixp30_t v;
+  fixp30_t w;
+  fixp30_t vbus;
+} AppFaultDiagSample_t;
+
+static volatile AppFaultDiagSample_t diag_trace[APP_FAULT_DIAG_TRACE_LEN];
+static volatile uint32_t diag_trace_head = 0U;
+static volatile uint32_t diag_trace_count = 0U;
+
+static volatile fixp30_t diag_peak_run_pu = 0;
+static volatile fixp30_t diag_peak_bucket_pu[2] = { 0, 0 };
+static volatile uint32_t diag_peak_bucket_cycles = 0U;
+static volatile uint32_t diag_peak_bucket_index = 0U;
+
+static volatile bool diag_break_latched = false;
+static volatile uint32_t diag_break_tick_ms = 0U;
+static volatile uint32_t diag_break_irq_count = 0U;
+static volatile uint32_t diag_break_tim_sr = 0U;
+static volatile bool diag_break_bkin_low = false;
+static volatile uint32_t diag_break_comp_mask = 0U;
+static volatile fixp30_t diag_break_peak_recent_pu = 0;
+
+static char diag_lines[APP_FAULT_DIAG_LINE_COUNT][APP_FAULT_DIAG_LINE_SIZE];
+static uint32_t diag_line_count = 0U;
+static uint32_t diag_line_next = 0U;
+
+static fixp30_t AppFaultDiag_AbsPu(fixp30_t value)
+{
+  return (value < 0) ? -value : value;
+}
+
+static long AppFaultDiag_CurrentDeciAmps(fixp30_t value_pu)
+{
+  return (long)(FIXP30_toF(value_pu) * CURRENT_SCALE * 10.0f);
+}
+
+static long AppFaultDiag_VoltageDeciVolts(fixp30_t value_pu)
+{
+  return (long)(FIXP30_toF(value_pu) * VOLTAGE_SCALE * 10.0f);
+}
+
+static bool AppFaultDiag_BkinIsLow(void)
+{
+  return LL_GPIO_IsInputPinSet(APP_FAULT_DIAG_BKIN_PORT, APP_FAULT_DIAG_BKIN_PIN) == 0U;
+}
+
+static uint32_t AppFaultDiag_ReadCompMask(void)
+{
+  uint32_t mask = 0U;
+
+  /* Polarité non inversée : sortie haute = courant au-dessus du seuil. */
+  if (LL_COMP_ReadOutputLevel(COMP4) == LL_COMP_OUTPUT_LEVEL_HIGH)
+  {
+    mask |= APP_FAULT_DIAG_COMP_U;
+  }
+  if (LL_COMP_ReadOutputLevel(COMP6) == LL_COMP_OUTPUT_LEVEL_HIGH)
+  {
+    mask |= APP_FAULT_DIAG_COMP_V;
+  }
+  if (LL_COMP_ReadOutputLevel(COMP7) == LL_COMP_OUTPUT_LEVEL_HIGH)
+  {
+    mask |= APP_FAULT_DIAG_COMP_W;
+  }
+  return mask;
+}
+
+void AppFaultDiag_Arm(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  diag_trace_head = 0U;
+  diag_trace_count = 0U;
+  diag_peak_run_pu = 0;
+  diag_peak_bucket_pu[0] = 0;
+  diag_peak_bucket_pu[1] = 0;
+  diag_peak_bucket_cycles = 0U;
+  diag_break_latched = false;
+  diag_break_irq_count = 0U;
+  diag_break_tim_sr = 0U;
+  diag_break_bkin_low = false;
+  diag_break_comp_mask = 0U;
+  diag_break_peak_recent_pu = 0;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+  diag_line_count = 0U;
+  diag_line_next = 0U;
+}
+
+void AppFaultDiag_OnHighFrequencyTask(void)
+{
+  const Currents_Irst_t *current = &PWM_Handle_M1._Super.Irst_in_pu;
+  uint32_t head;
+  uint32_t bucket;
+  fixp30_t peak;
+  fixp30_t abs_v;
+  fixp30_t abs_w;
+
+  /* Trace figée à l'instant de la coupure. */
+  if (diag_break_latched)
+  {
+    return;
+  }
+
+  head = diag_trace_head;
+  diag_trace[head].u = current->R;
+  diag_trace[head].v = current->S;
+  diag_trace[head].w = current->T;
+  diag_trace[head].vbus = VBus_M1.Udcbus_in_pu;
+  diag_trace_head = (head + 1U) % APP_FAULT_DIAG_TRACE_LEN;
+  if (diag_trace_count < APP_FAULT_DIAG_TRACE_LEN)
+  {
+    diag_trace_count++;
+  }
+
+  peak = AppFaultDiag_AbsPu(current->R);
+  abs_v = AppFaultDiag_AbsPu(current->S);
+  abs_w = AppFaultDiag_AbsPu(current->T);
+  if (abs_v > peak)
+  {
+    peak = abs_v;
+  }
+  if (abs_w > peak)
+  {
+    peak = abs_w;
+  }
+  if (peak > diag_peak_run_pu)
+  {
+    diag_peak_run_pu = peak;
+  }
+
+  if (++diag_peak_bucket_cycles >= APP_FAULT_DIAG_PEAK_BUCKET_CYCLES)
+  {
+    diag_peak_bucket_cycles = 0U;
+    diag_peak_bucket_index ^= 1U;
+    diag_peak_bucket_pu[diag_peak_bucket_index] = 0;
+  }
+  bucket = diag_peak_bucket_index;
+  if (peak > diag_peak_bucket_pu[bucket])
+  {
+    diag_peak_bucket_pu[bucket] = peak;
+  }
+}
+
+void AppFaultDiag_OnBreakIrq(void)
+{
+  fixp30_t recent;
+
+  diag_break_irq_count++;
+  if (diag_break_latched)
+  {
+    return;
+  }
+  /* Lecture immédiate : une impulsion courte peut déjà être retombée. */
+  diag_break_tim_sr = TIM8->SR;
+  diag_break_bkin_low = AppFaultDiag_BkinIsLow();
+  diag_break_comp_mask = AppFaultDiag_ReadCompMask();
+  diag_break_tick_ms = HAL_GetTick();
+  recent = diag_peak_bucket_pu[0];
+  if (diag_peak_bucket_pu[1] > recent)
+  {
+    recent = diag_peak_bucket_pu[1];
+  }
+  diag_break_peak_recent_pu = recent;
+  diag_break_latched = true;
+}
+
+void AppFaultDiag_PrepareReport(void)
+{
+  bool latched = diag_break_latched;
+  uint32_t count = diag_trace_count;
+  uint32_t oldest = (diag_trace_head + APP_FAULT_DIAG_TRACE_LEN - count) % APP_FAULT_DIAG_TRACE_LEN;
+  fixp30_t recent = latched ? diag_break_peak_recent_pu
+                            : ((diag_peak_bucket_pu[0] > diag_peak_bucket_pu[1])
+                               ? diag_peak_bucket_pu[0] : diag_peak_bucket_pu[1]);
+  uint32_t line;
+
+  /* Une trace non figée continue de bouger : on ne l'envoie que si le break l'a gelée. */
+  if (!latched)
+  {
+    count = 0U;
+  }
+
+  (void)snprintf(diag_lines[0], APP_FAULT_DIAG_LINE_SIZE,
+    "#FAULT_DIAG,break=%u,t_break_ms=%lu,t_now_ms=%lu,irq_count=%lu,tim_sr=0x%04lX,"
+    "bkin_low=%u,comp=0x%lX,bkin_now_low=%u,comp_now=0x%lX,"
+    "peak_run_da=%ld,peak_recent_da=%ld,ocp_da=%ld,vbus_dv=%ld,"
+    "trace_n=%lu,trace_period_us=%lu\r\n",
+    latched ? 1U : 0U,
+    (unsigned long)diag_break_tick_ms,
+    (unsigned long)HAL_GetTick(),
+    (unsigned long)diag_break_irq_count,
+    (unsigned long)(diag_break_tim_sr & 0xFFFFU),
+    diag_break_bkin_low ? 1U : 0U,
+    (unsigned long)diag_break_comp_mask,
+    AppFaultDiag_BkinIsLow() ? 1U : 0U,
+    (unsigned long)AppFaultDiag_ReadCompMask(),
+    AppFaultDiag_CurrentDeciAmps(diag_peak_run_pu),
+    AppFaultDiag_CurrentDeciAmps(recent),
+    (long)(APP_FAULT_DIAG_OCP_THRESHOLD_A * 10.0f),
+    AppFaultDiag_VoltageDeciVolts(VBus_M1.Udcbus_in_pu),
+    (unsigned long)count,
+    (unsigned long)(1000000UL / ISR_FREQUENCY_HZ));
+
+  /* #FAULT_TRACE,<index du 1er échantillon, -1 = dernier avant la coupure>,
+   * puis u:v:w:vbus en 0,1 A et 0,1 V, du plus ancien au plus récent. */
+  diag_line_count = 1U;
+  for (line = 0U; (line * APP_FAULT_DIAG_TRACE_PER_LINE) < count; line++)
+  {
+    char *text = diag_lines[diag_line_count];
+    size_t used;
+    uint32_t first = line * APP_FAULT_DIAG_TRACE_PER_LINE;
+    uint32_t k;
+    int written = snprintf(text, APP_FAULT_DIAG_LINE_SIZE, "#FAULT_TRACE,%ld",
+                           (long)first - (long)count);
+
+    used = (written > 0) ? (size_t)written : 0U;
+    for (k = first; (k < count) && (k < first + APP_FAULT_DIAG_TRACE_PER_LINE); k++)
+    {
+      uint32_t index = (oldest + k) % APP_FAULT_DIAG_TRACE_LEN;
+
+      written = snprintf(text + used, APP_FAULT_DIAG_LINE_SIZE - used, ",%ld:%ld:%ld:%ld",
+                         AppFaultDiag_CurrentDeciAmps(diag_trace[index].u),
+                         AppFaultDiag_CurrentDeciAmps(diag_trace[index].v),
+                         AppFaultDiag_CurrentDeciAmps(diag_trace[index].w),
+                         AppFaultDiag_VoltageDeciVolts(diag_trace[index].vbus));
+      if ((written <= 0) || ((size_t)written >= APP_FAULT_DIAG_LINE_SIZE - used))
+      {
+        break;
+      }
+      used += (size_t)written;
+    }
+    (void)snprintf(text + used, APP_FAULT_DIAG_LINE_SIZE - used, "\r\n");
+    diag_line_count++;
+  }
+  diag_line_next = 0U;
+}
+
+bool AppFaultDiag_SendPendingReport(void)
+{
+  while (diag_line_next < diag_line_count)
+  {
+    if (!AppDatalog_SendText(diag_lines[diag_line_next]))
+    {
+      return false;
+    }
+    diag_line_next++;
+  }
+  return true;
+}
