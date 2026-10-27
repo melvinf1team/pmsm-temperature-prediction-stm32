@@ -82,6 +82,10 @@ def load_module(name: str, path: Path):
 
 
 def load_dashboard_module():
+    # The dashboard imports fault_diagnostics.py from its own folder.
+    datalogging_dir = str(PROJECT_ROOT / "datalogging")
+    if datalogging_dir not in sys.path:
+        sys.path.insert(0, datalogging_dir)
     return load_module(
         "motor_datalog_gui_dashboard",
         PROJECT_ROOT / "datalogging" / "motor_datalog_gui_dashboard.py",

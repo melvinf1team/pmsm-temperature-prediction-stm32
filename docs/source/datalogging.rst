@@ -241,10 +241,13 @@ Fault source diagnostic
 A motor stop is shown in the UART log as `ERROR: Motor stopped`, decoded from
 `#FAULT`. When the mask is `0x0040`, the MCSDK only reports a TIM8 break, which
 is either the power-board fault line on `PB7` or a phase comparator at about
-110 A. The dashboard collects the `#FAULT_DIAG` and `#FAULT_TRACE` lines that
-the acquisition firmware sends next (see :doc:`firmware`) and
-`diagnose_fault_source` turns them into a verdict, printed in the log in
-yellow as `FAULT SOURCE → ...`, followed by its evidence lines.
+110 A. When the occurred mask is `0x0001` (`MC_DURATION`), the FOC wrote its
+duty cycles too late: a CPU timing problem, not an electrical one. The
+dashboard collects the `#FAULT_DIAG` and `#FAULT_TRACE` lines that the
+firmware sends next (see :doc:`firmware`) and `diagnose_fault_source`, in
+`datalogging/fault_diagnostics.py`, turns them into a verdict, printed in the
+log in yellow as `FAULT SOURCE → ...`, followed by its evidence lines. The
+validation interface uses the same module.
 
 .. csv-table:: Verdicts
    :header: "Verdict", "Condition", "What to check"
@@ -255,11 +258,15 @@ yellow as `FAULT SOURCE → ...`, followed by its evidence lines.
    "Probable real overcurrent", "Both sources already released, but the sampled current was at least 80% of the threshold", "Treated as a real overcurrent"
    "Probable glitch (noise on the break inputs)", "Both sources released and the last sample plus the largest possible rise in one FOC period (`Vbus / Ls x period`, about 66 A) stays under the threshold", "Grounding and routing of PB7 and the comparator inputs; filter of the break input"
    "Undetermined break source", "Sources released and no trace received", "Capture again, or measure with a current probe"
-   "No hardware break", "`break=0`: another protection stopped the motor", "Use the decoded `#FAULT` reason"
+   "FOC overrun: interrupt started late (CPU timing, not electrical)", "`MC_DURATION` and the overrun period started at least 2 us late", "Code that masks interrupts in the main loop (1-Wire, bit-banged buses, flash writes)"
+   "FOC overrun: computation too long (CPU timing, not electrical)", "`MC_DURATION` and the overrun period started on time", "Work done in `TSK_HighFrequencyTask`"
+   "FOC overrun (CPU timing, not electrical)", "`MC_DURATION` from a firmware without FOC timing, or without a captured period", "Flash the current firmware to get the timing"
+   "No hardware break", "`break=0` and no `MC_DURATION`: another protection stopped the motor", "Use the decoded `#FAULT` reason"
 
 The evidence lines also report a Vbus above 19.44 V (regenerative braking
-charging the bus), a Vbus below 10 V (possible driver undervoltage), and a
-break interrupt that ran several times. If the trace is incomplete after
+charging the bus), a Vbus below 10 V (possible driver undervoltage), a
+break interrupt that ran several times, the longest FOC run and largest FOC
+start delay since the start, and dropped DS18B20 1-Wire slots. If the trace is incomplete after
 1.5 s, the verdict is given with the received samples and says so.
 
 The status strip and the motor state keep the source first, for example
@@ -281,6 +288,9 @@ Troubleshooting
 * `Motor error` with `mc_now=0x0040`: read the `FAULT SOURCE` line below it.
   No such line means the board runs an older acquisition firmware without
   `#FAULT_DIAG`; rebuild and flash it.
+* `Motor error` with `mc_occurred=0x0001`: an FOC overrun, not an
+  overcurrent. The `FAULT SOURCE` line says whether the FOC started late or
+  ran too long; the evidence gives both times in microseconds.
 * A `Probable glitch` verdict does not mean the motor is healthy. A
   current spike shorter than the 62 us FOC period is not in the trace; compare
   with a current probe on the scope if the fault repeats.

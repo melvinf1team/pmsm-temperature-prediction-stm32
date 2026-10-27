@@ -110,6 +110,12 @@ Demo mode without a board:
 Close the dashboard, Motor Pilot, and any serial terminal before connecting:
 a COM port can belong to only one application at a time.
 
+If the firmware stops the motor, its `#FAULT` line sets the motor indicator
+to **Motor · fault stop** and the header status to red. The source of the stop
+follows from `#FAULT_DIAG` (for example `FOC overrun: interrupt started late`)
+and is saved with the raw lines in `validation_ia_..._fault_HHMMSS.txt` next to
+the session CSV. Start a profile again to restart the motor.
+
 On Windows, a transient `ClearCommError` is retried up to 100 times, with a
 150 ms pause between attempts. The recovery window is therefore about
 15 seconds, excluding the duration of serial operations. Any other error
@@ -171,8 +177,9 @@ The unit tests need neither a board nor a graphical window:
 ```
 
 They cover profile-command validation, control acknowledgments, two- and
-three-field telemetry parsing, `ClearCommError` recovery, and immediate
-flushing of a CSV sample.
+three-field telemetry parsing, `ClearCommError` recovery, immediate
+flushing of a CSV sample, and the display and report of a firmware motor stop.
+`tests/unit/test_fault_diagnostics.py` checks the shared fault decoding.
 They do not validate the visual rendering, the physical COM port, or the
 model's statistical performance.
 

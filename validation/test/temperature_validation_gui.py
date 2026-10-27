@@ -1,4 +1,10 @@
-"""Real-time dashboard for comparing D6T measurements with NanoEdge AI predictions."""
+"""Real-time dashboard for comparing D6T measurements with NanoEdge AI predictions.
+
+When the firmware stops the motor, it sends ``#FAULT``, ``#FAULT_DIAG`` and
+``#FAULT_TRACE`` lines. The interface shows the stop in the header and the
+motor indicator, identifies its source with ``datalogging/fault_diagnostics.py``
+(shared with the acquisition dashboard) and saves a ``*_fault_*.txt`` report.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ import argparse
 import csv
 import math
 import queue
+import sys
 import threading
 import time
 from collections import deque
@@ -23,6 +30,17 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 import serial
 from serial.tools import list_ports
+
+DATALOGGING_DIRECTORY = Path(__file__).resolve().parents[2] / "datalogging"
+if str(DATALOGGING_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(DATALOGGING_DIRECTORY))
+
+from fault_diagnostics import (  # noqa: E402  (needs the path above)
+    FAULT_REPORT_TIMEOUT_MS,
+    FaultReportCollector,
+    describe_motor_fault,
+    format_fault_report,
+)
 
 
 BAUD_RATE = 115200
@@ -392,6 +410,11 @@ class TemperatureValidationApp(tk.Tk):
         self.pending_control_command: str | None = None
         self.control_command_error: str | None = None
         self.gui_started_motor = False
+        # Firmware motor stop: header text, verdict collection and report file.
+        self.motor_fault_text: str | None = None
+        self.fault_collector = FaultReportCollector()
+        self.fault_report_after_id: str | None = None
+        self.last_fault_report_path: Path | None = None
         self.status_var = tk.StringVar(value="Ready to connect the board")
         self.serial_state_var = tk.StringVar(value="Serial · offline")
         self.data_state_var = tk.StringVar(value="Data · waiting")
@@ -1637,6 +1660,10 @@ class TemperatureValidationApp(tk.Tk):
             context = f"Firmware error: {self.control_command_error}"
         elif self.pending_control_command is not None:
             context = "Command sent. Waiting for firmware acknowledgment…"
+        elif self.motor_fault_text is not None:
+            context = f"{self.motor_fault_text}. Start a profile again to restart the motor."
+            if self.last_fault_report_path is not None:
+                context += f" Report: {self.last_fault_report_path.name}"
         elif self.active_profile_token is not None:
             active_profile = PROFILE_LABELS_BY_TOKEN.get(self.active_profile_token)
             if active_profile is not None:
@@ -1695,6 +1722,8 @@ class TemperatureValidationApp(tk.Tk):
             self.set_state_indicator("motor", "Motor · command error", COLORS["red"])
         elif self.pending_control_command == "STOP":
             self.set_state_indicator("motor", "Motor · stop requested", COLORS["orange"])
+        elif self.motor_fault_text is not None and self.pending_control_command is None:
+            self.set_state_indicator("motor", "Motor · fault stop", COLORS["red"])
         elif self.pending_control_command is not None:
             self.set_state_indicator("motor", "Motor · starting…", COLORS["orange"])
         elif self.active_profile_token is not None:
@@ -1832,6 +1861,9 @@ class TemperatureValidationApp(tk.Tk):
         self.pending_control_command = None
         self.control_command_error = None
         self.gui_started_motor = False
+        self.cancel_fault_report_timer()
+        self.fault_collector.reset()
+        self.motor_fault_text = None
         self.connection_generation += 1
         self.reader_stop_event.set()
         self.stop_automatic_export()
@@ -1909,6 +1941,9 @@ class TemperatureValidationApp(tk.Tk):
 
     def handle_control_response(self, control_line: str) -> None:
         """Reflect PROFILE/STOP acknowledgements and firmware errors in the UI."""
+        if control_line.startswith("#FAULT"):
+            self.handle_fault_line(control_line)
+            return
         response_kind, token = parse_control_response(control_line)
         if response_kind == "error":
             self.pending_control_command = None
@@ -1920,6 +1955,7 @@ class TemperatureValidationApp(tk.Tk):
         if response_kind == "profile_ack" and token is not None:
             self.pending_control_command = None
             self.control_command_error = None
+            self.motor_fault_text = None
             self.active_profile_token = token
             self.gui_started_motor = True
             self.update_profile_controls_state()
@@ -1942,6 +1978,74 @@ class TemperatureValidationApp(tk.Tk):
             self.control_command_error = None
             self.update_profile_controls_state()
             self.set_status(f"Firmware: {control_line}", COLORS["blue"])
+
+    def handle_fault_line(self, line: str) -> None:
+        """Show a firmware motor stop, then report its source once diagnosed.
+
+        ``#FAULT`` stops the motor state at once; the verdict follows when
+        ``#FAULT_DIAG`` and its trace arrived, or after
+        ``FAULT_REPORT_TIMEOUT_MS`` with whatever was received.
+        """
+        if line.startswith("#FAULT,"):
+            self.cancel_fault_report_timer()
+            self.fault_collector.feed(line)
+            reason, _detail = describe_motor_fault(line)
+            self.pending_control_command = None
+            self.control_command_error = None
+            self.active_profile_token = None
+            self.gui_started_motor = False
+            self.motor_fault_text = f"Motor stopped by the firmware · {reason}"
+            self.last_fault_report_path = None
+            self.update_profile_controls_state()
+            self.set_status(self.motor_fault_text, COLORS["red"])
+            self.fault_report_after_id = self.after(FAULT_REPORT_TIMEOUT_MS, self.report_fault_source)
+            return
+        try:
+            complete = self.fault_collector.feed(line)
+        except ValueError:
+            return
+        if complete:
+            self.report_fault_source()
+
+    def cancel_fault_report_timer(self) -> None:
+        if self.fault_report_after_id is not None:
+            try:
+                self.after_cancel(self.fault_report_after_id)
+            except tk.TclError:
+                pass
+            self.fault_report_after_id = None
+
+    def report_fault_source(self) -> None:
+        """Show the stop source in the header and save the evidence."""
+        self.cancel_fault_report_timer()
+        if not self.fault_collector.active:
+            return
+        verdict, details = self.fault_collector.diagnose()
+        fault_line = self.fault_collector.fault_line
+        reason = describe_motor_fault(fault_line)[0] if fault_line else "UNKNOWN"
+        self.last_fault_report_path = self.save_fault_report(verdict, details)
+        self.fault_collector.reset()
+        self.motor_fault_text = f"Motor stopped · {reason} · {verdict}"
+        self.update_profile_controls_state()
+        self.set_status(self.motor_fault_text, COLORS["red"])
+
+    def save_fault_report(self, verdict: str, details: list[str]) -> Path | None:
+        """Write the verdict and raw firmware lines next to the session CSV."""
+        now = datetime.now()
+        if self.automatic_export is not None:
+            path = self.automatic_export.path.with_name(
+                f"{self.automatic_export.path.stem}_fault_{now:%H%M%S}.txt"
+            )
+        else:
+            path = VALIDATION_DIRECTORY / f"fault_{now:%Y%m%d_%H%M%S}.txt"
+        try:
+            path.write_text(
+                format_fault_report(verdict, details, self.fault_collector.raw_lines(), now),
+                encoding="utf-8",
+            )
+        except OSError:
+            return None
+        return path
 
     def process_events(self) -> None:
         try:
@@ -2041,6 +2145,7 @@ class TemperatureValidationApp(tk.Tk):
             stream_was_stale
             and self.control_command_error is None
             and self.pending_control_command is None
+            and self.motor_fault_text is None
         ):
             if self.active_profile_token is None:
                 self.set_status("Telemetry stream active", COLORS["green"])
@@ -2242,6 +2347,8 @@ class TemperatureValidationApp(tk.Tk):
                 self.set_status(f"Firmware: {self.control_command_error}", COLORS["red"])
             elif self.pending_control_command is not None:
                 self.set_status("Command sent · waiting for firmware ACK", COLORS["orange"])
+            elif self.motor_fault_text is not None:
+                self.set_status(self.motor_fault_text, COLORS["red"])
             elif self.last_sample_monotonic is None:
                 self.set_status("Board connected · waiting for data", COLORS["orange"])
             elif (time.monotonic() - self.last_sample_monotonic) > STALE_DATA_SECONDS:

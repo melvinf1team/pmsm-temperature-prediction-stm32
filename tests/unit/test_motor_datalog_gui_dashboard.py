@@ -38,6 +38,7 @@ from motor_datalog_gui_dashboard import (
     describe_motor_fault,
     diagnose_fault_source,
     FAULT_VERDICT_BOARD,
+    FAULT_VERDICT_FOC_LATE,
     FAULT_VERDICT_COMPARATOR,
     FAULT_VERDICT_GLITCH,
     FAULT_VERDICT_NO_BREAK,
@@ -549,6 +550,7 @@ class FaultSourceTests(unittest.TestCase):
         app.fault_trace_samples = []
         app.fault_trace_expected = 0
         app.fault_report_after_id = None
+        app.last_fault_line = ""
         app.motor_fault_message = "MCSDK_FAULT: protection fault"
         app.after = mock.Mock(return_value="after#1")
         app.after_cancel = mock.Mock()
@@ -566,6 +568,31 @@ class FaultSourceTests(unittest.TestCase):
         self.assertTrue(app.motor_fault_message.startswith(
             f"MCSDK_FAULT — source: {FAULT_VERDICT_GLITCH}: "))
         self.assertEqual(app.fault_diag_line, "")
+
+    def test_dashboard_names_an_foc_overrun_from_the_fault_masks(self) -> None:
+        app = object.__new__(MotorDatalogGui)
+        app.fault_diag_line = ""
+        app.fault_trace_lines = []
+        app.fault_trace_samples = []
+        app.fault_trace_expected = 0
+        app.fault_report_after_id = None
+        app.last_fault_line = "#FAULT,MCSDK_FAULT,mc_now=0x0000,mc_occurred=0x0001"
+        app.motor_fault_message = "MCSDK_FAULT: protection fault"
+        app.after = mock.Mock()
+        app.after_cancel = mock.Mock()
+        app.log = mock.Mock()
+        app.save_fault_report = mock.Mock()
+        app.show_running_status = mock.Mock()
+
+        app.handle_firmware_event(fault_diag(**{
+            "break": "0", "trace_n": "0", "foc_period_ns": "62494", "foc_max_ns": "31000",
+            "foc_late_max_ns": "13200", "foc_overruns": "1", "foc_overrun_ns": "30500",
+            "foc_overrun_late_ns": "13200", "quiet_timeouts": "0"}))
+
+        app.save_fault_report.assert_called_once()
+        self.assertEqual(app.save_fault_report.call_args.args[0], FAULT_VERDICT_FOC_LATE)
+        self.assertTrue(app.motor_fault_message.startswith(
+            f"MCSDK_FAULT — source: {FAULT_VERDICT_FOC_LATE}: "))
 
 
 class SessionPathTests(unittest.TestCase):

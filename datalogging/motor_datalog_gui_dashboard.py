@@ -29,13 +29,16 @@ The expected firmware serial protocol is line-oriented text::
     #CSV_HEADER,<column_1>,<column_2>,...
     #PROFILE,START,<TOKEN>,...
     #FAULT,<reason>,t_ms=...,speed_mrpm=...,speed_limit_rpm=...,iq_ma=...,id_ma=...,hard_ma=...,load_ma=...,mc_now=0x...,mc_occurred=0x...
-    #FAULT_DIAG,break=<0|1>,bkin_low=...,comp=0x...,peak_run_da=...,peak_recent_da=...,ocp_da=...,trace_n=...,...
+    #FAULT_DIAG,break=<0|1>,bkin_low=...,comp=0x...,peak_run_da=...,ocp_da=...,trace_n=...,foc_max_ns=...,foc_late_max_ns=...,...
     #FAULT_TRACE,<first index>,<u>:<v>:<w>:<vbus>,...   (0.1 A / 0.1 V, last 2 ms before the break)
     DATA,<value_1>,<value_2>,...
 
 After a TIM8 break (mc_now=0x0040), the dashboard combines #FAULT_DIAG and
 #FAULT_TRACE to tell a power-board fault line (PB7), a real comparator
-overcurrent and a short glitch apart, logs the verdict and saves a report.
+overcurrent and a short glitch apart. After an FOC overrun (MC_DURATION,
+0x0001), the FOC timing fields tell a delayed interrupt from a computation that
+is too long. The verdict is logged and saved in a report; the decoding lives in
+``fault_diagnostics.py``, shared with the validation interface.
 """
 
 import csv
@@ -57,6 +60,24 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 import configargparse
 import serial
 import serial.tools.list_ports
+
+from fault_diagnostics import (
+    FAULT_VERDICT_BOARD,
+    FAULT_VERDICT_COMPARATOR,
+    FAULT_VERDICT_FOC_LATE,
+    FAULT_VERDICT_FOC_OVERRUN,
+    FAULT_VERDICT_FOC_SLOW,
+    FAULT_VERDICT_GLITCH,
+    FAULT_VERDICT_NO_BREAK,
+    FAULT_VERDICT_PROBABLE_OCP,
+    FAULT_VERDICT_UNDETERMINED,
+    MCSDK_FAULT_BITS,
+    MOTOR_FAULT_DESCRIPTIONS,
+    describe_motor_fault,
+    diagnose_fault_source,
+    format_fault_report,
+    parse_fault_trace,
+)
 
 try:
     import matplotlib
@@ -91,201 +112,6 @@ MAX_DATALOG_MS = 10000
 MAX_DS18B20_MS = 10000
 MIN_LOAD_SETPOINT_A = 0.05
 MAX_LOAD_SETPOINT_A = 0.25
-
-MOTOR_FAULT_DESCRIPTIONS = {
-    "OVERSPEED": "Measured speed exceeded the shutdown threshold.",
-    "HARD_OVERCURRENT": "Measured Id/Iq current exceeded the hard-stop limit.",
-    "MCSDK_FAULT": "The motor-control SDK reported a protection fault.",
-    "MCSDK_STOPPED": "MCSDK unexpectedly left the running state.",
-    "D6T_OVERTEMP": "D6T motor temperature exceeded 70 C.",
-    "D6T_UNAVAILABLE": "D6T motor temperature is missing, invalid or stale.",
-    "CUSTOM_SPEED_TIMEOUT": "Speed failed to follow the reference for 5 seconds.",
-    "CUSTOM_MOTOR_STOPPED": "MCSDK left RUN during the Custom startup sequence.",
-    "STARTUP_TIMEOUT": "MCSDK did not reach RUN within the startup timeout.",
-    "START_REJECTED": "MCSDK rejected the start command.",
-    "MCSDK_NOT_IDLE": "MCSDK was not ready to accept a start command.",
-    "LOAD_DAC": "The TB-200S load command could not be written to the DAC.",
-    "NONFINITE_SPEED": "The measured motor speed is invalid.",
-    "NONFINITE_CURRENT": "The measured motor current is invalid.",
-}
-MCSDK_FAULT_BITS = {
-    0x0001: "FOC duration", 0x0002: "overvoltage", 0x0004: "undervoltage",
-    0x0008: "power-board overtemperature", 0x0010: "startup failure",
-    0x0020: "speed feedback", 0x0040: "TIM8 break: comparator OCP or power-board fault line",
-    0x0080: "software error", 0x0100: "current-sampling fault",
-    0x0200: "software overcurrent", 0x0400: "driver protection",
-}
-
-
-def describe_motor_fault(line):
-    """Decode both legacy #FAULT lines and detailed firmware stop snapshots."""
-    parts = line.split(",")
-    reason = parts[1].strip() if len(parts) > 1 and parts[1].strip() else "UNKNOWN"
-    fields = dict(part.split("=", 1) for part in parts[2:] if "=" in part)
-    detail = [MOTOR_FAULT_DESCRIPTIONS.get(reason, "The firmware stopped the motor.")]
-    for key, label, scale, unit in (
-        ("speed_mrpm", "speed", 1000.0, "rpm"),
-        ("speed_limit_rpm", "shutdown speed", 1.0, "rpm"),
-        ("iq_ma", "Iq", 1000.0, "A"), ("id_ma", "Id", 1000.0, "A"),
-        ("hard_ma", "hard current limit", 1000.0, "A"),
-        ("load_ma", "brake command", 1000.0, "A"),
-    ):
-        try:
-            value = float(fields[key]) / scale
-            if math.isfinite(value):
-                detail.append(f"{label} {value:.3f} {unit}")
-        except (KeyError, ValueError):
-            pass
-    for key in ("mc_now", "mc_occurred"):
-        try:
-            mask = int(fields[key], 0)
-        except (KeyError, ValueError):
-            continue
-        if mask:
-            names = [name for bit, name in MCSDK_FAULT_BITS.items() if mask & bit]
-            unknown = mask & ~sum(MCSDK_FAULT_BITS)
-            if unknown:
-                names.append(f"unknown bits 0x{unknown:04X}")
-            detail.append(f"{key}=0x{mask:04X} ({', '.join(names)})")
-    return reason, " | ".join(detail)
-
-
-# Hardware-break diagnostics (app_fault_diag.c). Board values come from the
-# Workbench project: OCP threshold, LS in pmsm_motor_parameters.h, regen limit.
-OCP_THRESHOLD_FALLBACK_A = 110.0
-MOTOR_LS_H = 17e-6
-VBUS_REGEN_HIGH_V = 19.44
-VBUS_SAG_V = 10.0
-BREAK_PROBABLE_OCP_RATIO = 0.80
-COMPARATOR_PHASES = ((0x1, "U (COMP4)"), (0x2, "V (COMP6)"), (0x4, "W (COMP7)"))
-TIM_SR_BREAK_FLAGS = ((0x0080, "BIF"), (0x0100, "B2IF"), (0x2000, "SBIF"))
-FAULT_VERDICT_BOARD = "Power-board fault line (PB7)"
-FAULT_VERDICT_COMPARATOR = "Real phase overcurrent (comparator)"
-FAULT_VERDICT_PROBABLE_OCP = "Probable real overcurrent"
-FAULT_VERDICT_GLITCH = "Probable glitch (noise on the break inputs)"
-FAULT_VERDICT_UNDETERMINED = "Undetermined break source"
-FAULT_VERDICT_NO_BREAK = "No hardware break"
-
-
-def parse_fault_trace(line):
-    """Parse ``#FAULT_TRACE,<first>,u:v:w:vbus,...`` into amps and volts.
-
-    Returns:
-        tuple[int, list[tuple[float, float, float, float]]]: Index of the first
-        sample relative to the break (-1 is the last one) and the samples.
-    """
-    parts = line.strip().split(",")
-    first = int(parts[1])
-    samples = []
-    for item in parts[2:]:
-        values = item.split(":")
-        if len(values) != 4:
-            raise ValueError(f"Invalid trace sample: {item}")
-        samples.append(tuple(int(value) / 10.0 for value in values))
-    return first, samples
-
-
-def _mask_names(mask, names):
-    return ", ".join(name for bit, name in names if mask & bit) or "none"
-
-
-def diagnose_fault_source(diag_line, trace=()):
-    """Identify which protection cut the PWM from ``#FAULT_DIAG`` and its trace.
-
-    The MCSDK reports both break sources as MC_OVER_CURR. The firmware reads
-    them at the start of the break IRQ: the external BKIN pin PB7 (power-board
-    fault line, active low) and the COMP4/6/7 outputs (phase overcurrent). If
-    both are already released, the phase currents sampled every FOC period
-    decide: with ``LS`` and Vbus, the current cannot rise by more than
-    ``Vbus / LS * period`` between two samples, so a last sample far below the
-    threshold rules out a real overcurrent.
-
-    Args:
-        diag_line: Raw ``#FAULT_DIAG`` line.
-        trace: ``(u, v, w, vbus)`` samples, oldest first, in A and V.
-
-    Returns:
-        tuple[str, list[str]]: Verdict label and the evidence lines.
-    """
-    fields = dict(part.split("=", 1) for part in diag_line.strip().split(",")[1:] if "=" in part)
-
-    def number(key, default=0.0, scale=1.0):
-        try:
-            return int(fields[key], 0) / scale
-        except (KeyError, ValueError):
-            return default
-
-    ocp_a = number("ocp_da", OCP_THRESHOLD_FALLBACK_A * 10.0, 10.0)
-    peak_run_a = number("peak_run_da", math.nan, 10.0)
-    peak_recent_a = number("peak_recent_da", math.nan, 10.0)
-    period_us = number("trace_period_us", 62.0)
-    details = [
-        f"Phase-current peak since START {peak_run_a:.1f} A, last 20 ms {peak_recent_a:.1f} A "
-        f"(OCP threshold {ocp_a:.0f} A)."
-    ]
-    if not int(number("break")):
-        details.insert(0, "No TIM8 break captured: another protection stopped the motor.")
-        return FAULT_VERDICT_NO_BREAK, details
-
-    bkin_low = bool(number("bkin_low"))
-    comp = int(number("comp"))
-    irq_count = int(number("irq_count"))
-    tim_sr = int(number("tim_sr"))
-    details.append(
-        f"At the break IRQ: PB7 {'LOW (board fault asserted)' if bkin_low else 'high'}, "
-        f"comparators above threshold: {_mask_names(comp, COMPARATOR_PHASES)}, "
-        f"TIM8 flags: {_mask_names(tim_sr, TIM_SR_BREAK_FLAGS)}."
-    )
-    if number("bkin_now_low"):
-        details.append("PB7 is still LOW when the report is sent: the board keeps its fault asserted "
-                       "(driver supply/UVLO, board protection or wiring).")
-    if irq_count > 1:
-        details.append(f"The break IRQ fired {irq_count} times: the source chatters.")
-
-    last_peak_a = math.nan
-    max_rise_a = math.nan
-    if trace:
-        peaks = [max(abs(u), abs(v), abs(w)) for u, v, w, _ in trace]
-        vbus = [sample[3] for sample in trace]
-        last_peak_a = peaks[-1]
-        max_rise_a = max(vbus) / MOTOR_LS_H * period_us * 1e-6
-        u, v, w, _ = trace[-1]
-        details.append(
-            f"Last FOC sample before the break: U {u:.1f} A, V {v:.1f} A, W {w:.1f} A; "
-            f"max |I| over the last {len(trace) * period_us / 1000.0:.1f} ms {max(peaks):.1f} A."
-        )
-        details.append(f"Vbus over the trace: {min(vbus):.1f}-{max(vbus):.1f} V.")
-        if max(vbus) > VBUS_REGEN_HIGH_V:
-            details.append(f"Vbus exceeded {VBUS_REGEN_HIGH_V:.2f} V: regenerative braking pumped the bus.")
-        if min(vbus) < VBUS_SAG_V:
-            details.append(f"Vbus fell below {VBUS_SAG_V:.0f} V: supply sag, the driver may have hit UVLO.")
-
-    if comp:
-        verdict = FAULT_VERDICT_COMPARATOR
-        details.append(f"Phase {_mask_names(comp, COMPARATOR_PHASES)} crossed ~{ocp_a:.0f} A: "
-                       "check angle estimation, current-loop stability and speed/load steps.")
-    elif bkin_low:
-        verdict = FAULT_VERDICT_BOARD
-        details.append("The STDES-LVHP01 / L6491 fault line cut the PWM, not the MCU comparators: "
-                       "check the driver supply, board protections and the PB7 wiring.")
-    elif trace and last_peak_a + max_rise_a < ocp_a:
-        verdict = FAULT_VERDICT_GLITCH
-        details.append(
-            f"Both sources had already released and the last sample ({last_peak_a:.1f} A) could rise by at "
-            f"most ~{max_rise_a:.0f} A in one {period_us:.0f} us period: the current never reached "
-            f"{ocp_a:.0f} A. Suspect EMI on PB7/BKIN or the comparator inputs; raise the break filter "
-            "or improve wiring/grounding."
-        )
-    elif max(last_peak_a if trace else 0.0, peak_recent_a if math.isfinite(peak_recent_a) else 0.0) \
-            >= BREAK_PROBABLE_OCP_RATIO * ocp_a:
-        verdict = FAULT_VERDICT_PROBABLE_OCP
-        details.append("The source released before the IRQ read, but the sampled current was already "
-                       f"near {ocp_a:.0f} A: treat it as a real overcurrent.")
-    else:
-        verdict = FAULT_VERDICT_UNDETERMINED
-        details.append("The source released before the IRQ read and no trace allows a conclusion.")
-    return verdict, details
-
 
 ACQUISITION_MODE_MOTOR = "Motor + logging"
 ACQUISITION_MODE_IDLE = "Logging only (motor stopped)"
@@ -3877,7 +3703,8 @@ class MotorDatalogGui(tk.Tk):
         self.cancel_fault_report_timer()
         if not self.fault_diag_line:
             return
-        verdict, details = diagnose_fault_source(self.fault_diag_line, self.fault_trace_samples)
+        verdict, details = diagnose_fault_source(
+            self.fault_diag_line, self.fault_trace_samples, self.last_fault_line)
         if len(self.fault_trace_samples) < self.fault_trace_expected:
             details.append(f"Trace incomplete: {len(self.fault_trace_samples)}/{self.fault_trace_expected} samples received.")
         self.log(f"FAULT SOURCE → {verdict}", "verdict")
@@ -3899,19 +3726,11 @@ class MotorDatalogGui(tk.Tk):
             path = Path(f"{base}_fault_{now:%H%M%S}.txt")
         else:
             path = self.paths.log_dir / f"fault_{now:%Y%m%d_%H%M%S}.txt"
-        content = [
-            f"Fault report {now.isoformat(timespec='seconds')}",
-            f"Verdict: {verdict}",
-            *(f"- {line}" for line in details),
-            "",
-            "Raw firmware lines:",
-            self.last_fault_line,
-            self.fault_diag_line,
-            *self.fault_trace_lines,
-        ]
+        content = format_fault_report(
+            verdict, details, [self.last_fault_line, self.fault_diag_line, *self.fault_trace_lines], now)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("\n".join(content) + "\n", encoding="utf-8")
+            path.write_text(content, encoding="utf-8")
             self.log(f"Fault report saved: {path}")
         except OSError as exc:
             self.log(f"Fault report not saved: {exc}", "error")

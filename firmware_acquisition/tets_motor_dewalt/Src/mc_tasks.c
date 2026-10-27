@@ -51,6 +51,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_config.h"
 #include "app_fault_diag.h"
+#include "app_foc_timing.h"
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN Private define */
@@ -739,7 +740,8 @@ __weak uint8_t TSK_HighFrequencyTask(void)
   uint16_t hFOCreturn;
 
   /* USER CODE BEGIN HighFrequencyTask 0 */
-
+  AppFocTiming_OnHighFrequencyStart();
+  hFOCreturn = MC_NO_FAULTS;
   /* USER CODE END HighFrequencyTask 0 */
 
   /* Simplified controller */
@@ -758,6 +760,7 @@ __weak uint8_t TSK_HighFrequencyTask(void)
 
   /* USER CODE BEGIN HighFrequencyTask 1 */
   AppFaultDiag_OnHighFrequencyTask();
+  AppFocTiming_OnHighFrequencyEnd(hFOCreturn == MC_DURATION);
   /* USER CODE END HighFrequencyTask 1 */
 
   return M1;

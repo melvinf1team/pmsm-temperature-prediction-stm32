@@ -37,7 +37,6 @@ static int16_t d6tir_pixels_tenth[D6TIR_OBJECT_COUNT];
 static void D6TIR_DwtInit(void)
 {
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0U;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 

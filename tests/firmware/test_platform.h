@@ -82,4 +82,11 @@ void HAL_GPIO_WritePin(int, uint32_t, int);
 int HAL_GPIO_ReadPin(int, uint32_t);
 void HAL_GPIO_Init(int, GPIO_InitTypeDef *);
 
+/* FOC timing (app_foc_timing.c): TIM8 auto-reload and timer clock. */
+typedef struct { uint32_t ARR; } TestTim;
+extern TestTim *TIM8;
+static inline uint32_t LL_TIM_GetAutoReload(TestTim *t) { return t->ARR; }
+#define REGULATION_EXECUTION_RATE 1
+#define ADV_TIM_CLK_MHz 170
+
 #endif

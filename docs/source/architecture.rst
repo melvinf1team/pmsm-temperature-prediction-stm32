@@ -59,6 +59,9 @@ Application modules are in
 * `app_fault_diag.c` latches the sources of a TIM8 hardware break and the
   last 2 ms of phase currents, and sends them as `#FAULT_DIAG` and
   `#FAULT_TRACE` after `#FAULT`;
+* `app_foc_timing.c` measures the duration and start delay of every FOC
+  period for `#FAULT_DIAG`, and gives the DS18B20 driver interrupt-free
+  windows that cannot delay the FOC;
 * `app_wiring_diag.c` answers `DIAG` and `STATUS` for
   `tests/bench/check_wiring.py`;
 * `d6t_ir.c` and `ds18b20.c` isolate sensor protocols; `d6t_ir.c` also keeps

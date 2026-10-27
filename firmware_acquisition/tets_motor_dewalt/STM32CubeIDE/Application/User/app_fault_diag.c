@@ -2,6 +2,7 @@
 
 #include "main.h"
 #include "app_datalog.h"
+#include "app_foc_timing.h"
 #include "mc_config.h"
 #include "drive_parameters.h"
 #include "fixpmath.h"
@@ -30,7 +31,7 @@
 #define APP_FAULT_DIAG_TRACE_PER_LINE        8U
 #define APP_FAULT_DIAG_TRACE_LINES           (APP_FAULT_DIAG_TRACE_LEN / APP_FAULT_DIAG_TRACE_PER_LINE)
 #define APP_FAULT_DIAG_LINE_COUNT            (1U + APP_FAULT_DIAG_TRACE_LINES)
-#define APP_FAULT_DIAG_LINE_SIZE             320U
+#define APP_FAULT_DIAG_LINE_SIZE             448U
 
 typedef struct
 {
@@ -213,6 +214,9 @@ void AppFaultDiag_PrepareReport(void)
                             : ((diag_peak_bucket_pu[0] > diag_peak_bucket_pu[1])
                                ? diag_peak_bucket_pu[0] : diag_peak_bucket_pu[1]);
   uint32_t line;
+  AppFocTimingReport_t timing;
+
+  AppFocTiming_GetReport(&timing);
 
   /* Une trace non figée continue de bouger : on ne l'envoie que si le break l'a gelée. */
   if (!latched)
@@ -224,7 +228,9 @@ void AppFaultDiag_PrepareReport(void)
     "#FAULT_DIAG,break=%u,t_break_ms=%lu,t_now_ms=%lu,irq_count=%lu,tim_sr=0x%04lX,"
     "bkin_low=%u,comp=0x%lX,bkin_now_low=%u,comp_now=0x%lX,"
     "peak_run_da=%ld,peak_recent_da=%ld,ocp_da=%ld,vbus_dv=%ld,"
-    "trace_n=%lu,trace_period_us=%lu\r\n",
+    "trace_n=%lu,trace_period_us=%lu,"
+    "foc_period_ns=%lu,foc_max_ns=%lu,foc_late_max_ns=%lu,foc_overruns=%lu,"
+    "foc_overrun_ns=%lu,foc_overrun_late_ns=%lu,quiet_timeouts=%lu\r\n",
     latched ? 1U : 0U,
     (unsigned long)diag_break_tick_ms,
     (unsigned long)HAL_GetTick(),
@@ -239,7 +245,14 @@ void AppFaultDiag_PrepareReport(void)
     (long)(APP_FAULT_DIAG_OCP_THRESHOLD_A * 10.0f),
     AppFaultDiag_VoltageDeciVolts(VBus_M1.Udcbus_in_pu),
     (unsigned long)count,
-    (unsigned long)(1000000UL / ISR_FREQUENCY_HZ));
+    (unsigned long)(1000000UL / ISR_FREQUENCY_HZ),
+    (unsigned long)timing.period_ns,
+    (unsigned long)timing.duration_max_ns,
+    (unsigned long)timing.late_max_ns,
+    (unsigned long)timing.overrun_count,
+    (unsigned long)(timing.overrun_captured ? timing.overrun_duration_ns : 0U),
+    (unsigned long)(timing.overrun_captured ? timing.overrun_late_ns : 0U),
+    (unsigned long)timing.quiet_timeouts);
 
   /* #FAULT_TRACE,<index du 1er échantillon, -1 = dernier avant la coupure>,
    * puis u:v:w:vbus en 0,1 A et 0,1 V, du plus ancien au plus récent. */

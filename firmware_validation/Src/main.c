@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_motor_control.h"
 #include "app_datalog.h"
+#include "app_foc_timing.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -154,6 +155,7 @@ int main(void)
   /* Initialize interrupts */
   MX_NVIC_Init();
   /* USER CODE BEGIN 2 */
+  AppFocTiming_Init();
   AppDatalog_Init();
   AppMotorControl_Init();
   /* USER CODE END 2 */

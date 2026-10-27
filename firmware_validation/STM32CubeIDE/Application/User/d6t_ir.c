@@ -31,7 +31,6 @@ static int16_t d6tir_last_raw_tenth = 0;
 static void D6TIR_DwtInit(void)
 {
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0U;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 

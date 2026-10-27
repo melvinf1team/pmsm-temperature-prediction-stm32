@@ -7,6 +7,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 VALIDATION_GUI_DIR = Path(__file__).resolve().parents[2] / "validation" / "test"
 if str(VALIDATION_GUI_DIR) not in sys.path:
@@ -14,6 +15,7 @@ if str(VALIDATION_GUI_DIR) not in sys.path:
 
 from temperature_validation_gui import (
     CsvSessionRecorder,
+    FaultReportCollector,
     PROFILE_ALL_VARIABLE,
     PROFILE_COLLECT_ONLY,
     PROFILE_STABLE,
@@ -158,6 +160,9 @@ class CommandSafetyTests(unittest.TestCase):
             port_combo=DummyWidget(),
             refresh_button=DummyWidget(),
             stop_automatic_export=lambda: None,
+            cancel_fault_report_timer=lambda: None,
+            fault_collector=FaultReportCollector(),
+            motor_fault_text=None,
             update_profile_controls_state=lambda: None,
             set_status=lambda _text, _color: None,
         )
@@ -200,6 +205,81 @@ class CommandSafetyTests(unittest.TestCase):
         TemperatureValidationApp.disconnect_serial(app, stop_owned_motor=False)
 
         self.assertEqual(connection.writes, [])
+
+
+FAULT_LINE = (
+    "#FAULT,MCSDK_FAULT,t_ms=450777,speed_mrpm=3485858,iq_ma=-39,id_ma=-27,"
+    "load_ma=177,mc_now=0x0000,mc_occurred=0x0001"
+)
+DIAG_LINE = (
+    "#FAULT_DIAG,break=0,peak_run_da=271,peak_recent_da=167,ocp_da=1100,trace_n=0,"
+    "trace_period_us=62,foc_period_ns=62494,foc_max_ns=31000,foc_late_max_ns=13200,"
+    "foc_overruns=1,foc_overrun_ns=30500,foc_overrun_late_ns=13200,quiet_timeouts=0"
+)
+
+
+class FirmwareFaultTests(unittest.TestCase):
+    @staticmethod
+    def make_app(directory: Path) -> TemperatureValidationApp:
+        app = object.__new__(TemperatureValidationApp)
+        app.pending_control_command = "PROFILE,STABLE"
+        app.control_command_error = None
+        app.active_profile_token = "STABLE"
+        app.gui_started_motor = True
+        app.motor_fault_text = None
+        app.fault_collector = FaultReportCollector()
+        app.fault_report_after_id = None
+        app.last_fault_report_path = None
+        app.automatic_export = SimpleNamespace(path=directory / "validation_ia_20261027_113719.csv")
+        app.after = mock.Mock(return_value="after#1")
+        app.after_cancel = mock.Mock()
+        app.update_profile_controls_state = mock.Mock()
+        app.set_status = mock.Mock()
+        return app
+
+    def test_fault_stops_the_motor_state_then_reports_its_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory))
+
+            TemperatureValidationApp.handle_control_response(app, FAULT_LINE)
+
+            self.assertFalse(app.gui_started_motor)
+            self.assertIsNone(app.active_profile_token)
+            self.assertIsNone(app.pending_control_command)
+            self.assertEqual(app.motor_fault_text, "Motor stopped by the firmware · MCSDK_FAULT")
+            app.after.assert_called_once()
+
+            TemperatureValidationApp.handle_control_response(app, DIAG_LINE)
+
+            app.after_cancel.assert_called_once_with("after#1")
+            self.assertIn("MCSDK_FAULT · FOC overrun: interrupt started late", app.motor_fault_text)
+            self.assertIn(app.motor_fault_text, app.set_status.call_args.args[0])
+            report = app.last_fault_report_path
+            self.assertRegex(report.name, r"^validation_ia_20261027_113719_fault_\d{6}\.txt$")
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("Verdict: FOC overrun: interrupt started late", text)
+            self.assertIn(FAULT_LINE, text)
+            self.assertIn(DIAG_LINE, text)
+            self.assertFalse(app.fault_collector.active)
+
+    def test_timeout_reports_a_firmware_without_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory))
+            TemperatureValidationApp.handle_control_response(app, FAULT_LINE)
+
+            TemperatureValidationApp.report_fault_source(app)
+
+            self.assertIn("No firmware diagnostic", app.motor_fault_text)
+
+    def test_new_profile_ack_clears_the_fault(self) -> None:
+        app = self.make_app(Path("."))
+        app.motor_fault_text = "Motor stopped · MCSDK_FAULT"
+        app.gui_started_motor = False
+
+        TemperatureValidationApp.handle_control_response(app, "ACK,PROFILE,STABLE")
+
+        self.assertIsNone(app.motor_fault_text)
+        self.assertTrue(app.gui_started_motor)
 
 
 class CsvSessionRecorderTests(unittest.TestCase):

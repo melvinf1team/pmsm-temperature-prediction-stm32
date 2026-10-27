@@ -29,6 +29,8 @@ Validation-specific components are mainly in:
 | `STM32CubeIDE/Application/User/app_ai_model.c` | NanoEdge AI checks and calls |
 | `STM32CubeIDE/Application/User/app_datalog.c` | Acquisition, timing, and USART1 output |
 | `STM32CubeIDE/Application/User/app_motor_control.c` | Motor state machine and TB-200S DAC/load scheduler |
+| `STM32CubeIDE/Application/User/app_fault_diag.c` | TIM8 break sources and phase-current trace after a stop |
+| `STM32CubeIDE/Application/User/app_foc_timing.c` | FOC duration/delay and DS18B20 windows between FOC runs |
 | `Inc/app_config.h` | Model/Emulator mode selection |
 | `Inc/preprocess_ewma.h` | Preprocessing period and dimensions |
 | `AI_Model/feature_order.txt` | Required order of 55 axes |
@@ -55,8 +57,11 @@ are in `Inc/app_motor_control.h`. B2/PROFILE presets retain their behavior.
 All protection stops report `#FAULT,<reason>,...` with the speed, shutdown
 threshold, Id/Iq, brake command, and current/occurred MCSDK fault masks
 captured before STOP. Reports retry on a full UART queue and are emitted
-once per fault. Unexpected MCSDK stops are also reported. The acquisition
-dashboard decodes these events and retains the error state while logging.
+once per fault. Unexpected MCSDK stops are also reported. Each `#FAULT` is
+followed by `#FAULT_DIAG` and, after a TIM8 break, `#FAULT_TRACE`
+(`app_fault_diag.c`, FOC timing from `app_foc_timing.c`), exactly as in the
+acquisition firmware. The validation interface and the acquisition dashboard
+decode these events, show the source of the stop and save a report.
 The root README documents the fields and the strict 5000 rpm shutdown cap.
 
 Both projects currently request Id = 0 A, disabling heating injection.

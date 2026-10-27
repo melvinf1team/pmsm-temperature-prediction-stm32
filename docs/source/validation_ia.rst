@@ -160,7 +160,18 @@ to a run started physically with B2. For one of the other choices, press
 motor** to send `STOP`. A profile request is shown as accepted only after
 its matching `ACK,PROFILE,<TOKEN>` is received; this acknowledgment means that
 the profile is armed, not necessarily that MCSDK has already reached `RUN`.
-An `ERR` line is reported in the status area. Disconnecting or closing a
+An `ERR` line is reported in the status area.
+
+When the firmware stops the motor by itself, its `#FAULT` line immediately
+turns the motor indicator to **Motor · fault stop** and the header status to
+red, and the profile is no longer shown as active. The interface then
+collects `#FAULT_DIAG` and `#FAULT_TRACE` and shows the verdict of
+`datalogging/fault_diagnostics.py`, the module also used by the acquisition
+dashboard, for example `Motor stopped · MCSDK_FAULT · FOC overrun: interrupt
+started late (CPU timing, not electrical)`. The evidence and the raw lines are
+saved next to the session CSV as `validation_ia_..._fault_HHMMSS.txt`. A
+firmware without `#FAULT_DIAG` gives `No firmware diagnostic` after 1.5 s.
+Starting a profile again clears the fault display. Disconnecting or closing a
 collection-only session sends no command. If the GUI launched the profile, it
 attempts a safety `STOP` before disconnecting or closing.
 
@@ -186,7 +197,7 @@ Python on Windows.
 
 On Windows, a transient `ClearCommError` is retried at most 100 times with
 150 ms between attempts, giving about 15 seconds excluding serial operation
-time. `ACK`/`ERR` control lines are handled separately. Non-ASCII,
+time. `ACK`/`ERR` control lines and `#` event lines are handled separately. Non-ASCII,
 nonnumeric, nonfinite frames, and frames with neither two nor three fields
 are rejected and counted.
 

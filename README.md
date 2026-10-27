@@ -299,6 +299,10 @@ The main application modules are:
 - `app_datalog.c`: sensor scheduling and nonblocking CSV transmission;
 - `app_wiring_diag.c`: wiring diagnostics (`DIAG`) and motor status
   (`STATUS`);
+- `app_fault_diag.c`: source of a TIM8 break and last 2 ms of phase currents
+  (`#FAULT_DIAG`, `#FAULT_TRACE`);
+- `app_foc_timing.c`: FOC duration and start delay, and interrupt-free windows
+  between two FOC runs for the DS18B20;
 - `d6t_ir.c`: I2C reads from the D6T sensor (logged pixel
   `D6TIR_SELECTED_PIXEL_INDEX`);
 - `ds18b20.c`: 1-Wire reads from the DS18B20 sensor.
@@ -417,7 +421,7 @@ red `Motor error` state; logging continues until the operator presses **STOP LOG
 A late header/launch ACK does not hide this state. A new explicit start
 clears the display once accepted by the firmware.
 
-The acquisition firmware follows every `#FAULT` with a source diagnostic
+Both firmwares follow every `#FAULT` with a source diagnostic
 (`app_fault_diag.c`). `mc_now=0x0040` means a TIM8 break, which merges two
 sources: the power-board fault line on PB7 (BKIN, active low) and the
 COMP4/6/7 phase comparators (~110 A). The break IRQ reads both before the
@@ -425,7 +429,7 @@ MCSDK handler runs and freezes the last 32 FOC samples (2 ms) of phase
 currents and Vbus:
 
 ```text
-#FAULT_DIAG,break=1,t_break_ms=406671,t_now_ms=406684,irq_count=1,tim_sr=0x0081,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=168,peak_recent_da=131,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62
+#FAULT_DIAG,break=1,t_break_ms=406671,t_now_ms=406684,irq_count=1,tim_sr=0x0081,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=168,peak_recent_da=131,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62,foc_period_ns=62494,foc_max_ns=30900,foc_late_max_ns=1200,foc_overruns=0,foc_overrun_ns=0,foc_overrun_late_ns=0,quiet_timeouts=0
 #FAULT_TRACE,-32,118:-61:-57:181,...   (u:v:w:vbus in 0.1 A / 0.1 V, oldest first, 8 samples per line)
 ```
 
@@ -434,6 +438,17 @@ fault line, real comparator overcurrent, probable overcurrent, or glitch when
 the last sample could not reach the threshold within one FOC period), and saves
 the verdict with the raw lines in `<csv>_fault_HHMMSS.txt`, or
 `fault_<timestamp>.txt` in the log folder when no CSV is open.
+
+`mc_occurred=0x0001` (`MC_DURATION`) is a CPU timing fault, not an electrical
+one: the FOC wrote its duty cycles after the next TIM8 update. The `foc_*`
+fields of `#FAULT_DIAG` (`app_foc_timing.c`) give the longest FOC run, the
+largest FOC start delay, and the duration and delay of the overrun period, so
+the verdict says whether the FOC started late (interrupts masked just before
+it) or ran too long. The DS18B20 driver now masks interrupts only in windows
+placed between two FOC runs; a 1-Wire slot that finds no window is dropped
+(`quiet_timeouts`) and the driver keeps its cached value. The decoding is in
+`datalogging/fault_diagnostics.py`, shared with the validation interface,
+which shows the stop and its verdict and saves the same report next to its CSV.
 
 At a 4500 rpm target, the current overspeed shutdown threshold is
 5000 rpm: any measured speed above it for 100 ms trips `OVERSPEED`. Reaching

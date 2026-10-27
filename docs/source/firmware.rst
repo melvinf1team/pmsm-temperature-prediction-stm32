@@ -24,9 +24,15 @@ The main application modules are:
    USART ownership, nonblocking TX queue, CSV header, and `DATA` rows.
 
 `app_fault_diag.c`
-   Source diagnostic of a hardware break (acquisition firmware only): reads
+   Source diagnostic of a hardware break (both firmware projects): reads
    the break sources in the TIM8 break interrupt and keeps the last 2 ms of
    phase currents (see `Hardware break diagnostic`_).
+
+`app_foc_timing.c`
+   FOC timing (both firmware projects): duration and start delay of every
+   FOC period, capture of an `MC_DURATION` overrun, and interrupt-free
+   windows placed between two FOC runs for the DS18B20 (see
+   `FOC timing and MC_DURATION`_).
 
 `app_wiring_diag.c`
    Wiring diagnostics of the sensor and TB-200S lines (`DIAG`) and motor
@@ -195,7 +201,7 @@ power board (L6491 drivers), and the internal comparators ``COMP4``,
 about 110 A (``WB_UI_OCP_THRESHOLD``). The MCSDK does not record which source
 fired.
 
-The acquisition firmware adds ``app_fault_diag.c`` for this. It is called
+Both firmware projects add ``app_fault_diag.c`` for this. It is called
 from three places, the first two inside ``USER CODE`` sections so that a
 Workbench regeneration keeps them:
 
@@ -216,7 +222,7 @@ captured, four ``#FAULT_TRACE`` lines:
 
 .. code-block:: text
 
-   #FAULT_DIAG,break=1,t_break_ms=406671,t_now_ms=406684,irq_count=1,tim_sr=0x0081,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=168,peak_recent_da=131,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62
+   #FAULT_DIAG,break=1,t_break_ms=406671,t_now_ms=406684,irq_count=1,tim_sr=0x0081,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=168,peak_recent_da=131,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62,foc_period_ns=62494,foc_max_ns=30900,foc_late_max_ns=1200,foc_overruns=0,foc_overrun_ns=0,foc_overrun_late_ns=0,quiet_timeouts=0
    #FAULT_TRACE,-32,118:-61:-57:181,...
 
 .. csv-table:: ``#FAULT_DIAG`` fields
@@ -232,6 +238,11 @@ captured, four ``#FAULT_TRACE`` lines:
    "ocp_da", "Hardware threshold, 0.1 A (``APP_FAULT_DIAG_OCP_THRESHOLD_A``)"
    "vbus_dv", "Bus voltage when the report is built, 0.1 V"
    "trace_n, trace_period_us", "Number of trace samples and the period between them"
+   "foc_period_ns", "Nominal FOC period measured from TIM8 (about 62,500 ns at 16 kHz)"
+   "foc_max_ns, foc_late_max_ns", "Longest ``TSK_HighFrequencyTask`` and largest start delay since the start"
+   "foc_overruns", "Number of FOC periods that ended in ``MC_DURATION`` since the start"
+   "foc_overrun_ns, foc_overrun_late_ns", "Duration and start delay of the first of these periods, 0 if none"
+   "quiet_timeouts", "DS18B20 1-Wire slots dropped because no FOC-free window was found"
 
 ``#FAULT_TRACE,<first>,u:v:w:vbus,...`` carries up to 8 samples per line from
 the oldest to the newest; ``<first>`` is the index of the first sample
@@ -241,8 +252,49 @@ from the three shunts at the FOC rate, so a spike shorter than a PWM period
 may not appear in them even when the comparator saw it.
 
 The phase current and bus voltage scales come from ``CURRENT_SCALE`` and
-``VOLTAGE_SCALE`` in ``drive_parameters.h``. ``firmware_validation`` does not
-contain this module and keeps the plain ``#FAULT`` line.
+``VOLTAGE_SCALE`` in ``drive_parameters.h``. ``firmware_validation`` contains
+the same module, with English comments, and sends the same lines.
+
+FOC timing and MC_DURATION
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``mc_occurred=0x0001`` (``MC_DURATION``) is not an electrical fault. With
+``OVS_COUNT = 4``, the FOC runs in the ``DMA2_Channel1`` interrupt (priority 1)
+once per PWM period. ``R3_GetMeasurements()`` clears the TIM8 update flag when
+it reads the currents, and ``R3_WriteTIMRegisters()`` checks it again after
+writing the duty cycles. If the next TIM8 update came in between, the duty
+cycles were written too late for the next PWM period and the MCSDK stops the
+motor. Inside the FOC, no interrupt can preempt it, so the overrun comes either
+from a FOC started late, because some code masked interrupts just before
+(``__disable_irq``), or from a computation that took too long.
+
+``app_foc_timing.c`` measures both with the DWT cycle counter, from two hooks
+in the ``USER CODE`` sections of ``TSK_HighFrequencyTask`` (``Src/mc_tasks.c``):
+
+* ``AppFocTiming_OnHighFrequencyStart()`` takes the start time. The start
+  delay is measured against the ideal start schedule, which is strictly
+  periodic (2 x TIM8 ARR cycles): an on-time start becomes the reference, a
+  later one is counted as late.
+* ``AppFocTiming_OnHighFrequencyEnd(hFOCreturn == MC_DURATION)`` takes the
+  duration, keeps the maxima since the start and captures the duration and
+  delay of the first period that ended in ``MC_DURATION``.
+
+``AppFocTiming_Init()`` runs in ``main.c`` before the sensors are initialized,
+and ``AppFocTiming_Arm()`` clears the maxima before each motor start. The
+values are sent in ``#FAULT_DIAG`` (see the table above).
+
+The 27 October 2026 random-profile session stopped with ``MC_DURATION`` at
+about 3500 rpm. The likely cause was the DS18B20 driver, which masked
+interrupts for up to about 13 us on every 1-Wire bit, dozens of times per
+second, with a 62.5 us FOC period. ``ds18b20.c`` now asks
+``AppFocTiming_EnterQuietWindow()`` for each short critical window (8 us for a
+written 1, 15 us for a read bit). The function masks interrupts only when the
+next FOC start is far enough away, leaving a 3 us guard
+(``APP_FOC_TIMING_GUARD_US``). If no such window appears within four FOC
+periods, the bit is dropped and the transaction fails, so the driver retries
+or keeps its cached value instead of delaying the FOC. ``quiet_timeouts``
+counts these drops. The drivers no longer reset ``DWT->CYCCNT``, which the
+timing module uses as its time base.
 
 Both projects define the heating settings in ``Inc/app_motor_control.h``:
 ``APP_ID_TARGET_A=0.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Heating injection
@@ -351,9 +403,11 @@ DS18B20 sensor
 --------------
 
 `ds18b20.c` drives the 1-Wire bus with very short critical sections to avoid
-disrupting motor control. A 12-bit conversion takes 750 ms. If a fresh read
-fails but an older valid value exists, the driver returns the last known
-value to keep the CSV usable.
+disrupting motor control. Each critical section is placed between two FOC runs
+by `AppFocTiming_EnterQuietWindow()` (see `FOC timing and MC_DURATION`_).
+A 12-bit conversion takes 750 ms. If a fresh read fails but an older valid
+value exists, the driver returns the last known value to keep the CSV
+usable.
 
 Safety controls
 ---------------

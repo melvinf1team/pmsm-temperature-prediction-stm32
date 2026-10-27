@@ -15,6 +15,15 @@ Datalogging dashboard
    :show-inheritance:
    :special-members: __init__
 
+Fault diagnostics
+-----------------
+
+.. automodule:: fault_diagnostics
+   :no-index:
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Wiring check
 ------------
 

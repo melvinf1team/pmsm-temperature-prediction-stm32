@@ -12,6 +12,8 @@
 #include "pidreg_speed.h"
 #include "fixpmath.h"
 #include "app_datalog.h"
+#include "app_fault_diag.h"
+#include "app_foc_timing.h"
 
 #include <stdbool.h>
 #include <math.h>
@@ -226,6 +228,11 @@ static void AppMotorControl_ReportPendingFault(void)
   {
     app_fault_report_pending = false;
   }
+  /* #FAULT_DIAG / #FAULT_TRACE always follow the #FAULT line. */
+  if (!app_fault_report_pending)
+  {
+    (void)AppFaultDiag_SendPendingReport();
+  }
 }
 
 static void AppMotorControl_SetFault(const char *reason)
@@ -252,6 +259,7 @@ static void AppMotorControl_SetFault(const char *reason)
       (unsigned long)MC_GetCurrentFaultsMotor1(),
       (unsigned long)MC_GetOccurredFaultsMotor1());
     app_fault_report_pending = true;
+    AppFaultDiag_PrepareReport();
   }
   app_mc_fault_reason = reason;
   app_mc_state = APP_MC_FAULT;
@@ -1179,6 +1187,8 @@ bool AppMotorControl_Start(void)
   app_iq_ramp_last_ms = HAL_GetTick();
 
   AppMotorControl_ApplyConfig();
+  AppFaultDiag_Arm();
+  AppFocTiming_Arm();
 
   if (MC_StartWithPolarizationMotor1() == MC_SUCCESS)
   {

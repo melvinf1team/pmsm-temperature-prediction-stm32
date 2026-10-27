@@ -27,13 +27,21 @@ Open points
 0. Fault source diagnostic on target
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**High priority.** The `#FAULT_DIAG` / `#FAULT_TRACE` diagnostic of the
-acquisition firmware (`app_fault_diag.c`) and its dashboard analysis compile
-with the STM32CubeIDE toolchain and pass the unit tests with synthetic data,
-but have not been run on the programmed board. The 27 October 2026 session
-stopped with `mc_now=0x0040` at 3184 rpm while the sampled Id/Iq were far
-below 110 A, and its source is still unknown. Flash the firmware, repeat the
-`All variable` profile, and record the verdict before concluding on the cause.
+**High priority.** The `#FAULT_DIAG` / `#FAULT_TRACE` diagnostic
+(`app_fault_diag.c`), the FOC timing (`app_foc_timing.c`) and the DS18B20
+windows placed between two FOC runs are in both firmware projects. Both
+projects build and link with STM32CubeIDE 2.1.1, and the emulated firmware
+tests and the unit tests pass, but the changes have not been run on the
+programmed board. Two sessions of 27 October 2026 stopped the motor:
+
+* 09:28, `mc_now=0x0040` at 3184 rpm while the sampled Id/Iq were far below
+  110 A: TIM8 break of unknown source;
+* 11:37, `mc_occurred=0x0001` (`MC_DURATION`) at about 3500 rpm during a load
+  step: FOC overrun, most likely delayed by the DS18B20 critical sections.
+
+Flash both firmwares, repeat the `All variable` profile, and check that the
+`MC_DURATION` stop no longer occurs, that the DS18B20 column stays fresh
+(`quiet_timeouts=0`), and record the verdict of any new stop.
 
 1. Test bench qualification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

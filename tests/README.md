@@ -23,6 +23,7 @@ tests/
     ├── test_calibrate_tb200s.py
     ├── test_check_wiring.py
     ├── test_d6t_calibration.py
+    ├── test_fault_diagnostics.py
     ├── test_motor_datalog_gui_dashboard.py
     ├── test_motor_firmware_safety.py
     ├── test_preprocess_logs_ewma.py
@@ -77,7 +78,11 @@ and Id inhibition until the sequence is complete. B2/PROFILE behavior is
 also checked separately.
 Fault-report tests reproduce a 5010 rpm overspeed stop, verify capture before
 the brake resets, retry a full UART queue, preserve the first stop cause,
-and ensure persistent faults are reported once. Dashboard tests check
+and ensure persistent faults are reported once. `foc_timing_harness.c`
+runs `app_foc_timing.c` of both firmwares: start delay against the ideal
+schedule, overrun capture, CYCCNT wrap, and the interrupt-free window.
+`unit/test_fault_diagnostics.py` checks the shared decoding of `#FAULT`,
+`#FAULT_DIAG` and `#FAULT_TRACE` (break sources and FOC overrun verdicts). Dashboard tests check
 decoded SDK masks, legacy messages, and an error state that survives late
 headers/launch confirmation while logging remains open.
 

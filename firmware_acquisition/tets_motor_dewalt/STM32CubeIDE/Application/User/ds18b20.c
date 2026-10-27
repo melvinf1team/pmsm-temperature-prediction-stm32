@@ -1,5 +1,6 @@
 #include "ds18b20.h"
 #include "main.h"
+#include "app_foc_timing.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -46,19 +47,34 @@ static uint32_t ds18b20_cache_used_count = 0U;
  * du 1-Wire est vraiment critique.
  */
 
-static uint32_t DS18B20_EnterTinyCritical(void)
+/*
+ * Ces fenêtres sont placées entre deux FOC (AppFocTiming) : masquer les IRQ
+ * juste avant l'IRQ FOC la retarde et provoque MC_DURATION (0x0001). Sans
+ * fenêtre libre, le bit est abandonné et la transaction échoue (nouvel essai,
+ * puis valeur en cache) plutôt que de retarder la FOC.
+ */
+#define DS18B20_WRITE1_WINDOW_US   8U
+#define DS18B20_READ_WINDOW_US     15U
+
+static bool ds18b20_bus_aborted = false;
+
+static bool DS18B20_EnterTinyCritical(uint32_t window_us, uint32_t *primask)
 {
-  uint32_t primask = __get_PRIMASK();
-  __disable_irq();
-  return primask;
+  if (ds18b20_bus_aborted)
+  {
+    return false;
+  }
+  if (!AppFocTiming_EnterQuietWindow(window_us, primask))
+  {
+    ds18b20_bus_aborted = true;
+    return false;
+  }
+  return true;
 }
 
 static void DS18B20_ExitTinyCritical(uint32_t primask)
 {
-  if (primask == 0U)
-  {
-    __enable_irq();
-  }
+  AppFocTiming_ExitQuietWindow(primask);
 }
 
 /*
@@ -70,7 +86,6 @@ static void DS18B20_ExitTinyCritical(uint32_t primask)
 static void DS18B20_DwtInit(void)
 {
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0U;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
@@ -124,6 +139,9 @@ static bool DS18B20_Reset(void)
 {
   bool presence;
 
+  /* Nouvelle transaction : un abandon précédent ne compte plus. */
+  ds18b20_bus_aborted = false;
+
   /*
    * Pas de critical section longue ici.
    * Un reset 1-Wire tolère bien un pulse low plus long que 480 us.
@@ -158,6 +176,11 @@ static bool DS18B20_ResetRetry(void)
 
 static void DS18B20_WriteBit(uint8_t bit)
 {
+  if (ds18b20_bus_aborted)
+  {
+    return;
+  }
+
   if (bit != 0U)
   {
     /*
@@ -165,7 +188,12 @@ static void DS18B20_WriteBit(uint8_t bit)
      * Timing critique court : low environ 6 us puis release.
      * On protège seulement cette petite fenêtre.
      */
-    uint32_t primask = DS18B20_EnterTinyCritical();
+    uint32_t primask;
+
+    if (!DS18B20_EnterTinyCritical(DS18B20_WRITE1_WINDOW_US, &primask))
+    {
+      return;
+    }
 
     DS18B20_LineLow();
     DS18B20_DelayUs(6U);
@@ -205,7 +233,10 @@ static uint8_t DS18B20_ReadBit(void)
    *
    * On garde les IRQ désactivées environ 13 us, pas plusieurs ms.
    */
-  primask = DS18B20_EnterTinyCritical();
+  if (!DS18B20_EnterTinyCritical(DS18B20_READ_WINDOW_US, &primask))
+  {
+    return 1U;
+  }
 
   DS18B20_LineLow();
   DS18B20_DelayUs(3U);
@@ -306,7 +337,7 @@ static bool DS18B20_ConfigureSensor(void)
   DS18B20_WriteByte(0x46U);
   DS18B20_WriteByte(0x7FU);
 
-  return true;
+  return !ds18b20_bus_aborted;
 }
 
 static void DS18B20_InitModule(void)
@@ -343,7 +374,7 @@ static bool DS18B20_StartMeasurement(void)
     DS18B20_WriteByte(DS18B20_CMD_CONVERT_T);
   }
 
-  return ok;
+  return ok && !ds18b20_bus_aborted;
 }
 
 static bool DS18B20_ReadScratchpad(uint8_t scratchpad[9])
@@ -364,6 +395,11 @@ static bool DS18B20_ReadScratchpad(uint8_t scratchpad[9])
   for (uint8_t i = 0U; i < 9U; i++)
   {
     scratchpad[i] = DS18B20_ReadByte();
+  }
+
+  if (ds18b20_bus_aborted)
+  {
+    return false;
   }
 
   if (DS18B20_Crc8(scratchpad, 8U) != scratchpad[8])

@@ -13,6 +13,7 @@
 #include "fixpmath.h"
 #include "app_datalog.h"
 #include "app_fault_diag.h"
+#include "app_foc_timing.h"
 
 #include <stdbool.h>
 #include <math.h>
@@ -1252,6 +1253,7 @@ bool AppMotorControl_Start(void)
 
   AppMotorControl_ApplyConfig();
   AppFaultDiag_Arm();
+  AppFocTiming_Arm();
 
   if (MC_StartWithPolarizationMotor1() == MC_SUCCESS)
   {
