@@ -1,0 +1,8 @@
+Fault report 2026-10-27T11:44:43
+Verdict: No hardware break
+- No TIM8 break captured: another protection stopped the motor.
+- Phase-current peak since START 27.1 A, last 20 ms 16.7 A (OCP threshold 110 A).
+
+Raw firmware lines:
+#FAULT,MCSDK_FAULT,t_ms=450777,speed_mrpm=3485858,speed_limit_rpm=5000,iq_ma=-39,id_ma=-27,hard_ma=30000,load_ma=177,mc_now=0x0000,mc_occurred=0x0001
+#FAULT_DIAG,break=0,t_break_ms=0,t_now_ms=450777,irq_count=0,tim_sr=0x0000,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=271,peak_recent_da=167,ocp_da=1100,vbus_dv=180,trace_n=0,trace_period_us=62
