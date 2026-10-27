@@ -493,7 +493,7 @@ void AppDatalog_StartLogging(void)
 {
   uint32_t now = HAL_GetTick();
 
-  AppDatalog_ResetTxQueue();
+  /* Preserve queued motor events and acknowledgements across logging changes. */
 
   logging_enabled = true;
   header_sent = false;
@@ -510,7 +510,6 @@ void AppDatalog_StopLogging(void)
   logging_enabled = false;
   header_sent = false;
 
-  AppDatalog_ResetTxQueue();
 
   AppDatalog_UartQueueText("#LOG_STOP\r\n");
   AppDatalog_UartPump();
@@ -519,6 +518,15 @@ void AppDatalog_StopLogging(void)
 bool AppDatalog_IsLogging(void)
 {
   return logging_enabled;
+}
+
+void AppDatalog_RepeatHeader(void)
+{
+  if (logging_enabled)
+  {
+    AppDatalog_SendHeader();
+    AppDatalog_UartPump();
+  }
 }
 
 /*

@@ -9,20 +9,21 @@ without a PC timestamp. Default paths can be overridden by command-line
 options, YAML, or environment variables through ConfigArgParse.
 
 Six test profiles can be selected quickly, like in the validation GUI:
-``Collect only`` (motor stopped), the four firmware presets ``Stable``,
+``Collect only`` (no motor command), the four firmware presets ``Stable``,
 ``Variable load``, ``Variable speed`` and ``All variable``, and ``Custom``,
 whose settings are edited and saved by the user.
 
 The expected firmware serial protocol is line-oriented text::
 
-    SYNC
-    CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>,<datalog_ms>,<ds18b20_ms>
+    HELLO
+    MOTOR_CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>
     LOAD,<amps>
     LOAD,VARIABLE
-    START
-    PROFILE,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>,<datalog_ms>,<ds18b20_ms>
-    ACQ_START,<datalog_ms>,<ds18b20_ms>
-    STOP
+    PROFILE_SET,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>
+    MOTOR_START
+    MOTOR_STOP
+    LOG_START,<datalog_ms>,<ds18b20_ms>
+    LOG_STOP
     ACK,<command>
     ERR,<reason>
     #CSV_HEADER,<column_1>,<column_2>,...
@@ -176,12 +177,14 @@ PRESET_PROFILE_TOKENS = {
 QUICK_PROFILES_BY_TOKEN = {token: name for name, token in PRESET_PROFILE_TOKENS.items()}
 
 # Preset settings applied by the firmware (APP_PROFILE_* and APP_BUTTON_*).
-PRESET_FIXED_SPEED_RPM = 2500.0
-PRESET_MIN_SPEED_RPM = 2000.0
+PRESET_FIXED_SPEED_RPM = 4000.0
+PRESET_MIN_SPEED_RPM = 3000.0
 PRESET_MAX_SPEED_RPM = 4000.0
-PRESET_FIXED_LOAD_A = 0.10
-PRESET_IQ_LIMIT_A = 25.0
-PRESET_HARD_LIMIT_A = 28.0
+PRESET_FIXED_LOAD_A = 0.20
+PRESET_MIN_LOAD_A = 0.10
+PRESET_MAX_LOAD_A = 0.20
+PRESET_IQ_LIMIT_A = 28.0
+PRESET_HARD_LIMIT_A = 30.0
 PRESET_ACCEL_ELEC_HZ_S = 500.0
 PRESET_CHANGE_PERIOD_TEXT = "2–5 s"
 STALE_DATA_S = 2.0
@@ -280,24 +283,24 @@ _FIXED_LOAD_ROW = (
 )
 _VARIABLE_LOAD_ROW = (
     "TB-200S load",
-    f"{MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A, new value every {PRESET_CHANGE_PERIOD_TEXT}",
+    f"{PRESET_MIN_LOAD_A:.2f}–{PRESET_MAX_LOAD_A:.2f} A, new value every {PRESET_CHANGE_PERIOD_TEXT}",
 )
 
 QUICK_PROFILES = {
     QUICK_PROFILE_COLLECT_ONLY: QuickProfile(
         name=QUICK_PROFILE_COLLECT_ONLY,
         title="Collect only",
-        summary="Motor off · sensors",
+        summary="Independent logging",
         description=(
-            "Logs temperatures with the motor forced to stop. No motor command is "
-            "sent; motor columns are logged as zero."
+            "Records data independently of the motor. No motor command is "
+            "sent by START LOGGING."
         ),
         accent=COLORS["muted"],
         parameters=(
-            ("Motor", "Forced stop before logging"),
-            ("TB-200S load", f"{_format_amps(MIN_LOAD_SETPOINT_A)} (minimum)"),
-            ("Motor columns", "Logged as zero"),
-            ("UART command", "ACQ_START"),
+            ("Motor", "Controlled separately with START / STOP MOTOR"),
+            ("TB-200S load", "Controlled with the motor"),
+            ("Motor columns", "Zero while the motor is stopped"),
+            ("UART command", "LOG_START"),
         ),
     ),
     QUICK_PROFILE_STABLE: QuickProfile(
@@ -310,15 +313,15 @@ QUICK_PROFILES = {
         ),
         accent=COLORS["lime"],
         token=PRESET_PROFILE_TOKENS[QUICK_PROFILE_STABLE],
-        parameters=(_FIXED_SPEED_ROW, _FIXED_LOAD_ROW, *_PRESET_LIMIT_ROWS, ("UART command", "PROFILE,STABLE")),
+        parameters=(_FIXED_SPEED_ROW, _FIXED_LOAD_ROW, *_PRESET_LIMIT_ROWS, ("Apply to board", "PROFILE_SET,STABLE")),
     ),
     QUICK_PROFILE_VARIABLE_LOAD: QuickProfile(
         name=QUICK_PROFILE_VARIABLE_LOAD,
         title="Variable load",
-        summary=f"{PRESET_FIXED_SPEED_RPM:g} rpm · {MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A",
+        summary=f"{PRESET_FIXED_SPEED_RPM:g} rpm · {PRESET_MIN_LOAD_A:.2f}–{PRESET_MAX_LOAD_A:.2f} A",
         description=(
             f"Constant {PRESET_FIXED_SPEED_RPM:g} rpm; the TB-200S load changes randomly "
-            f"between {MIN_LOAD_SETPOINT_A:.2f} and {MAX_LOAD_SETPOINT_A:.2f} A every "
+            f"between {PRESET_MIN_LOAD_A:.2f} and {PRESET_MAX_LOAD_A:.2f} A every "
             f"{PRESET_CHANGE_PERIOD_TEXT}."
         ),
         accent=COLORS["amber"],
@@ -328,7 +331,7 @@ QUICK_PROFILES = {
             _FIXED_SPEED_ROW,
             _VARIABLE_LOAD_ROW,
             *_PRESET_LIMIT_ROWS,
-            ("UART command", "PROFILE,VARIABLE_LOAD"),
+            ("Apply to board", "PROFILE_SET,VARIABLE_LOAD"),
         ),
     ),
     QUICK_PROFILE_VARIABLE_SPEED: QuickProfile(
@@ -347,7 +350,7 @@ QUICK_PROFILES = {
             _VARIABLE_SPEED_ROW,
             _FIXED_LOAD_ROW,
             *_PRESET_LIMIT_ROWS,
-            ("UART command", "PROFILE,VARIABLE_SPEED"),
+            ("Apply to board", "PROFILE_SET,VARIABLE_SPEED"),
         ),
     ),
     QUICK_PROFILE_ALL_VARIABLE: QuickProfile(
@@ -356,7 +359,7 @@ QUICK_PROFILES = {
         summary=f"Speed + load · {PRESET_CHANGE_PERIOD_TEXT}",
         description=(
             f"Speed ({PRESET_MIN_SPEED_RPM:g}–{PRESET_MAX_SPEED_RPM:g} rpm) and load "
-            f"({MIN_LOAD_SETPOINT_A:.2f}–{MAX_LOAD_SETPOINT_A:.2f} A) both change every "
+            f"({PRESET_MIN_LOAD_A:.2f}–{PRESET_MAX_LOAD_A:.2f} A) both change every "
             f"{PRESET_CHANGE_PERIOD_TEXT}, exactly like the board button B2."
         ),
         accent=COLORS["violet"],
@@ -368,7 +371,7 @@ QUICK_PROFILES = {
             _VARIABLE_LOAD_ROW,
             *_PRESET_LIMIT_ROWS,
             ("Same as", "Board button B2"),
-            ("UART command", "PROFILE,VARIABLE_ALL"),
+            ("Apply to board", "PROFILE_SET,VARIABLE_ALL"),
         ),
     ),
     QUICK_PROFILE_CUSTOM: QuickProfile(
@@ -672,6 +675,8 @@ class MotorDatalogGui(tk.Tk):
 
         self.serial_obj = None
         self.serial_lock = threading.Lock()
+        self.command_lock = threading.Lock()
+        self.board_motor_running = False
         self.reader_thread = None
         self.launch_thread = None
         self.stop_thread = None
@@ -692,6 +697,11 @@ class MotorDatalogGui(tk.Tk):
         self.is_running = False
         self.is_launching = False
         self.is_stopping = False
+        self.motor_running = False
+        self.board_hello_needed = True
+        self.logging_requested = False
+        self.current_action = None
+        self.prepared_config = None
         self.motor_fault_message = ""
         self.data_before_header_count = 0
         self.log_line_count = 0
@@ -737,6 +747,7 @@ class MotorDatalogGui(tk.Tk):
         self.session_ended_s = None
         self.session_rows = 0
         self.active_datalog_ms = 0
+        self.active_ds18b20_ms = 1000
         self.data_times = deque(maxlen=50)
         self.session_elapsed_var = tk.StringVar(value="—")
         self.session_detail_var = tk.StringVar(value="No session yet")
@@ -1071,12 +1082,20 @@ class MotorDatalogGui(tk.Tk):
         control_card.grid_columnconfigure(0, weight=1)
         control_card.grid_columnconfigure(1, weight=1)
 
-        self.start_button = self.action_button(control_card, "START", self.start_run, COLORS["lime"], "#062712")
+        self.start_button = self.action_button(control_card, "START MOTOR", self.start_motor, COLORS["lime"], "#062712")
         self.start_button.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
-        self.stop_button = self.action_button(control_card, "STOP", self.stop_run, COLORS["danger"], "#3A1018")
+        self.stop_button = self.action_button(control_card, "STOP MOTOR", self.stop_motor, COLORS["danger"], "#3A1018")
         self.stop_button.configure(state=tk.DISABLED)
         self.stop_button.grid(row=0, column=1, sticky="nsew")
+        self.logging_start_button = self.action_button(control_card, "START LOGGING", self.start_logging, COLORS["cyan"], "#082A35")
+        self.logging_start_button.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(8, 0))
+        self.logging_stop_button = self.action_button(control_card, "STOP LOGGING", self.stop_logging, COLORS["amber"], "#35260B")
+        self.logging_stop_button.grid(row=1, column=1, sticky="nsew", pady=(8, 0))
+        self.apply_board_button = self.small_button(control_card, "Apply profile", self.apply_board_profile, COLORS["violet"])
+        self.apply_board_button.grid(row=2, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
+        self.disconnect_button = self.small_button(control_card, "Disconnect", self.stop_run, COLORS["muted"])
+        self.disconnect_button.grid(row=2, column=1, sticky="ew", pady=(8, 0))
 
     def action_button(self, parent, text, command, accent, base_bg):
         """Create a large motor-control button."""
@@ -1914,8 +1933,8 @@ class MotorDatalogGui(tk.Tk):
             self.delete_profile_button.configure(state=button_state)
 
     def controls_locked(self):
-        """Return whether a session owns the serial port, freezing all settings."""
-        return self.is_running or self.is_launching or self.is_stopping
+        """Motor settings can change while logging a stopped motor."""
+        return self.motor_running or self.is_launching or self.is_stopping
 
     def selected_quick_profile(self):
         """Return the canonical name of the selected test profile."""
@@ -2050,7 +2069,7 @@ class MotorDatalogGui(tk.Tk):
         """Refresh description, settings panel, controls, and validation."""
         name = self.selected_quick_profile()
         if name == QUICK_PROFILE_COLLECT_ONLY:
-            safety_text = "MOTOR FORCED OFF  ·  ACQ_START stops the motor before logging"
+            safety_text = "LOGGING IS INDEPENDENT  ·  motor commands are separate"
             safety_color = COLORS["muted"]
         else:
             safety_text = (
@@ -2115,20 +2134,19 @@ class MotorDatalogGui(tk.Tk):
         self.after_idle(self.on_left_content_configure)
 
     def update_controls_state(self):
-        """Enable only the inputs relevant to the selected profile and session state."""
+        """Freeze motor settings and logging settings independently."""
         if self.custom_editor_frame is None:
             return
-
         locked = self.controls_locked()
-        entry_state = "disabled" if locked else "normal"
-        button_state = tk.DISABLED if locked else tk.NORMAL
-
-        self.port_combo.configure(state="disabled" if locked else "readonly")
-        for widget in (self.baud_entry, self.csv_entry, self.datalog_entry, self.ds18b20_entry):
-            widget.configure(state=entry_state)
-        for button in (self.refresh_button, self.csv_new_button, self.csv_browse_button):
-            button.configure(state=button_state, cursor="arrow" if locked else "hand2")
-
+        connected = self.serial_obj is not None
+        log_locked = self.is_running or self.logging_requested or self.is_launching or self.is_stopping
+        self.port_combo.configure(state="disabled" if connected or locked else "readonly")
+        self.baud_entry.configure(state="disabled" if connected or locked else "normal")
+        self.refresh_button.configure(state=tk.DISABLED if connected or locked else tk.NORMAL)
+        for widget in (self.csv_entry, self.datalog_entry, self.ds18b20_entry):
+            widget.configure(state="disabled" if log_locked else "normal")
+        for button in (self.csv_new_button, self.csv_browse_button):
+            button.configure(state=tk.DISABLED if log_locked else tk.NORMAL)
         editable = self.is_custom_selected() and not locked
         load_is_variable = self.load_mode_var.get() == LOAD_MODE_VARIABLE
         for widget in self.motor_profile_widgets:
@@ -2139,9 +2157,28 @@ class MotorDatalogGui(tk.Tk):
             else:
                 widget.configure(state="normal" if editable else "disabled")
         self.update_save_profile_button()
-
-        self.start_button.configure(text="START LOGGING" if self.is_idle_acquisition_mode() else "START")
+        self.update_action_buttons()
         self.refresh_quick_profile_cards()
+
+    def update_action_buttons(self):
+        busy = self.is_launching or self.is_stopping
+        try:
+            self.parse_config(include_motor=False)
+            logging_valid = True
+        except (ValueError, OSError):
+            logging_valid = False
+        try:
+            self.parse_config(include_logging=False)
+            motor_valid = not self.is_idle_acquisition_mode()
+        except (ValueError, OSError):
+            motor_valid = False
+        motor_ready = motor_valid and not self.motor_running and not busy
+        self.start_button.configure(state=tk.NORMAL if motor_ready else tk.DISABLED)
+        self.apply_board_button.configure(state=tk.NORMAL if motor_ready else tk.DISABLED)
+        self.stop_button.configure(state=tk.NORMAL if self.serial_obj is not None and not self.is_stopping else tk.DISABLED)
+        self.logging_start_button.configure(state=tk.NORMAL if logging_valid and not self.is_running and not busy else tk.DISABLED)
+        self.logging_stop_button.configure(state=tk.NORMAL if self.is_running and not busy else tk.DISABLED)
+        self.disconnect_button.configure(state=tk.NORMAL if self.serial_obj is not None and not self.is_stopping else tk.DISABLED)
 
     def on_load_mode_changed(self, *_args):
         """Update the load field and profile state after a fixed/variable change."""
@@ -2484,8 +2521,9 @@ class MotorDatalogGui(tk.Tk):
             self.iq_limit_var.set(str(profile.iq_limit_a))
             self.hard_limit_var.set(str(profile.hard_limit_a))
             self.accel_var.set(str(profile.accel_elec_hz_s))
-            self.datalog_ms_var.set(str(profile.datalog_ms))
-            self.ds18b20_ms_var.set(str(profile.ds18b20_ms))
+            if not self.is_running:
+                self.datalog_ms_var.set(str(profile.datalog_ms))
+                self.ds18b20_ms_var.set(str(profile.ds18b20_ms))
             self.load_mode_var.set(normalize_load_mode(profile.load_mode))
             self.load_setpoint_var.set(self.format_float(profile.load_setpoint_a))
         finally:
@@ -2495,12 +2533,12 @@ class MotorDatalogGui(tk.Tk):
         self.update_save_profile_button()
         self.validate_form()
 
-    def parse_config(self):
+    def parse_config(self, *, include_motor=True, include_logging=True):
         """Read and validate current interface settings.
 
         Returns:
             dict[str, object]: Configuration ready to open the serial port and send
-            ``ACQ_START``, ``PROFILE`` or ``CFG``/``LOAD``/``START`` for the
+            ``LOG_START``, ``PROFILE_SET`` or ``CFG``/``LOAD``/``MOTOR_START`` for the
             selected test profile.
 
         Raises:
@@ -2515,9 +2553,14 @@ class MotorDatalogGui(tk.Tk):
 
         port = self.get_selected_port_device()
         baud = int(self.baud_var.get().strip())
-        datalog_ms = int(self.datalog_ms_var.get().strip())
-        ds18b20_ms = int(self.ds18b20_ms_var.get().strip())
-        csv_path = self.csv_path_from_text(self.csv_path_var.get())
+        if include_logging:
+            datalog_ms = int(self.datalog_ms_var.get().strip())
+            ds18b20_ms = int(self.ds18b20_ms_var.get().strip())
+            csv_path = self.csv_path_from_text(self.csv_path_var.get())
+        else:
+            datalog_ms = vars(self).get("active_datalog_ms") or 100
+            ds18b20_ms = vars(self).get("active_ds18b20_ms") or 1000
+            csv_path = None
 
         if not port:
             raise ValueError("No COM port selected.")
@@ -2540,7 +2583,7 @@ class MotorDatalogGui(tk.Tk):
             "csv_path": csv_path,
         }
 
-        if quick_profile in PRESET_PROFILE_TOKENS:
+        if include_motor and quick_profile in PRESET_PROFILE_TOKENS:
             load_mode, load_setpoint_a = preset_load_settings(quick_profile)
             config.update({
                 "profile_token": PRESET_PROFILE_TOKENS[quick_profile],
@@ -2548,7 +2591,7 @@ class MotorDatalogGui(tk.Tk):
                 "load_mode": load_mode,
                 "load_setpoint_a": load_setpoint_a,
             })
-        elif quick_profile == QUICK_PROFILE_CUSTOM:
+        elif include_motor and quick_profile == QUICK_PROFILE_CUSTOM:
             target_rpm = float(self.speed_rpm_var.get().replace(",", "."))
             speed_hz = float(self.speed_hz_var.get().replace(",", "."))
             pole_pairs = int(self.pole_pairs_var.get().strip())
@@ -2758,7 +2801,7 @@ class MotorDatalogGui(tk.Tk):
             elif load_mode == LOAD_MODE_VARIABLE:
                 warnings.append(
                     "Variable TB-200S load starts at 0.05 A, then changes "
-                    "randomly between 0.05 A and 0.25 A every 2-5 s."
+                    "randomly between 0.10 A and 0.20 A every 2-5 s."
                 )
 
         datalog_ms = parse_int("datalog_ms", self.datalog_ms_var, "DATA period", 0)
@@ -2832,12 +2875,13 @@ class MotorDatalogGui(tk.Tk):
 
         if not self.controls_locked():
             if is_valid:
-                self.start_button.configure(state=tk.NORMAL, bg=COLORS["accent_2"], fg="#062712")
+                self.start_button.configure(bg=COLORS["accent_2"], fg="#062712")
                 self.set_status("Ready", self.ready_status_detail(quick_profile))
             else:
-                self.start_button.configure(state=tk.DISABLED, bg=COLORS["panel_3"])
+                self.start_button.configure(bg=COLORS["panel_3"])
                 self.set_status("Configuration error", errors[0])
 
+        self.update_action_buttons()
         self.update_iq_warning_color()
         return is_valid
 
@@ -2845,188 +2889,244 @@ class MotorDatalogGui(tk.Tk):
         """Describe what START will do for the selected test profile."""
         profile = QUICK_PROFILES[quick_profile]
         if quick_profile == QUICK_PROFILE_COLLECT_ONLY:
-            return "Collect only: START logs with the motor stopped."
+            return "START LOGGING records data independently. Select a profile to enable START MOTOR."
         if quick_profile == QUICK_PROFILE_CUSTOM:
             return (
                 f"Custom ({self.profile_var.get()}): {self.speed_rpm_var.get()} rpm, "
                 f"load {self.load_mode_var.get().lower()}."
             )
-        return f"{profile.title}: {profile.summary}. START runs the firmware preset."
+        return f"{profile.title}: {profile.summary}. Apply profile prepares the board; START MOTOR runs it."
 
-    def start_run(self):
-        """Start a motor and acquisition session, or acquire with the motor stopped.
-
-        Validate settings, prepare the CSV, open serial, start the reader thread, and run the mode-specific startup sequence in a worker thread.
-        """
-        if self.is_running or self.is_launching:
+    def ensure_serial_connection(self, cfg):
+        """Keep one serial reader alive across independent motor/logging actions."""
+        if self.serial_obj is not None and self.serial_obj.is_open:
             return
-        if not self.validate_form():
-            messagebox.showerror("Invalid configuration", self.status_detail_var.get())
-            return
-
-        cfg = self.parse_config()
-        csv_path = cfg["csv_path"]
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if csv_path.exists():
-            overwrite = messagebox.askyesno("File already exists", f"This file already exists:\n{csv_path}\n\nOverwrite it?")
-            if not overwrite:
-                return
-
+        connection = serial.Serial(port=cfg["port"], baudrate=cfg["baud"], timeout=.05, write_timeout=1.)
         try:
-            self.serial_obj = serial.Serial(port=cfg["port"], baudrate=cfg["baud"], timeout=0.05, write_timeout=1.0)
-            time.sleep(0.2)
-            try:
-                self.serial_obj.reset_input_buffer()
-                self.serial_obj.reset_output_buffer()
-            except Exception:
-                pass
-        except Exception as exc:
-            messagebox.showerror("Serial error", f"Could not open {cfg['port']}:\n{exc}")
-            return
-
-        self.csv_path = str(csv_path)
-        self.csv_file = None
-        self.csv_writer = None
-        self.csv_columns = []
-        self.csv_output_columns = []
-        self.csv_pending_rows = 0
-        self.csv_last_flush_s = time.monotonic()
-        self.data_before_header_count = 0
-        self.reset_live_values()
-        self.clear_plot()
-        self.clear_ack_queue()
-
+            time.sleep(.2)
+            connection.reset_input_buffer()
+            connection.reset_output_buffer()
+        except Exception:
+            connection.close()
+            raise
+        self.serial_obj = connection
         self.stop_event.clear()
-        self.launch_cancel_event.clear()
-        self.motor_fault_message = ""
+        self.board_hello_needed = True
+        self.clear_ack_queue()
         self.reader_thread = threading.Thread(target=self.serial_reader_loop, daemon=True)
         self.reader_thread.start()
+        self.log(f"Serial port opened: {cfg['port']}.")
 
+    def begin_board_action(self, action, cfg):
+        """Serialize command/ACK transactions without interrupting the CSV reader."""
+        if self.is_launching or self.is_stopping:
+            return
+        try:
+            self.ensure_serial_connection(cfg)
+        except Exception as exc:
+            messagebox.showerror("Serial error", str(exc))
+            if action == "log_start":
+                self.finish_logging()
+            return
+        self.launch_cancel_event.clear()
+        self.current_action = action
         self.is_launching = True
-        self.is_running = False
-        self.is_stopping = False
-        self.active_acquisition_mode = cfg["acquisition_mode"]
-        self.active_quick_profile = cfg["quick_profile"]
-        self.motor_start_confirmed = False
-        if cfg["acquisition_mode"] == ACQUISITION_MODE_MOTOR:
-            self.active_load_mode = cfg["load_mode"]
-            self.active_load_setpoint_a = cfg["load_setpoint_a"]
+        if action == "motor_start":
+            self.motor_fault_message = ""
+            self.motor_running = True  # Keep STOP available even before START is acknowledged.
+            self.motor_start_confirmed = False
+        self.update_controls_state()
+        self.set_status("Sending command", action.replace("_", " ").capitalize())
+        self.launch_thread = threading.Thread(target=self.board_action_thread, args=(action, cfg), daemon=True)
+        self.launch_thread.start()
 
+    def apply_board_profile(self):
+        """Prepare the selected motor profile on the board, without starting it."""
+        if self.controls_locked() or self.is_idle_acquisition_mode():
+            return
+        try:
+            cfg = self.parse_config(include_logging=False)
+        except ValueError as exc:
+            messagebox.showerror("Invalid configuration", str(exc))
+            return
+        self.begin_board_action("apply", cfg)
+
+    def start_motor(self):
+        """Apply the selected settings and start only the motor."""
+        if self.controls_locked() or self.is_idle_acquisition_mode():
+            return
+        try:
+            cfg = self.parse_config(include_logging=False)
+        except ValueError as exc:
+            messagebox.showerror("Invalid motor configuration", str(exc))
+            return
+        self.begin_board_action("motor_start", cfg)
+
+    def start_logging(self):
+        """Start a new CSV independently of the motor and its configuration."""
+        if self.is_running or self.is_launching or self.is_stopping:
+            return
+        try:
+            cfg = self.parse_config(include_motor=False)
+            csv_path = cfg["csv_path"]
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
+            if csv_path.exists() and not messagebox.askyesno("File already exists", f"Overwrite {csv_path}?"):
+                return
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("Invalid logging configuration", str(exc))
+            return
+        self.csv_path = str(csv_path)
+        self.csv_columns = []
+        self.csv_output_columns = []
+        self.csv_writer = self.csv_file = None
+        self.csv_pending_rows = 0
+        self.data_before_header_count = 0
+        self.logging_requested = True
+        self.is_running = True
         self.session_started_s = time.monotonic()
         self.session_ended_s = None
         self.session_rows = 0
         self.active_datalog_ms = cfg["datalog_ms"]
+        self.active_ds18b20_ms = cfg["ds18b20_ms"]
         self.data_times.clear()
-        self.refresh_session_stats(reschedule=False)
+        self.clear_plot()
+        self.begin_board_action("log_start", cfg)
 
-        self.start_button.configure(state=tk.DISABLED, bg="#14532D")
-        self.stop_button.configure(state=tk.NORMAL)
+    def stop_logging(self):
+        """Stop only logging; the motor and serial connection remain active."""
+        if self.is_running and not (self.is_launching or self.is_stopping):
+            self.begin_board_action("log_stop", {})
+
+    def stop_motor(self):
+        """Cancel a pending motor start and stop the motor, retaining the CSV."""
+        if self.serial_obj is None or self.is_stopping:
+            return
+        self.is_stopping = True
+        if self.current_action in ("apply", "motor_start"):
+            self.launch_cancel_event.set()
         self.update_controls_state()
-        profile_title = QUICK_PROFILES[cfg["quick_profile"]].title
-        if cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE:
-            self.set_status("Starting", "Preparing logging with the motor stopped...")
-        elif "profile_token" in cfg:
-            self.set_status("Starting", f"Synchronizing and arming the {profile_title} preset...")
-        else:
-            self.set_status("Starting", "Synchronizing and starting the motor...")
-        self.log(f"Serial port opened. Test profile: {profile_title}.")
+        self.stop_thread = threading.Thread(target=self.motor_stop_thread, daemon=True)
+        self.stop_thread.start()
 
-        self.launch_thread = threading.Thread(target=self.launch_sequence_thread, args=(cfg,), daemon=True)
-        self.launch_thread.start()
+    def motor_stop_thread(self):
+        with self.command_lock:
+            self.motor_stop_transaction()
 
-    def launch_sequence_thread(self, cfg):
-        """Run the UART startup sequence in a worker thread.
+    def motor_stop_transaction(self):
+        try:
+            self.clear_ack_queue()
+            self.send_command("MOTOR_STOP\n", char_delay=.002)
+            self.wait_for_ack("MOTOR_STOP", timeout=3.)
+            self.gui_queue.put(("action_success", ("motor_stop", {})))
+        except Exception as exc:
+            self.gui_queue.put(("action_failed", ("motor_stop", str(exc))))
 
-        Args:
-            cfg: Validated configuration returned by ``parse_config``.
-        """
+    def board_action_thread(self, action, cfg):
+        with self.command_lock:
+            self.board_action_transaction(action, cfg)
+
+    def board_action_transaction(self, action, cfg):
+        """Check capabilities without stopping a motor started by B2."""
         cancel = self.launch_cancel_event
 
-        def send(command, char_delay):
+        def transact(command, ack):
             if cancel.is_set():
-                raise RuntimeError("Startup cancelled.")
-            self.send_command(command, char_delay=char_delay)
-
-        try:
-            idle_mode = cfg["acquisition_mode"] == ACQUISITION_MODE_IDLE
-            profile_token = cfg.get("profile_token")
-            if idle_mode:
-                next_command = "ACQ_START"
-            elif profile_token:
-                next_command = "PROFILE"
-            else:
-                next_command = "CFG"
-
+                raise RuntimeError("Command cancelled.")
             self.clear_ack_queue()
-            send("SYNC\n", char_delay=0.002)
-            try:
-                sync_ok = self.wait_for_ack(
-                    "SYNC",
-                    timeout=2.0,
-                    ignored_errors={"ERR,UNKNOWN_CMD", "ERR,BAD_CFG", "ERR,NO_VALID_CFG"},
-                    cancel_event=cancel,
-                )
-                if not sync_ok:
-                    self.gui_queue.put(("log", f"Board did not support or accept SYNC; continuing with {next_command}."))
-            except TimeoutError:
-                self.gui_queue.put(("log", f"No SYNC response; continuing with {next_command}."))
+            self.send_command(command, char_delay=.002)
+            self.wait_for_ack(ack, timeout=5., cancel_event=cancel)
 
-            time.sleep(0.1)
-
-            if idle_mode:
-                acq_cmd = f"ACQ_START,{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n"
-                self.clear_ack_queue()
-                send(acq_cmd, char_delay=0.002)
-                self.wait_for_ack("ACQ_START", timeout=5.0, cancel_event=cancel)
-            elif profile_token:
-                profile_cmd = build_profile_command(
-                    cfg["quick_profile"],
-                    cfg["datalog_ms"],
-                    cfg["ds18b20_ms"],
-                )
-                self.clear_ack_queue()
-                send(profile_cmd, char_delay=0.002)
-                try:
-                    self.wait_for_ack(f"PROFILE,{profile_token}", timeout=5.0, cancel_event=cancel)
-                except (TimeoutError, RuntimeError) as exc:
-                    if cancel.is_set():
-                        raise
-                    raise RuntimeError(
-                        f"{exc}\n\nThe board did not accept PROFILE,{profile_token}. Flash the "
-                        "acquisition firmware with PROFILE support, or use the Custom profile."
-                    ) from exc
-            else:
-                cfg_cmd = (
-                    f"CFG,{cfg['target_rpm']:.3f},{cfg['iq_limit']:.3f},{cfg['hard_limit']:.3f},"
-                    f"{cfg['accel']:.3f},{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n"
-                )
-
-                self.clear_ack_queue()
-                send(cfg_cmd, char_delay=0.003)
-                self.wait_for_ack("CFG", timeout=5.0, cancel_event=cancel)
-
-                time.sleep(0.1)
-
-                load_cmd = build_load_command(
-                    cfg["load_mode"],
-                    cfg["load_setpoint_a"],
-                )
-                self.clear_ack_queue()
-                send(load_cmd, char_delay=0.002)
-                self.wait_for_ack("LOAD", timeout=5.0, cancel_event=cancel)
-
-                time.sleep(0.1)
-
-                self.clear_ack_queue()
-                send("START\n", char_delay=0.002)
-                self.wait_for_ack("START", timeout=5.0, cancel_event=cancel)
-
-            self.gui_queue.put(("launch_success", cfg["acquisition_mode"]))
+        start_issued = False
+        try:
+            if self.board_hello_needed:
+                transact("HELLO\n", "HELLO")
+                self.board_hello_needed = False
+            if action in ("apply", "motor_start"):
+                if self.board_motor_running:
+                    raise RuntimeError("Motor already active. Use STOP MOTOR before applying a profile.")
+                token = cfg.get("profile_token")
+                if token:
+                    transact(f"PROFILE_SET,{token}\n", f"PROFILE_SET,{token}")
+                else:
+                    transact(f"MOTOR_CFG,{cfg['target_rpm']:.3f},{cfg['iq_limit']:.3f},{cfg['hard_limit']:.3f},"
+                             f"{cfg['accel']:.3f}\n", "MOTOR_CFG")
+                    transact(build_load_command(cfg["load_mode"], cfg["load_setpoint_a"]), "LOAD")
+                if action == "motor_start":
+                    start_issued = True
+                    transact("MOTOR_START\n", "MOTOR_START")
+            elif action == "log_start":
+                start_issued = True
+                transact(f"LOG_START,{cfg['datalog_ms']},{cfg['ds18b20_ms']}\n", "LOG_START")
+            elif action == "log_stop":
+                transact("LOG_STOP\n", "LOG_STOP")
+            self.gui_queue.put(("action_success", (action, cfg)))
         except Exception as exc:
             if cancel.is_set():
                 return
-            self.gui_queue.put(("launch_failed", str(exc)))
+            # A missing ACK can mean the action occurred. Roll back only that subsystem.
+            if start_issued and isinstance(exc, TimeoutError):
+                stop = "MOTOR_STOP" if action == "motor_start" else "LOG_STOP"
+                try:
+                    self.clear_ack_queue()
+                    self.send_command(stop + "\n", char_delay=.002)
+                    self.wait_for_ack(stop, timeout=2.)
+                    self.gui_queue.put(("action_success", ("motor_stop" if action == "motor_start" else "log_stop", {})))
+                except Exception:
+                    pass
+            if action == "motor_start" and not isinstance(exc, TimeoutError) and not self.board_motor_running:
+                self.gui_queue.put(("action_success", ("motor_stop", {})))
+            if action == "log_start" and not start_issued:
+                self.gui_queue.put(("action_success", ("log_stop", {})))
+            detail = str(exc)
+            if isinstance(exc, TimeoutError) or "UNKNOWN" in detail:
+                detail += "\nCheck the connection and flash the updated acquisition firmware for independent commands."
+            self.gui_queue.put(("action_failed", (action, detail)))
+
+    def complete_board_action(self, action, cfg):
+        self.is_launching = False
+        if action == "motor_stop" or not self.is_stopping:
+            self.is_stopping = False
+        self.current_action = None
+        if action in ("apply", "motor_start"):
+            self.prepared_config = dict(cfg)
+            self.active_quick_profile = cfg["quick_profile"]
+            self.active_load_mode = cfg["load_mode"]
+            self.active_load_setpoint_a = cfg["load_setpoint_a"]
+        if action == "motor_start":
+            self.motor_running = not bool(self.motor_fault_message)
+            self.board_motor_running = self.motor_running
+            self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
+        elif action == "motor_stop":
+            self.motor_running = False
+            self.board_motor_running = False
+            self.motor_start_confirmed = False
+            self.active_acquisition_mode = ACQUISITION_MODE_IDLE
+        elif action == "log_start":
+            self.is_running = True
+        elif action == "log_stop":
+            self.finish_logging()
+        self.update_controls_state()
+        if action == "apply":
+            self.set_status("Profile applied", "Ready for START MOTOR. Logging is unchanged.")
+        else:
+            self.show_running_status()
+
+    def finish_logging(self):
+        """Close only the CSV, preserving the motor, connection and plots."""
+        self.logging_requested = False
+        self.is_running = False
+        if self.csv_file is not None:
+            self.flush_csv(force=True)
+            self.csv_file.close()
+            self.log(f"CSV closed: {self.csv_path}")
+        self.csv_file = self.csv_writer = None
+        self.csv_columns = []
+        self.csv_output_columns = []
+        self.csv_pending_rows = 0
+        if self.session_started_s is not None and self.session_ended_s is None:
+            self.session_ended_s = time.monotonic()
+        self.refresh_session_stats(reschedule=False)
+        self.suggest_next_csv_path()
 
     def stop_run(self):
         """Stop the motor if needed, then end acquisition with ``STOP``."""
@@ -3038,6 +3138,7 @@ class MotorDatalogGui(tk.Tk):
 
         self.is_stopping = True
         self.stop_button.configure(state=tk.DISABLED)
+        self.launch_cancel_event.set()
         self.refresh_quick_profile_cards()
         self.set_status("Stopping", "Sending STOP...")
         self.log("Stop requested.")
@@ -3045,67 +3146,45 @@ class MotorDatalogGui(tk.Tk):
         self.stop_thread.start()
 
     def stop_sequence_thread(self):
-        """Send ``STOP`` and close resources after an ACK or timeout."""
-        # STOP must be the last command sent, even if startup is still in progress.
-        self.launch_cancel_event.set()
-        launch_thread = self.launch_thread
-        if launch_thread is not None and launch_thread.is_alive():
-            launch_thread.join(timeout=2.0)
+        with self.command_lock:
+            self.shutdown_transaction()
 
+    def shutdown_transaction(self):
+        """Disconnect/quit stops both subsystems, unlike the two STOP buttons."""
+        self.launch_cancel_event.set()
         try:
-            self.clear_ack_queue()
-            self.send_command("STOP\n", char_delay=0.002)
-            try:
-                self.wait_for_ack("STOP", timeout=3.0)
-            except Exception as exc:
-                self.gui_queue.put(("log", f"No ACK,STOP received; closing anyway: {exc}"))
+            for command in ("MOTOR_STOP", "LOG_STOP"):
+                self.clear_ack_queue()
+                self.send_command(command + "\n", char_delay=.002)
+                self.wait_for_ack(command, timeout=3.)
         except Exception as exc:
-            self.gui_queue.put(("log", f"Could not send STOP: {exc}"))
+            self.gui_queue.put(("log", f"Independent shutdown not acknowledged: {exc}; sending legacy STOP."))
+            try:
+                self.send_command("STOP\n", char_delay=.002)
+            except Exception as stop_error:
+                self.gui_queue.put(("log", f"Could not stop the board: {stop_error}. Use B2."))
         self.gui_queue.put(("close_resources", None))
 
     def close_resources(self):
-        """Close the CSV and serial port cleanly and return the GUI to idle."""
+        """Close the connection after explicit disconnect, quit or serial loss."""
         self.stop_event.set()
-
-        if self.csv_file:
-            try:
-                self.flush_csv(force=True)
-                self.csv_file.close()
-                self.log(f"CSV closed: {self.csv_path}")
-            except Exception as exc:
-                self.log(f"Could not close CSV: {exc}")
-
-        self.csv_file = None
-        self.csv_writer = None
-        self.csv_columns = []
-        self.csv_output_columns = []
-        self.csv_pending_rows = 0
-
+        self.finish_logging()
         with self.serial_lock:
-            serial_obj = self.serial_obj
-            self.serial_obj = None
-
+            serial_obj, self.serial_obj = self.serial_obj, None
         if serial_obj is not None:
             try:
-                if serial_obj.is_open:
-                    serial_obj.close()
-                self.log("Serial port closed.")
+                serial_obj.close()
             except Exception as exc:
-                self.log(f"Could not close serial port: {exc}")
-
-        self.is_running = False
-        self.is_launching = False
-        self.is_stopping = False
+                self.log(f"Could not close serial: {exc}")
+        if self.reader_thread is not None and self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=1.)
+        self.motor_running = self.motor_start_confirmed = False
+        self.is_launching = self.is_stopping = False
+        self.board_hello_needed = True
+        self.prepared_config = None
         self.active_quick_profile = None
-        if self.session_started_s is not None and self.session_ended_s is None:
-            self.session_ended_s = time.monotonic()
-        self.refresh_session_stats(reschedule=False)
-        self.stop_button.configure(state=tk.DISABLED)
-        self.suggest_next_csv_path()
         self.update_controls_state()
-        self.validate_form()
-        self.set_status("Stopped", f"Session complete · {self.session_rows} rows logged.")
-
+        self.set_status("Disconnected", f"{self.session_rows} rows logged.")
         if self.close_requested:
             self.destroy()
 
@@ -3221,6 +3300,9 @@ class MotorDatalogGui(tk.Tk):
                 line = raw_line.decode(errors="replace").replace("\x00", "").strip()
                 if not line:
                     continue
+                if line.startswith("#CONTROL,"):
+                    fields = dict(item.split("=", 1) for item in line.split(",")[1:] if "=" in item)
+                    self.board_motor_running = fields.get("motor") == "1"
                 if line.startswith("ACK,") or line.startswith("ERR,"):
                     self.ack_queue.put(line)
                 self.gui_queue.put(("line", line))
@@ -3238,33 +3320,29 @@ class MotorDatalogGui(tk.Tk):
                     self.handle_serial_line(payload)
                 elif kind == "log":
                     self.log(payload)
-                elif kind == "launch_success":
-                    if self.is_stopping:
-                        # STOP won the race against the startup acknowledgment.
+                elif kind == "action_success":
+                    action, cfg = payload
+                    if self.is_stopping and action not in ("motor_stop", "log_start", "log_stop"):
+                        continue
+                    self.complete_board_action(action, cfg)
+                elif kind == "action_failed":
+                    action, detail = payload
+                    if self.is_stopping and action not in ("motor_stop", "log_start", "log_stop"):
                         continue
                     self.is_launching = False
-                    self.is_running = True
-                    self.is_stopping = False
+                    if action == "motor_stop":
+                        self.is_stopping = False
+                    self.current_action = None
                     self.update_controls_state()
-                    self.show_running_status()
-                    self.start_button.configure(state=tk.DISABLED, bg="#14532D")
-                    self.stop_button.configure(state=tk.NORMAL)
-                elif kind == "launch_failed":
-                    self.log(f"Startup failed: {payload}")
-                    self.set_status("Startup failed", payload)
-                    messagebox.showerror("Startup failed", payload)
-                    try:
-                        if self.serial_obj and self.serial_obj.is_open:
-                            self.send_command("STOP\n", char_delay=0.001)
-                    except Exception:
-                        pass
-                    self.close_resources()
-                    if not self.close_requested:
-                        self.set_status("Startup failed", str(payload).splitlines()[0])
+                    self.log(f"Command failed ({action}): {detail}")
+                    self.set_status("Command failed", str(detail).splitlines()[0])
+                    messagebox.showerror("Command failed", detail)
                 elif kind == "close_resources":
                     self.close_resources()
                 elif kind == "reader_stopped":
-                    pass
+                    if not self.stop_event.is_set():
+                        self.close_resources()
+                        self.set_status("Connection lost", "Motor state unknown. Use B2 to stop the motor.")
         except queue.Empty:
             pass
         self.after(50, self.process_gui_queue)
@@ -3362,6 +3440,8 @@ class MotorDatalogGui(tk.Tk):
             self.log(f"RX ← {line}")
 
         if line.startswith("#CSV_HEADER,"):
+            if not self.logging_requested:
+                return
             columns = self.clean_fields(line.split(",")[1:])
             if not columns:
                 self.log("Empty CSV header ignored.")
@@ -3411,53 +3491,65 @@ class MotorDatalogGui(tk.Tk):
             self.handle_firmware_event(line)
 
     def handle_firmware_event(self, line):
-        """React to firmware status lines that change what the motor is doing."""
+        """Track the physical motor even when no CSV is being recorded."""
         if line.startswith("#FAULT,"):
             reason, detail = describe_motor_fault(line)
-            self.motor_start_confirmed = False
+            self.motor_running = self.motor_start_confirmed = False
+            self.board_motor_running = False
             self.motor_fault_message = f"{reason}: {detail}"
-            self.log(f"ERROR: Motor stopped — {self.motor_fault_message}")
-            self.set_status("Motor error", self.motor_fault_message)
+            self.log(f"ERROR: Motor stopped \u2014 {self.motor_fault_message}")
+            self.update_controls_state()
+            self.show_running_status()
             return
-        if not (self.is_running or self.is_launching):
+        if self.serial_obj is None:
             return
-        if line.startswith("#PROFILE,START,"):
+        if line.startswith("#CONTROL,"):
+            fields = dict(item.split("=", 1) for item in line.split(",")[1:] if "=" in item)
+            self.motor_running = fields.get("motor") == "1"
+            self.board_motor_running = self.motor_running
+            self.motor_start_confirmed = self.motor_running
+        elif line.startswith("#PROFILE,START,"):
+            token = line.split(",")[2]
+            self.active_quick_profile = QUICK_PROFILES_BY_TOKEN.get(token, self.active_quick_profile)
             self.motor_fault_message = ""
-            self.motor_start_confirmed = True
-            if self.is_running:
-                self.show_running_status()
+            self.motor_running = self.motor_start_confirmed = True
+            self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
+            self.show_running_status()
         elif line.startswith("#B2,STOP"):
-            self.set_status("Motor stopped (B2)", "Board button B2 stopped the motor; logging continues until STOP.")
+            self.motor_running = self.motor_start_confirmed = False
+            self.active_acquisition_mode = ACQUISITION_MODE_IDLE
+            self.set_status("Motor stopped (B2)", "Logging continues." if self.is_running else "Logging is stopped.")
         elif line.startswith("#B2,START,"):
             self.motor_fault_message = ""
-            self.set_status("Motor running (B2)", "Board button B2 started the All variable profile.")
+            self.motor_running = self.motor_start_confirmed = True
+            self.active_acquisition_mode = ACQUISITION_MODE_MOTOR
+            self.active_quick_profile = QUICK_PROFILE_ALL_VARIABLE
+            self.active_load_mode = LOAD_MODE_VARIABLE
+            self.show_running_status()
         elif line.startswith("#CUSTOM,START"):
             self.motor_fault_message = ""
+            self.motor_running = True
             self.motor_start_confirmed = False
-            self.set_status("Motor starting", "Custom speed and brake ramps are in progress.")
-        elif line.startswith("#CUSTOM,READY") and not getattr(self, "motor_fault_message", ""):
-            self.motor_start_confirmed = True
-            self.set_status("Motor running", "Custom speed and brake targets reached.")
+            self.show_running_status()
+        elif line.startswith("#CUSTOM,READY") and not self.motor_fault_message:
+            self.motor_running = self.motor_start_confirmed = True
+            self.show_running_status()
+        self.board_motor_running = self.motor_running
+        self.update_controls_state()
 
     def show_running_status(self):
-        """Describe the running session in the header status card."""
-        if getattr(self, "motor_fault_message", ""):
-            self.set_status("Motor error", self.motor_fault_message)
-            return
-        if self.active_acquisition_mode == ACQUISITION_MODE_IDLE:
-            self.set_status("Logging active", "Motor stopped; receiving temperatures and zero motor values.")
-            return
-        profile = QUICK_PROFILES.get(self.active_quick_profile)
-        if self.active_quick_profile in PRESET_PROFILE_TOKENS:
-            if self.motor_start_confirmed:
-                self.set_status("Motor running", f"{profile.title} preset · {profile.summary}")
-            else:
-                self.set_status(
-                    "Motor starting",
-                    f"{profile.title} preset armed; TB-200S held at {MIN_LOAD_SETPOINT_A:.2f} A until RUN.",
-                )
-            return
-        self.set_status("Motor running", "Custom profile · receiving log data.")
+        """Report motor and acquisition as independent states."""
+        logging = "CSV logging active." if self.is_running else "CSV logging stopped."
+        if self.motor_fault_message:
+            self.set_status("Motor error", f"{self.motor_fault_message} {logging}")
+        elif self.motor_running:
+            profile = QUICK_PROFILES.get(self.active_quick_profile)
+            detail = profile.summary if profile is not None else "Profile started on board"
+            self.set_status("Motor running" if self.motor_start_confirmed else "Motor starting", f"{detail}. {logging}")
+        elif self.is_running:
+            self.set_status("Logging active", "Motor stopped; recording temperatures for cooldown.")
+        else:
+            self.set_status("Connected" if self.serial_obj is not None else "Stopped", "Motor stopped. " + logging)
 
     def stale_data_threshold_s(self):
         """Silence after which DATA is reported missing: 2.5 periods, at least 2 s."""
@@ -3707,8 +3799,8 @@ class MotorDatalogGui(tk.Tk):
         If a test is running, ask for confirmation and complete the motor shutdown
         sequence before destroying the window.
         """
-        if self.is_running or self.is_launching:
-            if not messagebox.askyesno("Quit", "A session is running. Stop it and quit?"):
+        if self.serial_obj is not None:
+            if (self.is_running or self.motor_running) and not messagebox.askyesno("Quit", "Stop the motor and logging, then quit?"):
                 return
             self.close_requested = True
             self.stop_run()

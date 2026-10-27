@@ -1,0 +1,314 @@
+{
+  "runs": [
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261022_150559.csv",
+      "protocol": {
+        "file": "daq_log_20261022_150559.csv",
+        "label": "22/10 : position 1, 4500 tr/min, frein 0,25 A, Id 4 A",
+        "rpm": 4500,
+        "gear": 1,
+        "brake_a": 0.25,
+        "id_target_a": 4,
+        "color": "#5279a5"
+      },
+      "rows": 25814,
+      "duration_min": 43.02166666666667,
+      "initial_first_sample_c": 22.3,
+      "initial_median_first_second_c": 22.25,
+      "temperature_at_times": {
+        "5": {
+          "d6t_temp_c": 33.0,
+          "ds18b20_temp_c": 24.87,
+          "rise_c": 10.75
+        },
+        "10": {
+          "d6t_temp_c": 38.7,
+          "ds18b20_temp_c": 24.68,
+          "rise_c": 16.450000000000003
+        },
+        "15": {
+          "d6t_temp_c": 42.8,
+          "ds18b20_temp_c": 24.56,
+          "rise_c": 20.549999999999997
+        },
+        "20": {
+          "d6t_temp_c": 45.5,
+          "ds18b20_temp_c": 24.75,
+          "rise_c": 23.25
+        },
+        "25": {
+          "d6t_temp_c": 47.4,
+          "ds18b20_temp_c": 25.37,
+          "rise_c": 25.15
+        },
+        "30": {
+          "d6t_temp_c": 48.6,
+          "ds18b20_temp_c": 24.81,
+          "rise_c": 26.35
+        }
+      },
+      "first_threshold_min": {
+        "40": 11.226666666666667,
+        "50": 36.07666666666667,
+        "55": null,
+        "60": null,
+        "65": null,
+        "70": null
+      },
+      "first_60c_held_for_60s_min": null,
+      "maximum_d6t_c": 51.0,
+      "final_sample_d6t_c": 50.8,
+      "final_minute_mean_d6t_c": 50.85590682196339,
+      "last5_mean_d6t_c": 50.59216927690769,
+      "last5_range_d6t_c": [
+        50.1,
+        51.0
+      ],
+      "last5_slope_c_min": 0.13731574707165112,
+      "sample_intervals_ms": [
+        100.0,
+        100.0
+      ],
+      "full_brake_first_s": 13.6,
+      "steady_min1_30": {
+        "rows": 17401,
+        "rpm_mean": 4499.881875754268,
+        "rpm_std": 42.236111627535934,
+        "rpm_range": [
+          4407.128,
+          4597.797
+        ],
+        "iq_mean_a": 8.092334233664731,
+        "id_mean_a": 4.0058697201310265,
+        "id_std_a": 1.7290398293033864,
+        "id_range_a": [
+          -0.018,
+          7.838
+        ],
+        "mean_sampled_i2_a2": 86.19197151180965,
+        "sampled_norm_equivalent_a": 9.283963136064774,
+        "brake_command_range_a": [
+          0.25,
+          0.25
+        ]
+      },
+      "maximum_rpm": 4597.797,
+      "maximum_abs_iq_a": 12.913,
+      "maximum_sampled_norm_a": 12.918926967825152,
+      "stopped_samples_after_minute1": 0,
+      "fraction_speed_within_5percent_after_minute1": 1.0
+    },
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261023_083421.csv",
+      "protocol": {
+        "file": "daq_log_20261023_083421.csv",
+        "label": "23/10 : position 2, 4500 tr/min, frein 0,15 A, Id 4 A",
+        "rpm": 4500,
+        "gear": 2,
+        "brake_a": 0.15,
+        "id_target_a": 4,
+        "color": "#c27426"
+      },
+      "rows": 20277,
+      "duration_min": 33.79333333333334,
+      "initial_first_sample_c": 21.1,
+      "initial_median_first_second_c": 21.1,
+      "temperature_at_times": {
+        "5": {
+          "d6t_temp_c": 32.1,
+          "ds18b20_temp_c": 21.56,
+          "rise_c": 11.0
+        },
+        "10": {
+          "d6t_temp_c": 37.4,
+          "ds18b20_temp_c": 21.5,
+          "rise_c": 16.299999999999997
+        },
+        "15": {
+          "d6t_temp_c": 40.9,
+          "ds18b20_temp_c": 21.75,
+          "rise_c": 19.799999999999997
+        },
+        "20": {
+          "d6t_temp_c": 43.3,
+          "ds18b20_temp_c": 21.75,
+          "rise_c": 22.199999999999996
+        },
+        "25": {
+          "d6t_temp_c": 45.1,
+          "ds18b20_temp_c": 21.75,
+          "rise_c": 24.0
+        },
+        "30": {
+          "d6t_temp_c": 46.3,
+          "ds18b20_temp_c": 22.25,
+          "rise_c": 25.199999999999996
+        }
+      },
+      "first_threshold_min": {
+        "40": 13.001666666666667,
+        "50": null,
+        "55": null,
+        "60": null,
+        "65": null,
+        "70": null
+      },
+      "first_60c_held_for_60s_min": null,
+      "maximum_d6t_c": 47.2,
+      "final_sample_d6t_c": 46.8,
+      "final_minute_mean_d6t_c": 46.8179700499168,
+      "last5_mean_d6t_c": 46.61026666666666,
+      "last5_range_d6t_c": [
+        45.8,
+        47.2
+      ],
+      "last5_slope_c_min": 0.20901588989065353,
+      "sample_intervals_ms": [
+        100.0,
+        100.0
+      ],
+      "full_brake_first_s": 14.0,
+      "steady_min1_30": {
+        "rows": 17401,
+        "rpm_mean": 4500.243149359232,
+        "rpm_std": 44.60584173069113,
+        "rpm_range": [
+          4375.604,
+          4625.824
+        ],
+        "iq_mean_a": 9.9554842825125,
+        "id_mean_a": 3.988036262283776,
+        "id_std_a": 1.739269623220737,
+        "id_range_a": [
+          -0.277,
+          8.075
+        ],
+        "mean_sampled_i2_a2": 119.83562708585714,
+        "sampled_norm_equivalent_a": 10.946946016394579,
+        "brake_command_range_a": [
+          0.15,
+          0.15
+        ]
+      },
+      "maximum_rpm": 4649.558,
+      "maximum_abs_iq_a": 15.723,
+      "maximum_sampled_norm_a": 15.723000795013654,
+      "stopped_samples_after_minute1": 0,
+      "fraction_speed_within_5percent_after_minute1": 1.0
+    },
+    {
+      "source": "C:\\Users\\melvi\\Documents\\ST_2026\\datalog_pmsm\\datalogging\\logs\\daq_log_20261026_103931.csv",
+      "protocol": {
+        "file": "daq_log_20261026_103931.csv",
+        "label": "26/10 : position 2, 4000 tr/min, frein 0,20 A, Id 0 A",
+        "rpm": 4000,
+        "gear": 2,
+        "brake_a": 0.2,
+        "id_target_a": 0,
+        "color": "#0f766e"
+      },
+      "rows": 20196,
+      "duration_min": 33.65833333333333,
+      "initial_first_sample_c": 18.7,
+      "initial_median_first_second_c": 18.8,
+      "temperature_at_times": {
+        "5": {
+          "d6t_temp_c": 46.0,
+          "ds18b20_temp_c": 21.56,
+          "rise_c": 27.2
+        },
+        "10": {
+          "d6t_temp_c": 54.9,
+          "ds18b20_temp_c": 21.81,
+          "rise_c": 36.099999999999994
+        },
+        "15": {
+          "d6t_temp_c": 60.6,
+          "ds18b20_temp_c": 21.93,
+          "rise_c": 41.8
+        },
+        "20": {
+          "d6t_temp_c": 64.4,
+          "ds18b20_temp_c": 22.06,
+          "rise_c": 45.60000000000001
+        },
+        "25": {
+          "d6t_temp_c": 65.1,
+          "ds18b20_temp_c": 22.18,
+          "rise_c": 46.3
+        },
+        "30": {
+          "d6t_temp_c": 66.2,
+          "ds18b20_temp_c": 22.31,
+          "rise_c": 47.400000000000006
+        }
+      },
+      "first_threshold_min": {
+        "40": 2.723333333333333,
+        "50": 7.065,
+        "55": 9.995,
+        "60": 14.323333333333334,
+        "65": 24.031666666666666,
+        "70": null
+      },
+      "first_60c_held_for_60s_min": 14.415,
+      "maximum_d6t_c": 66.4,
+      "final_sample_d6t_c": 65.2,
+      "final_minute_mean_d6t_c": 65.50648918469219,
+      "last5_mean_d6t_c": 66.01559480173275,
+      "last5_range_d6t_c": [
+        65.2,
+        66.4
+      ],
+      "last5_slope_c_min": -0.09755610221864956,
+      "sample_intervals_ms": [
+        100.0,
+        100.0
+      ],
+      "full_brake_first_s": 16.4,
+      "steady_min1_30": {
+        "rows": 17401,
+        "rpm_mean": 4000.0051506235277,
+        "rpm_std": 66.19881770555375,
+        "rpm_range": [
+          3828.706,
+          4174.409
+        ],
+        "iq_mean_a": 17.829020171254527,
+        "id_mean_a": -0.0003195793345209984,
+        "id_std_a": 2.6783272524476756,
+        "id_range_a": [
+          -5.103,
+          5.153
+        ],
+        "mean_sampled_i2_a2": 329.4572887701282,
+        "sampled_norm_equivalent_a": 18.150958343022225,
+        "brake_command_range_a": [
+          0.2,
+          0.2
+        ]
+      },
+      "maximum_rpm": 4174.409,
+      "maximum_abs_iq_a": 24.058,
+      "maximum_sampled_norm_a": 24.068474484270915,
+      "stopped_samples_after_minute1": 0,
+      "fraction_speed_within_5percent_after_minute1": 1.0
+    }
+  ],
+  "comparison": {
+    "iq_mean_ratio_vs_previous_position2": 1.7908742222186458,
+    "sampled_i2_ratio_vs_previous_position2": 2.749243249122283,
+    "d6t_at30_difference_vs_previous_position2_c": 19.900000000000006,
+    "notes": [
+      "User confirmed blocked air outlets and unchanged D6T view of motor windings.",
+      "Elapsed time starts at the first CSV row. Matched electrical statistics use minutes 1 through 30.",
+      "Temperature at specified minutes is the median within plus/minus five seconds.",
+      "The current target Id=0 is supported by the firmware change and the measured mean; instantaneous Id is not identically zero.",
+      "10 Hz current samples do not capture complete PWM phase-current RMS or instantaneous protection peaks.",
+      "Current-squared ratios concern a copper-loss proxy, not measured total motor heat or input power.",
+      "DS18B20 is an external reference, not a validated ambient-air measurement.",
+      "Speed, brake command and Id target changed together, so the experiment does not isolate the causal effect of disabling Id.",
+      "CSV does not contain fault codes, DC bus voltage, actual brake current, shaft torque or power-board temperature."
+    ]
+  }
+}

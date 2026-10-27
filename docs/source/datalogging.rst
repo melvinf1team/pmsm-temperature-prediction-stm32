@@ -11,7 +11,8 @@ interface. It combines:
 * six quick-select test profiles, aligned with the validation GUI;
 * custom motor profile management in `motor_profiles.json`;
 * serial port discovery and opening;
-* commands `SYNC`, `PROFILE`, `CFG`, `LOAD`, `START`, `ACQ_START`, and `STOP`;
+* independent `PROFILE_SET`, `MOTOR_START`, `MOTOR_STOP`, `LOG_START`, and
+  `LOG_STOP` commands, plus `SYNC`, `CFG`, and `LOAD`;
 * UART stream reception;
 * CSV output in `datalogging/logs`;
 * a live chart when `matplotlib` is available.
@@ -62,42 +63,45 @@ validation GUI profiles and add `Custom`:
       - TB-200S command
       - Command
     * - `Collect only` (default)
-      - Motor forced off
-      - 0.05 A
-      - `ACQ_START`
+      - No motor command
+      - Unchanged by logging
+      - `LOG_START`
     * - `Stable`
-      - 2500 rpm
-      - Fixed 0.10 A
-      - `PROFILE,STABLE`
+      - 4000 rpm
+      - Fixed 0.20 A
+      - `PROFILE_SET,STABLE`
     * - `Variable load`
-      - 2500 rpm
-      - Pseudorandom 0.05--0.25 A every 2--5 s
-      - `PROFILE,VARIABLE_LOAD`
+      - 4000 rpm
+      - Pseudorandom 0.10--0.20 A every 2--5 s
+      - `PROFILE_SET,VARIABLE_LOAD`
     * - `Variable speed`
-      - Pseudorandom 2000--4000 rpm every 2--5 s
-      - Fixed 0.10 A
-      - `PROFILE,VARIABLE_SPEED`
+      - Pseudorandom 3000--4000 rpm every 2--5 s
+      - Fixed 0.20 A
+      - `PROFILE_SET,VARIABLE_SPEED`
     * - `All variable`
-      - Pseudorandom 2000--4000 rpm every 2--5 s
-      - Pseudorandom 0.05--0.25 A every 2--5 s
-      - `PROFILE,VARIABLE_ALL`
+      - Pseudorandom 3000--4000 rpm every 2--5 s
+      - Pseudorandom 0.10--0.20 A every 2--5 s
+      - `PROFILE_SET,VARIABLE_ALL`
     * - `Custom`
       - User setting
       - User setting
-      - `CFG`, `LOAD`, `START`
+      - `MOTOR_CFG`, `LOAD`, `MOTOR_START`
 
 The four presets are executed by the acquisition firmware, with the B2 ramp
-and limits (500 electrical Hz/s, `Iq` 25 A, total 28 A). The panel below the
+and limits (500 electrical Hz/s, `Iq` 28 A, total 30 A). The panel below the
 tiles lists their read-only parameters, or becomes the `Custom` editor. The
 module constants `PRESET_*` mirror the firmware defines;
 `tests/consistency/validate_motor_limits.py` checks them against both firmware
 projects and the validation GUI. `Collect only` is the default so that no
 motor command is sent until a motor profile is chosen.
 
-While a session runs, every setting is locked, the active tile shows `LIVE`,
-and the **Session** card displays elapsed time, logged rows, and data rate; it
-turns amber when no `DATA` row has arrived for 2.5 `DATA` periods (at least two
-seconds).
+**Apply profile** prepares the selected motor settings on the board without
+starting either subsystem. **START MOTOR** and **STOP MOTOR** are independent
+of **START LOGGING** and **STOP LOGGING**. Motor settings are locked only
+while the motor runs; CSV settings are locked while logging runs. A motor
+stop or restart preserves the open CSV, including cooling measurements.
+The **Session** card shows logging time, rows and data rate, and turns amber
+when no DATA arrives for 2.5 periods (at least two seconds).
 
 Motor configuration
 -------------------
@@ -113,7 +117,7 @@ The built-in `Custom` profile starts with 600 rpm, a 2 A
 `Iq` limit, a 6 A hard stop, 5 electrical Hz/s, a 100 ms `DATA` period,
 and a 1000 ms DS18B20 period. Its TB-200S default is fixed at 0.05 A. The
 `Fixed` mode accepts 0.05--0.25 A; `Variable` delegates pseudorandom changes
-in that range every 2--5 seconds to the firmware. Editing a value switches the
+from 0.10 to 0.20 A every 2--5 seconds to the firmware. Editing a value switches the
 selector to unsaved `Custom`; **Save as…** stores the settings under a new
 name and **Delete** removes the selected saved profile. Profiles are
 serialized as JSON. A missing file simply recreates the built-in profile;
@@ -136,46 +140,28 @@ Hz/s for acceleration. Out-of-range values are rejected before startup. See
 Startup sequence
 ----------------
 
-`start_run` validates the settings, prepares the CSV file, opens the serial
-port, and starts the reader thread. For `Custom`, `launch_sequence_thread`
-then sends:
+The serial port opens automatically on the first action. `HELLO` is sent once
+per connection to read capabilities and motor state without stopping either
+subsystem, including a motor already started with B2. Later actions retain
+the connection.
 
-.. code-block:: text
+For a preset, **Apply profile** sends `PROFILE_SET,<TOKEN>` and waits for
+`ACK,PROFILE_SET,<TOKEN>`. For `Custom`, it sends `MOTOR_CFG` followed by `LOAD`, preserving the acquisition periods.
+Neither operation starts the motor or the logger. **START MOTOR** applies
+the selected settings and then sends `MOTOR_START`. **STOP MOTOR** sends
+`MOTOR_STOP`, leaving an active CSV open.
 
-   SYNC
-   CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>,<datalog_ms>,<ds18b20_ms>
-   LOAD,<amps>
-   # or: LOAD,VARIABLE
-   START
+**START LOGGING** sends `LOG_START,<datalog_ms>,<ds18b20_ms>`. It requires no
+valid motor configuration and does not stop a running motor. **STOP LOGGING**
+sends `LOG_STOP` and closes the CSV while keeping motor control connected.
+A subsequent logging start creates a new CSV. A motor stop/restart during
+logging keeps a single header and continuous timestamps in the same CSV.
 
-Each command waits for an `ACK` or `ERR`, including `ACK,LOAD`. Sending the
-load configuration before `START` lets the firmware force the launch value
-to 0.05 A and defer a higher fixed value or the first random draw until the
-motor reaches RUN. On failure, the dashboard reports the error and closes
-resources cleanly.
-
-For a preset, the sequence is:
-
-.. code-block:: text
-
-   SYNC
-   PROFILE,<TOKEN>,<datalog_ms>,<ds18b20_ms>
-
-The firmware restarts the logger, arms the preset, and answers
-`ACK,PROFILE,<TOKEN>`. The status shows *Motor starting* until the firmware
-reports `#PROFILE,START,<TOKEN>,...`. If the acknowledgment is missing or
-refused, the error message asks to flash the acquisition firmware with
-`PROFILE` support or to use `Custom`.
-
-For `Collect only`, the sequence is:
-
-.. code-block:: text
-
-   SYNC
-   ACQ_START,<datalog_ms>,<ds18b20_ms>
-
-This command does not depend on a motor `CFG` and forces the motor to stop
-before arming the logger.
+Every command waits for its matching ACK or an ERR. Startup cancellation
+and failures stop only the subsystem being started. **Disconnect** and
+closing the dashboard stop both subsystems before closing serial. These
+commands require the updated acquisition firmware; legacy combined `START`,
+`STOP`, `PROFILE` and `ACQ_START` remain available to other tools.
 
 UART reception and CSV
 ----------------------
@@ -216,9 +202,9 @@ Execution model
 Tkinter and graphical updates stay on the main thread. One thread reads the
 serial port; separate threads handle startup and shutdown. `queue.Queue`
 objects carry GUI events and acknowledgments without direct concurrent access
-to widgets. Writes to the serial port and its closure share a lock. Pressing
-the **STOP** button during startup cancels the remaining startup commands
-before `STOP` is sent, so `STOP` is always the last command of the session.
+to widgets. Writes to the serial port and its closure share a lock, and
+command/ACK transactions are serialized. **STOP MOTOR** cancels a pending
+motor start before sending `MOTOR_STOP`, without stopping the logger.
 
 The chart keeps at most 1500 points per series and refreshes every 250 ms.
 Missing Matplotlib does not prevent acquisition; only the chart is unavailable.
@@ -240,8 +226,8 @@ Troubleshooting
   750 ms DS18B20 minimum.
 * `ERR,BAD_LOAD`: select `Fixed` with 0.05--0.25 A or select `Variable`, then
   restart the complete sequence.
-* No `ACK,PROFILE,...` with a preset: the board runs an acquisition firmware
-  without `PROFILE` support; rebuild and flash it, or use `Custom`.
+* No `ACK,PROFILE_SET,...` with a preset: the board runs an acquisition firmware
+  without the independent commands; rebuild and flash it before using this dashboard.
 * `DATA` without a CSV file: look for `#CSV_HEADER` in the log first.
 * D6T readings of `NaN`: check power, pull-ups, and the I2C PEC, or run
   `tests/bench/check_wiring.py` to locate the fault.

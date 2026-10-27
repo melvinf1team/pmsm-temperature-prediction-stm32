@@ -66,13 +66,20 @@ when stray bytes precede them.
 `CFG` validates target speed, `Iq` limit, hard stop, acceleration, DATA
 period, and DS18B20 period against their limits. A valid configuration calls
 `AppMotorControl_SetRuntimeConfig` and `AppDatalog_SetRuntimePeriods`.
+The dashboard uses independent commands: `PROFILE_SET,<TOKEN>` stores a
+preset for the next `MOTOR_START`, `MOTOR_STOP` stops only the motor, and
+`LOG_START,<datalog_ms>,<ds18b20_ms>` / `LOG_STOP` control only the logger.
+A Custom configuration uses `MOTOR_CFG` and `LOAD`, without changing the acquisition periods. The port stays open
+across these actions, and a motor stop/restart does not reset the CSV.
+The legacy combined commands below remain supported.
+
 `ACQ_START` validates only the two periods, forces the motor to stop, and
 arms the logger without requiring a motor configuration.
 
 `LOAD,<amps>` selects a fixed 0.05--0.25 A TB-200S command;
-`LOAD,VARIABLE` selects pseudorandom values in the same range every 2--5
+`LOAD,VARIABLE` selects pseudorandom values from 0.10 to 0.20 A every 2--5
 seconds. Both forms answer `ACK,LOAD`. The dashboard sends the load command
-after `CFG` and before `START`.
+after `CFG` and before `MOTOR_START`.
 
 `PROFILE,<TOKEN>[,<datalog_ms>,<ds18b20_ms>]` runs the same four presets as
 the validation firmware (`STABLE`, `VARIABLE_LOAD`, `VARIABLE_SPEED`,
@@ -173,7 +180,8 @@ The current 5000 rpm absolute overspeed cap also applies to a 4500 rpm
 target: exceeding it for 100 ms stops the motor.
 
 Both projects define the heating settings in ``Inc/app_motor_control.h``:
-``APP_ID_TARGET_A=2.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Id remains zero
+``APP_ID_TARGET_A=0.0f`` and ``APP_ID_RAMP_A_PER_S=0.25f``. Heating injection
+is disabled. If a positive target is configured, Id remains zero
 during startup, including the complete Custom speed/brake sequence.
 After one second within 5% of the speed target (minimum
 tolerance 50 rpm), it increases at 0.25 A/s. Speed transitions pause the
@@ -194,9 +202,9 @@ The separate MCSDK NTC protection for the power board trips at 120 C, with
 the same threshold.
 
 B2 on `PC13` places a request in the interrupt, then the main loop draws the
-first target directly from the full 2000–4000 rpm range. It caps the PI
-`Iq` output at 25 A and the `Id/Iq` command magnitude at 28 A, and
-triggers application shutdown if the measured magnitude exceeds 28 A.
+first target directly from the full 3000–4000 rpm range. It caps the PI
+`Iq` output at 28 A and the `Id/Iq` command magnitude at 30 A, and
+triggers application shutdown if the measured magnitude exceeds 30 A.
 Every 2 to 5 seconds, a new pseudorandom target different from the previous
 one is drawn from the full range without step limits. Startup and every
 transition use the fast MCSDK ramp of 500 electrical Hz/s; with two pole
@@ -205,7 +213,7 @@ Deferred processing and 250 ms debounce avoid calling MCSDK from the
 interrupt.
 
 B2 always enables variable TB-200S load: the DAC is forced to 0.05 A before
-MCSDK starts, then a different value from 0.05 to 0.25 A is drawn every
+MCSDK starts, then a different value from 0.10 to 0.20 A is drawn every
 2--5 seconds. Pressing B2 overrides any earlier serial load/profile choice,
 so the physical button consistently starts the fully variable speed-and-load
 profile. Every stop returns the DAC command to 0.05 A.
@@ -213,8 +221,8 @@ profile. Every stop returns the DAC command to 0.05 A.
 The B2 profile is an internal path: it does not raise the 50 electrical
 Hz/s ceiling for configurations received through `CFG`. The serial `PROFILE`
 presets share this path through `AppMotorControl_StartProfile`: `STABLE` and
-`VARIABLE_LOAD` keep 2500 rpm, `VARIABLE_SPEED` and `VARIABLE_ALL` draw speed
-targets like B2, and the load is either fixed at 0.10 A after RUN or variable.
+`VARIABLE_LOAD` keep 4000 rpm, `VARIABLE_SPEED` and `VARIABLE_ALL` draw speed
+targets like B2, and the load is either fixed at 0.20 A after RUN or variable.
 When MCSDK accepts the start, the firmware sends `#PROFILE,START,<TOKEN>,...`
 (`#B2,START,...` for the button). A `CFG` command
 disables the standalone profile and takes control. During a

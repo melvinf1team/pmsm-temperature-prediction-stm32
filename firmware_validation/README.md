@@ -59,7 +59,8 @@ once per fault. Unexpected MCSDK stops are also reported. The acquisition
 dashboard decodes these events and retains the error state while logging.
 The root README documents the fields and the strict 5000 rpm shutdown cap.
 
-Both projects apply a positive Id target of 2 A at 0.25 A/s after one second
+Both projects currently request Id = 0 A, disabling heating injection.
+A positive target would ramp at 0.25 A/s after one second
 of stable RUN speed, after the Custom speed/brake sequence has completed.
 Configure `APP_ID_TARGET_A` and `APP_ID_RAMP_A_PER_S`
 in `Inc/app_motor_control.h`; zero disables heating. Stops, faults and new
@@ -81,12 +82,12 @@ bench's thermal capacity. Startup polarization is capped at 14 A; its
 software threshold and the DC profiler cannot exceed 30 A.
 
 The first press of B2 immediately draws a pseudorandom first target between
-2000 and 4000 rpm. A new target, necessarily different from the previous
+3000 and 4000 rpm. A new target, necessarily different from the previous
 one, is then drawn directly from this entire range every 2 to 5 seconds.
 Startup and transitions use a 500 electrical Hz/s MCSDK ramp, or
-15,000 rpm/s with two pole pairs. The PI `Iq` output is capped at 25 A;
+15,000 rpm/s with two pole pairs. The PI `Iq` output is capped at 28 A;
 the `Id/Iq` command magnitude and application shutdown threshold on measured
-magnitude are capped at 28 A. A second press stops and disables the profile.
+magnitude are capped at 30 A. A second press stops and disables the profile.
 
 B2 always selects the fully variable profile. It forces the TB-200S command
 to 0.05 A before starting the motor, then varies both speed and brake load;
@@ -95,14 +96,14 @@ three controlled alternatives, are available over USART1:
 
 | Command | Speed | Brake command |
 |---|---|---|
-| `PROFILE,STABLE` | 2500 rpm | Fixed 0.10 A |
-| `PROFILE,VARIABLE_LOAD` | 2500 rpm | Pseudorandom 0.05--0.25 A every 2--5 s |
-| `PROFILE,VARIABLE_SPEED` | Pseudorandom 2000--4000 rpm every 2--5 s | Fixed 0.10 A |
-| `PROFILE,VARIABLE_ALL` | Pseudorandom 2000--4000 rpm every 2--5 s | Pseudorandom 0.05--0.25 A every 2--5 s |
+| `PROFILE,STABLE` | 4000 rpm | Fixed 0.20 A |
+| `PROFILE,VARIABLE_LOAD` | 4000 rpm | Pseudorandom 0.10--0.20 A every 2--5 s |
+| `PROFILE,VARIABLE_SPEED` | Pseudorandom 3000--4000 rpm every 2--5 s | Fixed 0.20 A |
+| `PROFILE,VARIABLE_ALL` | Pseudorandom 3000--4000 rpm every 2--5 s | Pseudorandom 0.10--0.20 A every 2--5 s |
 
 All four commands first arm the DAC at 0.05 A and then start the motor. For
-the fixed-load profiles, 0.10 A is applied only after MCSDK reports `RUN`.
-They use the same 500 electrical Hz/s ramp and 25 A/28 A profile limits as B2.
+the fixed-load profiles, 0.20 A is applied only after MCSDK reports `RUN`.
+They use the same 500 electrical Hz/s ramp and 28 A/30 A profile limits as B2.
 An accepted request returns `ACK,PROFILE,<TOKEN>`. `STOP` is idempotent,
 stops the motor, restores 0.05 A, and returns `ACK,STOP`. A missing or unknown
 profile token returns `ERR,BAD_PROFILE`; a DAC initialization failure returns
@@ -334,7 +335,7 @@ files:
 ```
 
 This check covers the global 4500 rpm and 30 A ceilings, 14 A polarization,
-B2's 25 A `Iq`, 28 A total threshold, 2000–4000 rpm range, direct draws,
+B2's 28 A `Iq`, 30 A total threshold, 3000–4000 rpm range, direct draws,
 2 to 5 second delays, and 500 electrical Hz/s ramp. It also checks the
 0.05--0.25 A TB-200S range, four validation profiles, 2--5 second schedules,
 PA5/DAC1_OUT2 setup, profile command handlers, raw telemetry field, and analog

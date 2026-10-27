@@ -13,12 +13,15 @@ Recommended sequence
    `tests/bench/d6t_calibration.py` (see :ref:`d6t-calibration`).
 6. Start `datalogging/motor_datalog_gui_dashboard.py`.
 7. Select the port and 115200 baud.
-8. Pick a test profile: `Collect only` (motor stopped), one of the four
+8. Pick a test profile: `Collect only` (no motor command), one of the four
    firmware presets (`Stable`, `Variable load`, `Variable speed`,
    `All variable`), or `Custom`, where you choose or create a saved profile
    with a fixed TB-200S load or `Variable`.
-9. Check the CSV path, then start the session.
-10. Stop with the dashboard button, which sends `STOP` before closing resources.
+9. Use **Apply profile** to prepare the board, then **START MOTOR** to run it.
+   Check the CSV path and use **START LOGGING** independently, before or after
+   starting the motor.
+10. **STOP MOTOR** keeps recording in the same CSV for cooldown.
+    **STOP LOGGING** closes only the CSV. **Disconnect** stops both subsystems.
 11. Inspect the raw CSV file before running preprocessing.
 
 Wiring check
@@ -107,7 +110,7 @@ authority for commands sent directly over UART:
    "Acceleration", "greater than 0 to 50 electrical Hz/s", "Same limit in dashboard and firmware"
    "DATA period", "1 to 10,000 ms", "Sets the raw CSV sampling rate"
    "DS18B20 period", "750 to 10,000 ms", "Firmware raises shorter UART requests to 750 ms"
-   "TB-200S command", "0.05 to 0.25 A", "Fixed, or pseudorandom every 2 to 5 seconds"
+   "TB-200S command", "Fixed: 0.05 to 0.25 A", "Variable: 0.10 to 0.20 A every 2 to 5 seconds"
 
 .. danger::
 
@@ -123,16 +126,16 @@ Standalone B2 profile
 
 In both firmware projects, the first press of B2 starts this profile:
 
-* the first target is drawn directly between 2000 and 4000 rpm;
+* the first target is drawn directly between 3000 and 4000 rpm;
 * a new target different from the previous one is drawn after a
   pseudorandom delay of 2 to 5 seconds;
-* targets cover the entire 2000–4000 rpm range without step limits;
+* targets cover the entire 3000–4000 rpm range without step limits;
 * startup and transitions use a ramp of 500 electrical Hz/s, or
   15,000 rpm/s with two pole pairs;
-* the PI `Iq` output is limited to 25 A, while the `Id/Iq` command
-  magnitude and shutdown threshold on measured magnitude are limited to 28 A;
+* the PI `Iq` output is limited to 28 A, while the `Id/Iq` command
+  magnitude and shutdown threshold on measured magnitude are limited to 30 A;
 * the TB-200S command is forced to 0.05 A for motor launch, then changes
-  pseudorandomly between 0.05 and 0.25 A every 2 to 5 seconds.
+  pseudorandomly between 0.10 and 0.20 A every 2 to 5 seconds.
 
 The pseudorandom generator is seeded with the time of the B2 press. The new
 setpoint is processed in the main loop, not in the interrupt. A second press
@@ -282,9 +285,9 @@ pressed:
 
 The four profiles respectively select stable speed/stable load, stable
 speed/variable load, variable speed/stable load, or both variable. Stable
-speed is 2500 rpm, variable speed is drawn from 2000--4000 rpm every 2--5
-seconds, stable load is 0.10 A, and variable load is drawn from
-0.05--0.25 A every 2--5 seconds. Every start first commands 0.05 A; 0.10 A
+speed is 4000 rpm, variable speed is drawn from 3000--4000 rpm every 2--5
+seconds, stable load is 0.20 A, and variable load is drawn from
+0.10--0.20 A every 2--5 seconds. Every start first commands 0.05 A; 0.20 A
 is applied only after MCSDK reaches RUN.
 
 The firmware answers `ACK,PROFILE,<TOKEN>` or `ACK,STOP`; invalid requests

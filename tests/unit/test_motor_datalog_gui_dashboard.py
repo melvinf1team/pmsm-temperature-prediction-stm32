@@ -185,130 +185,213 @@ class ParseConfigTests(unittest.TestCase):
                     app.parse_config()
 
 
-class StartupSequenceTests(unittest.TestCase):
-    CONFIG = {
-        "acquisition_mode": ACQUISITION_MODE_MOTOR,
-        "target_rpm": 1200.0,
-        "iq_limit": 2.0,
-        "hard_limit": 6.0,
-        "accel": 5.0,
-        "datalog_ms": 100,
-        "ds18b20_ms": 1000,
-        "load_mode": LOAD_MODE_FIXED,
-        "load_setpoint_a": 0.15,
-    }
-    PRESET_CONFIG = {
-        "acquisition_mode": ACQUISITION_MODE_MOTOR,
-        "quick_profile": QUICK_PROFILE_VARIABLE_SPEED,
-        "profile_token": "VARIABLE_SPEED",
-        "iq_limit": PRESET_IQ_LIMIT_A,
-        "datalog_ms": 100,
-        "ds18b20_ms": 1000,
-        "load_mode": LOAD_MODE_FIXED,
-        "load_setpoint_a": PRESET_FIXED_LOAD_A,
-    }
+class IndependentControlTests(unittest.TestCase):
+    CUSTOM = dict(acquisition_mode=ACQUISITION_MODE_MOTOR, quick_profile=QUICK_PROFILE_CUSTOM,
+                  target_rpm=4000., iq_limit=28., hard_limit=30., accel=50.,
+                  datalog_ms=100, ds18b20_ms=1000, load_mode=LOAD_MODE_FIXED, load_setpoint_a=.2)
+    PRESET = dict(acquisition_mode=ACQUISITION_MODE_MOTOR, quick_profile=QUICK_PROFILE_STABLE,
+                  profile_token="STABLE", iq_limit=28., datalog_ms=100, ds18b20_ms=1000,
+                  load_mode=LOAD_MODE_FIXED, load_setpoint_a=.2)
 
-    def make_app(self):
+    def make_app(self, connected=True):
         app = object.__new__(MotorDatalogGui)
-        app.ack_queue = queue.Queue()
-        app.gui_queue = queue.Queue()
+        app.ack_queue, app.gui_queue = queue.Queue(), queue.Queue()
         app.launch_cancel_event = threading.Event()
+        app.board_hello_needed = not connected
+        app.command_lock = threading.Lock()
+        app.board_motor_running = False
+        app.is_stopping = False
+        app.commands = []
+        app.send_command = lambda command, **kwargs: app.commands.append(command)
+        app.wait_for_ack = lambda name, **kwargs: True
         return app
 
-    def test_load_is_applied_between_cfg_and_start(self) -> None:
+    def test_custom_motor_start_never_touches_logging(self):
+        app = self.make_app(connected=False)
+        app.board_action_thread("motor_start", self.CUSTOM)
+        self.assertEqual([c.split(',')[0].strip() for c in app.commands], ["HELLO", "MOTOR_CFG", "LOAD", "MOTOR_START"])
+        self.assertEqual(app.gui_queue.get_nowait(), ("action_success", ("motor_start", self.CUSTOM)))
+
+    def test_apply_profile_does_not_start_either_subsystem(self):
         app = self.make_app()
-        commands: list[str] = []
-        acknowledgements: list[str] = []
-        app.send_command = lambda command, char_delay=0.0: commands.append(command)
-        app.wait_for_ack = lambda name, **_kwargs: acknowledgements.append(name) or True
+        app.board_action_thread("apply", self.PRESET)
+        self.assertEqual(app.commands, ["PROFILE_SET,STABLE\n"])
 
-        with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
-            app.launch_sequence_thread(self.CONFIG)
-
-        self.assertEqual(
-            [command.split(",", 1)[0].strip() for command in commands],
-            ["SYNC", "CFG", "LOAD", "START"],
-        )
-        self.assertEqual(acknowledgements, ["SYNC", "CFG", "LOAD", "START"])
-        self.assertEqual(app.gui_queue.get_nowait(), ("launch_success", ACQUISITION_MODE_MOTOR))
-
-    def test_cancelled_startup_sends_no_further_command(self) -> None:
+    def test_motor_restart_during_logging_sends_no_sync_or_log_command(self):
         app = self.make_app()
-        commands: list[str] = []
-        app.send_command = lambda command, char_delay=0.0: commands.append(command)
+        app.csv_file = object()
+        original_csv = app.csv_file
+        app.board_action_thread("motor_start", self.PRESET)
+        self.assertEqual(app.commands, ["PROFILE_SET,STABLE\n", "MOTOR_START\n"])
+        self.assertIs(app.csv_file, original_csv)
 
-        def wait_for_ack(name, **_kwargs):
-            if name == "CFG":
-                app.launch_cancel_event.set()
+    def test_logging_start_and_stop_send_no_motor_commands(self):
+        for action, command in (("log_start", "LOG_START,100,1000\n"), ("log_stop", "LOG_STOP\n")):
+            with self.subTest(action=action):
+                app = self.make_app()
+                app.board_action_thread(action, self.PRESET)
+                self.assertEqual(app.commands, [command])
+
+    def test_first_logging_connection_preserves_motor_started_by_b2(self):
+        app = self.make_app(connected=False)
+        app.board_motor_running = True
+        app.board_action_thread("log_start", self.PRESET)
+        self.assertEqual(app.commands, ["HELLO\n", "LOG_START,100,1000\n"])
+        self.assertTrue(app.board_motor_running)
+
+    def test_apply_rejects_an_already_active_board_motor_without_stopping_it(self):
+        app = self.make_app()
+        app.board_motor_running = True
+        app.board_action_thread("apply", self.PRESET)
+        self.assertEqual(app.commands, [])
+        self.assertEqual(app.gui_queue.get_nowait()[0], "action_failed")
+
+    def test_cancelled_motor_start_sends_no_start_command(self):
+        app = self.make_app()
+        def ack(name, **kwargs):
+            if name == "MOTOR_CFG": app.launch_cancel_event.set()
             return True
-
-        app.wait_for_ack = wait_for_ack
-
-        with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
-            app.launch_sequence_thread(self.CONFIG)
-
-        self.assertEqual(
-            [command.split(",", 1)[0].strip() for command in commands],
-            ["SYNC", "CFG"],
-        )
+        app.wait_for_ack = ack
+        app.board_action_thread("motor_start", self.CUSTOM)
+        self.assertEqual([c.split(',')[0].strip() for c in app.commands], ["MOTOR_CFG"])
         self.assertTrue(app.gui_queue.empty())
 
-    def test_preset_is_started_by_a_single_profile_command(self) -> None:
+    def test_start_failure_rolls_back_only_its_subsystem(self):
+        for action, start, stop in (("motor_start", "MOTOR_START", "MOTOR_STOP"), ("log_start", "LOG_START", "LOG_STOP")):
+            with self.subTest(action=action):
+                app = self.make_app()
+                def ack(name, **kwargs):
+                    if name == start: raise TimeoutError("Missing ACK")
+                    return True
+                app.wait_for_ack = ack
+                app.board_action_thread(action, self.PRESET)
+                self.assertEqual(app.commands[-1], stop + "\n")
+                forbidden = "LOG_STOP" if action == "motor_start" else "MOTOR_STOP"
+                self.assertFalse(any(c.startswith(forbidden) for c in app.commands))
+
+    def test_motor_stop_preserves_active_csv_and_connection(self):
         app = self.make_app()
-        commands: list[str] = []
-        acknowledgements: list[str] = []
-        app.send_command = lambda command, char_delay=0.0: commands.append(command)
-        app.wait_for_ack = lambda name, **_kwargs: acknowledgements.append(name) or True
+        app.is_running = app.motor_running = app.motor_start_confirmed = True
+        app.motor_fault_message = ""
+        app.serial_obj, app.csv_file = object(), object()
+        original_serial, original_csv = app.serial_obj, app.csv_file
+        app.update_controls_state = mock.Mock()
+        app.show_running_status = mock.Mock()
+        app.complete_board_action("motor_stop", {})
+        self.assertFalse(app.motor_running)
+        self.assertTrue(app.is_running)
+        self.assertIs(app.csv_file, original_csv)
+        self.assertIs(app.serial_obj, original_serial)
 
-        with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
-            app.launch_sequence_thread(self.PRESET_CONFIG)
-
-        self.assertEqual(commands, ["SYNC\n", "PROFILE,VARIABLE_SPEED,100,1000\n"])
-        self.assertEqual(acknowledgements, ["SYNC", "PROFILE,VARIABLE_SPEED"])
-        self.assertEqual(app.gui_queue.get_nowait(), ("launch_success", ACQUISITION_MODE_MOTOR))
-
-    def test_collect_only_uses_acq_start(self) -> None:
+    def test_logging_stop_preserves_running_motor_and_connection(self):
         app = self.make_app()
-        commands: list[str] = []
-        app.send_command = lambda command, char_delay=0.0: commands.append(command)
-        app.wait_for_ack = lambda name, **_kwargs: True
-        config = {
-            "acquisition_mode": ACQUISITION_MODE_IDLE,
-            "quick_profile": QUICK_PROFILE_COLLECT_ONLY,
-            "datalog_ms": 100,
-            "ds18b20_ms": 1000,
-        }
+        app.is_running = app.motor_running = True
+        app.serial_obj, app.csv_file = object(), mock.Mock()
+        original_serial, original_csv = app.serial_obj, app.csv_file
+        app.csv_path = "test.csv"
+        app.session_started_s, app.session_ended_s = 1., None
+        app.flush_csv = mock.Mock()
+        app.log = mock.Mock()
+        app.refresh_session_stats = mock.Mock()
+        app.suggest_next_csv_path = mock.Mock()
+        app.update_controls_state = mock.Mock()
+        app.show_running_status = mock.Mock()
+        app.complete_board_action("log_stop", {})
+        self.assertTrue(app.motor_running)
+        self.assertFalse(app.is_running)
+        original_csv.close.assert_called_once()
+        self.assertIs(app.serial_obj, original_serial)
 
-        with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
-            app.launch_sequence_thread(config)
-
-        self.assertEqual(commands, ["SYNC\n", "ACQ_START,100,1000\n"])
-        self.assertEqual(app.gui_queue.get_nowait(), ("launch_success", ACQUISITION_MODE_IDLE))
-
-    def test_firmware_without_profile_support_gets_an_actionable_error(self) -> None:
+    def test_logging_stop_finishes_while_motor_stop_is_pending(self):
         app = self.make_app()
-        app.send_command = lambda command, char_delay=0.0: None
+        app.is_stopping = True
+        app.finish_logging = mock.Mock()
+        app.update_controls_state = mock.Mock()
+        app.show_running_status = mock.Mock()
+        app.complete_board_action("log_stop", {})
+        app.finish_logging.assert_called_once()
+        self.assertTrue(app.is_stopping)
 
-        def wait_for_ack(name, **_kwargs):
-            if name.startswith("PROFILE,"):
-                raise TimeoutError(f"Timed out waiting for ACK,{name}")
-            return True
 
-        app.wait_for_ack = wait_for_ack
+class ContinuousCsvTests(unittest.TestCase):
+    def test_motor_stop_restart_keeps_one_header_and_all_data_rows(self):
+        import csv
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            app = object.__new__(MotorDatalogGui)
+            app.csv_path = str(Path(directory) / "continuous.csv")
+            app.csv_file = app.csv_writer = None
+            app.csv_columns, app.csv_output_columns = [], []
+            app.csv_pending_rows = 0
+            app.csv_last_flush_s = time.monotonic()
+            app.logging_requested = app.is_running = app.motor_running = True
+            app.is_stopping = app.is_launching = False
+            app.motor_fault_message = ""
+            app.serial_obj = object()
+            app.show_data_frames_var = FakeVar(False)
+            app.live_vars = {}
+            app.session_rows, app.data_times = 0, []
+            app.session_started_s, app.session_ended_s = time.monotonic(), None
+            for name in ("log", "update_controls_state", "show_running_status", "register_csv_fields_for_live",
+                         "register_csv_fields_for_plot", "update_live_values", "append_plot_row",
+                         "refresh_session_stats", "suggest_next_csv_path"):
+                setattr(app, name, mock.Mock())
+            app.handle_serial_line("#CSV_HEADER," + ",".join(CSV_OUTPUT_COLUMNS))
+            writer = app.csv_writer
+            def data_row(index):
+                values = [str(index * 100) if column == "stm32_time_ms" else "0" for column in CSV_OUTPUT_COLUMNS]
+                app.handle_serial_line("DATA," + ",".join(values))
+            data_row(1)
+            app.complete_board_action("motor_stop", {})
+            data_row(2)
+            app.complete_board_action("motor_start", IndependentControlTests.PRESET)
+            data_row(3)
+            self.assertIs(app.csv_writer, writer)
+            self.assertEqual(app.session_rows, 3)
+            app.finish_logging()
+            with open(app.csv_path, newline="", encoding="utf-8") as stream:
+                rows = list(csv.reader(stream, delimiter=";"))
+            self.assertEqual(rows[0], list(CSV_OUTPUT_COLUMNS))
+            self.assertEqual(len(rows), 4)
+            self.assertTrue(app.motor_running)
 
-        with mock.patch("motor_datalog_gui_dashboard.time.sleep", return_value=None):
-            app.launch_sequence_thread(self.PRESET_CONFIG)
 
-        kind, message = app.gui_queue.get_nowait()
-        self.assertEqual(kind, "launch_failed")
-        self.assertIn("PROFILE support", message)
-        self.assertIn("Custom", message)
+class ConfigurationIndependenceTests(unittest.TestCase):
+    def make_app(self, profile):
+        app = object.__new__(MotorDatalogGui)
+        app.quick_profile_var = FakeVar(profile)
+        app.get_selected_port_device = lambda: "COM_TEST"
+        app.baud_var = FakeVar("115200")
+        app.datalog_ms_var = FakeVar("100")
+        app.ds18b20_ms_var = FakeVar("1000")
+        app.csv_path_var = FakeVar(str(Path(tempfile.gettempdir()) / "independent.csv"))
+        return app
+
+    def test_logging_does_not_read_custom_motor_fields(self):
+        app = self.make_app(QUICK_PROFILE_CUSTOM)
+        cfg = app.parse_config(include_motor=False)
+        self.assertEqual(cfg["datalog_ms"], 100)
+        self.assertNotIn("iq_limit", cfg)
+
+    def test_motor_configuration_does_not_require_valid_csv_or_logging_fields(self):
+        app = self.make_app(QUICK_PROFILE_STABLE)
+        app.csv_path_var = FakeVar("")
+        app.datalog_ms_var = FakeVar("invalid")
+        app.ds18b20_ms_var = FakeVar("invalid")
+        cfg = app.parse_config(include_logging=False)
+        self.assertEqual(cfg["profile_token"], "STABLE")
+        self.assertIsNone(cfg["csv_path"])
+
 
 
 class FirmwareEventTests(unittest.TestCase):
     def make_app(self):
         app = object.__new__(MotorDatalogGui)
         app.is_running = True
+        app.motor_running = True
+        app.serial_obj = object()
+        app.logging_requested = True
+        app.update_controls_state = mock.Mock()
         app.is_launching = False
         app.active_acquisition_mode = ACQUISITION_MODE_MOTOR
         app.active_quick_profile = QUICK_PROFILE_STABLE
@@ -335,9 +418,10 @@ class FirmwareEventTests(unittest.TestCase):
         app.handle_firmware_event("#B2,STOP,motor_off")
         self.assertEqual(app.statuses, ["Motor stopped (B2)"])
 
-    def test_events_are_ignored_outside_a_session(self) -> None:
+    def test_events_are_ignored_without_connection(self) -> None:
         app = self.make_app()
         app.is_running = False
+        app.serial_obj = None
         app.handle_firmware_event("#B2,STOP,motor_off")
         self.assertEqual(app.statuses, [])
 

@@ -49,7 +49,7 @@ class MotorFirmwareSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="pmsm-safety-") as directory:
             work = Path(directory)
             for name in ("main", "motorcontrol", "mc_api", "mc_interface", "mc_type",
-                         "mc_tasks", "pidreg_speed", "fixpmath"):
+                         "mc_tasks", "pidreg_speed", "fixpmath", "stm32g4xx_ll_usart"):
                 (work / f"{name}.h").write_text('#include "test_platform.h"\n', encoding="utf-8")
             elf_path = work / "test.elf"
             command = [self.gcc, "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=soft",
@@ -102,6 +102,9 @@ class MotorFirmwareSafetyTests(unittest.TestCase):
         for project in PROJECTS:
             with self.subTest(project=project.name):
                 self.execute_c(project, "d6t_freshness_harness.c", "d6t_ir.c")
+
+    def test_independent_serial_motor_and_logging_commands(self):
+        self.execute_c(PROJECTS[0], "serial_control_harness.c", "app_serial_control.c")
 
 
 if __name__ == "__main__":

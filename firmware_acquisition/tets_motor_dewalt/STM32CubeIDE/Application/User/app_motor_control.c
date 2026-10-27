@@ -53,12 +53,12 @@
 #define APP_CFG_MAX_ACCEL_ELEC_HZ_S         50.0f
 
 /* Profil autonome variable appliqué par le bouton bleu B2 (PC13). */
-#define APP_BUTTON_MIN_TARGET_SPEED_RPM     2000.0f
+#define APP_BUTTON_MIN_TARGET_SPEED_RPM     3000.0f
 #define APP_BUTTON_MAX_TARGET_SPEED_RPM     4000.0f
 #define APP_BUTTON_MIN_CHANGE_PERIOD_MS     2000U
 #define APP_BUTTON_MAX_CHANGE_PERIOD_MS     5000U
-#define APP_BUTTON_IQ_LIMIT_A               25.0f
-#define APP_BUTTON_HARD_STOP_CURRENT_A      28.0f
+#define APP_BUTTON_IQ_LIMIT_A               28.0f
+#define APP_BUTTON_HARD_STOP_CURRENT_A      30.0f
 #define APP_BUTTON_ACCEL_ELEC_HZ_S          500.0f
 #define APP_BUTTON_DEBOUNCE_MS              250U
 #define APP_START_RETRY_PERIOD_MS           100U
@@ -66,8 +66,8 @@
 #define APP_START_WAIT_IDLE_MS              1000U
 
 /* Profils série PROFILE,<TOKEN>, identiques au firmware de validation. */
-#define APP_PROFILE_FIXED_SPEED_RPM         2500.0f
-#define APP_PROFILE_FIXED_LOAD_A               0.10f
+#define APP_PROFILE_FIXED_SPEED_RPM         4000.0f
+#define APP_PROFILE_FIXED_LOAD_A               0.20f
 
 /* TB-200S : droite d'étalonnage banc (tension PA5 -> courant affiché TB-200S),
  * calibrate_tb200s.py du 2026-10-14 : 0,2567 A/V, seuil 0,194 V, écart max 0,003 A.
@@ -414,8 +414,8 @@ static bool AppMotorControl_SelectAndApplyNextLoad(void)
   do
   {
     next_ma = AppMotorControl_ButtonRandomRange(
-      (uint32_t)(APP_TB200S_MIN_LOAD_A * 1000.0f),
-      (uint32_t)(APP_TB200S_MAX_LOAD_A * 1000.0f));
+      (uint32_t)(APP_TB200S_VARIABLE_MIN_LOAD_A * 1000.0f),
+      (uint32_t)(APP_TB200S_VARIABLE_MAX_LOAD_A * 1000.0f));
   } while (next_ma == current_ma);
 
   return AppMotorControl_ApplyLoadSetpoint((float)next_ma / 1000.0f);
@@ -628,14 +628,14 @@ static const char *AppMotorControl_GetProfileStartText(AppMotorProfile_t profile
   switch (profile)
   {
     case APP_MOTOR_PROFILE_STABLE:
-      return "#PROFILE,START,STABLE,rpm=2500,load_a=0.10,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+      return "#PROFILE,START,STABLE,rpm=4000,load_a=0.20,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500\r\n";
     case APP_MOTOR_PROFILE_VARIABLE_LOAD:
-      return "#PROFILE,START,VARIABLE_LOAD,rpm=2500,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+      return "#PROFILE,START,VARIABLE_LOAD,rpm=4000,load_a=0.10-0.20,load_change_ms=2000-5000,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500\r\n";
     case APP_MOTOR_PROFILE_VARIABLE_SPEED:
-      return "#PROFILE,START,VARIABLE_SPEED,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.10,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+      return "#PROFILE,START,VARIABLE_SPEED,random_rpm=3000-4000,change_ms=2000-5000,load_a=0.20,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500\r\n";
     case APP_MOTOR_PROFILE_VARIABLE_ALL:
     default:
-      return "#PROFILE,START,VARIABLE_ALL,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
+      return "#PROFILE,START,VARIABLE_ALL,random_rpm=3000-4000,change_ms=2000-5000,load_a=0.10-0.20,load_change_ms=2000-5000,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500\r\n";
   }
 }
 
@@ -747,8 +747,8 @@ static void AppMotorControl_SetIqLimit(float limit_a, bool reset_pi)
     limit_a = APP_MOTOR_MAX_IQ_LIMIT_A;
   }
 
-  /* B2 rampe doucement Iq et porte progressivement le cercle Id/Iq à 28 A ;
-   * à régime établi, Iq reste indépendamment borné à 25 A. */
+  /* B2 rampe doucement Iq et porte progressivement le cercle Id/Iq à 30 A ;
+   * à régime établi, Iq reste indépendamment borné à 28 A. */
   total_limit_a = limit_a;
   if (app_button_profile_active)
   {
@@ -1335,6 +1335,12 @@ bool AppMotorControl_IsRunning(void)
   return (app_mc_state == APP_MC_RUNNING) || (MC_GetSTMStateMotor1() == RUN);
 }
 
+bool AppMotorControl_IsActive(void)
+{
+  return app_motor_start_requested || (app_mc_state == APP_MC_STARTING) ||
+         AppMotorControl_IsRunning();
+}
+
 /* Remplace l'implémentation faible générée dans mc_tasks.c. Cette fonction est
  * appelée depuis EXTI15_10_IRQHandler() et doit donc rester non bloquante. */
 void UI_HandleStartStopButton_cb(void)
@@ -1389,8 +1395,8 @@ static void AppMotorControl_HandleButtonToggle(void)
   if (AppMotorControl_StartProfile(APP_MOTOR_PROFILE_VARIABLE_ALL) ==
       APP_MOTOR_PROFILE_START_ACCEPTED)
   {
-    app_profile_start_text = "#B2,START,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n";
-    AppDatalog_SendText("#B2,START_REQUESTED,random_rpm=2000-4000,change_ms=2000-5000,load_a=0.05-0.25,load_change_ms=2000-5000,iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500\r\n");
+    app_profile_start_text = "#B2,START,random_rpm=3000-4000,change_ms=2000-5000,load_a=0.10-0.20,load_change_ms=2000-5000,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500\r\n";
+    AppDatalog_SendText("#B2,START_REQUESTED,random_rpm=3000-4000,change_ms=2000-5000,load_a=0.10-0.20,load_change_ms=2000-5000,iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500\r\n");
   }
 }
 

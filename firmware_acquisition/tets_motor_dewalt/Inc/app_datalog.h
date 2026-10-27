@@ -13,6 +13,7 @@ void AppDatalog_SetRuntimePeriods(uint32_t datalog_ms,
 void AppDatalog_StartLogging(void);
 void AppDatalog_StopLogging(void);
 bool AppDatalog_IsLogging(void);
+void AppDatalog_RepeatHeader(void);
 
 /*
  * Utilisé par app_serial_control.c pour envoyer ACK / ERR sur le même UART.

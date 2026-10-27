@@ -326,24 +326,32 @@ static int test_custom_start(void)
   CHECK(app_tb200s_change_scheduled);
   CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
 
-  /* B2 and PROFILE presets retain their original speed/load behavior. */
+  /* The stable preset uses the validated 4000 rpm / 0.20 A operating point. */
   reset();
   CHECK(AppMotorControl_StartProfile(APP_MOTOR_PROFILE_STABLE) ==
         APP_MOTOR_PROFILE_START_ACCEPTED);
   AppMotorControl_Task();
   AppMotorControl_Task();
   CHECK(app_custom_phase == APP_CUSTOM_OFF);
-  CHECK(NEAR(mock_speed_reference_rpm, 2500.0f));
+  CHECK(NEAR(mock_speed_reference_rpm, 4000.0f));
   CHECK(NEAR(mock_acceleration, 500.0f));
-  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.10f));
+  CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.20f));
+  CHECK(NEAR(app_iq_limit_a, 28.0f) && NEAR(app_hard_stop_current_a, 30.0f));
   AppMotorControl_Stop();
   UI_HandleStartStopButton_cb();
   AppMotorControl_Task();
   AppMotorControl_Task();
   CHECK(app_custom_phase == APP_CUSTOM_OFF && app_button_speed_variable);
-  CHECK(mock_speed_reference_rpm >= 2000.0f && mock_speed_reference_rpm <= 4000.0f);
+  CHECK(mock_speed_reference_rpm >= 3000.0f && mock_speed_reference_rpm <= 4000.0f);
   CHECK(NEAR(mock_acceleration, 500.0f));
   CHECK(NEAR(AppMotorControl_GetLoadSetpointA(), 0.05f));
+  CHECK(NEAR(app_iq_limit_a, 28.0f) && NEAR(app_hard_stop_current_a, 30.0f));
+  for (int i = 0; i < 100; i++)
+  {
+    CHECK(AppMotorControl_SelectAndApplyNextLoad());
+    CHECK(AppMotorControl_GetLoadSetpointA() >= 0.10f);
+    CHECK(AppMotorControl_GetLoadSetpointA() <= 0.20f);
+  }
   return 0;
 }
 

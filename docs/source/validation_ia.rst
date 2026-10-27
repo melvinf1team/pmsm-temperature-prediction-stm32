@@ -48,9 +48,9 @@ text. This matches the explanatory columns of the preprocessed CSV files and
 can be read directly by the extrapolation Serial Emulator.
 
 In both modes, streaming starts automatically at boot at 115200 baud, 8N1.
-B2 starts a profile whose `Iq` output is limited to 25 A; the `Id/Iq`
+B2 starts a profile whose `Iq` output is limited to 28 A; the `Id/Iq`
 command magnitude and the shutdown threshold on measured magnitude are
-limited to 28 A. Its target is drawn directly between 2000 and 4000 rpm every
+limited to 30 A. Its target is drawn directly between 3000 and 4000 rpm every
 2 to 5 seconds, using a 500 electrical Hz/s ramp at startup and between
 changes.
 
@@ -78,26 +78,26 @@ and responds with `ACK,STOP`; invalid requests return `ERR,<reason>`.
      - TB-200S command
    * - `Stable`
      - `STABLE`
-     - 2500 rpm
-     - Fixed 0.10 A
+     - 4000 rpm
+     - Fixed 0.20 A
    * - `Variable load`
      - `VARIABLE_LOAD`
-     - 2500 rpm
-     - Pseudorandom 0.05--0.25 A every 2--5 s
+     - 4000 rpm
+     - Pseudorandom 0.10--0.20 A every 2--5 s
    * - `Variable speed`
      - `VARIABLE_SPEED`
-     - Pseudorandom 2000--4000 rpm every 2--5 s
-     - Fixed 0.10 A
+     - Pseudorandom 3000--4000 rpm every 2--5 s
+     - Fixed 0.20 A
    * - `All variable`
      - `VARIABLE_ALL`
-     - Pseudorandom 2000--4000 rpm every 2--5 s
-     - Pseudorandom 0.05--0.25 A every 2--5 s
+     - Pseudorandom 3000--4000 rpm every 2--5 s
+     - Pseudorandom 0.10--0.20 A every 2--5 s
 
 Every profile forces the brake command to 0.05 A before motor launch. Fixed
-load changes to 0.10 A only after MCSDK reports `RUN`; variable load makes
+load changes to 0.20 A only after MCSDK reports `RUN`; variable load makes
 its first new draw after a 2--5 second delay. B2 always starts
 `VARIABLE_ALL`, overriding a previously selected serial profile. B2 and all
-four serial profiles use the same 500 electrical Hz/s ramp and 25 A/28 A
+four serial profiles use the same 500 electrical Hz/s ramp and 28 A/30 A
 current limits.
 
 Validation sequence

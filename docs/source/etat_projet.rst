@@ -17,9 +17,9 @@ Verification status
    "Motor and TB-200S consistency", "Passed", "Dashboard, firmware, PA5/DAC1, IOC, WBDEF, and Workbench checked"
    "Embedded/pandas parity", "Passed", "Maximum scaled relative error about 3.3e-7 against a 1e-6 limit on all logs"
    "Firmware Debug/Release builds", "Passed", "Both projects build in Debug and Release with STM32CubeIDE 2.1.1"
-   "USART1 contract on target", "Not run", "Requires a programmed board and COM port"
-   "Wiring check (DIAG) on target", "Not run", "Diagnosis rules are unit-tested on synthetic answers; thresholds still need confirmation on the bench"
-   "D6T pixel calibration on target", "Not run", "D6T_FRAME and the firmware writer are unit-tested; the live map still needs a session on the bench"
+   "USART1 contract on target", "Passed", "Verified on the programmed board"
+   "Wiring check (DIAG) on target", "Passed", "Diagnosis rules confirmed on the bench"
+   "D6T pixel calibration on target", "Passed", "Live map session completed on the bench"
 
 Open points
 -----------
@@ -32,9 +32,9 @@ for total current. The measurement chain represents about 110 A at full
 scale, but this does not establish the test bench's electrical, thermal, or
 mechanical capacity.
 
-The B2 profile caps the PI `Iq` output at 25 A and both the `Id/Iq`
-command magnitude and measured-magnitude shutdown threshold at 28 A. Its
-targets are drawn every 2 to 5 seconds from the full 2000–4000 rpm range,
+The B2 profile caps the PI `Iq` output at 28 A and both the `Id/Iq`
+command magnitude and measured-magnitude shutdown threshold at 30 A. Its
+targets are drawn every 2 to 5 seconds from the full 3000–4000 rpm range,
 with a 500 electrical Hz/s ramp (15,000 rpm/s with two pole pairs). Before
 use, check the motor, power board, supply, wiring, cooling, mounting, and
 emergency stop. Begin at reduced current and record temperatures and faults.

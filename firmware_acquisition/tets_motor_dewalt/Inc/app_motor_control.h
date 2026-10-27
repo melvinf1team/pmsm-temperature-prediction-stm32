@@ -37,6 +37,8 @@
  * plage de charge volontairement limitée à 0,05-0,25 A. */
 #define APP_TB200S_MIN_LOAD_A                 0.05f
 #define APP_TB200S_MAX_LOAD_A                 0.25f
+#define APP_TB200S_VARIABLE_MIN_LOAD_A        0.10f
+#define APP_TB200S_VARIABLE_MAX_LOAD_A        0.20f
 
 /* Profils prédéfinis, identiques à ceux du firmware de validation. */
 typedef enum
@@ -67,6 +69,7 @@ void AppMotorControl_SetRuntimeConfig(float target_rpm,
 bool AppMotorControl_Start(void);
 void AppMotorControl_Stop(void);
 bool AppMotorControl_IsRunning(void);
+bool AppMotorControl_IsActive(void);
 
 /* Arme puis lance le profil de façon non bloquante. Si le moteur tourne déjà,
  * il est d'abord arrêté et le redémarrage attend que le MCSDK revienne IDLE. */

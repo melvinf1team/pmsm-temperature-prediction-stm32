@@ -180,31 +180,35 @@ Start the dashboard:
 python .\datalogging\motor_datalog_gui_dashboard.py
 ```
 
-Pick a **test profile** among six quick-select tiles, the same as in the
-validation GUI plus `Custom`, then press **START**:
+Select a **test profile**, then **Apply profile** to prepare the board without
+starting the motor. **START MOTOR** and **STOP MOTOR** control the motor only.
+**START LOGGING** and **STOP LOGGING** control acquisition and the CSV only.
+You can record before startup, stop/restart the motor in the same CSV, and
+record its cooling after a stop. Stopping logging leaves the motor running.
 
-| Profile | Speed | TB-200S command | UART sequence |
+| Profile | Speed | TB-200S command | Preparation command |
 |---|---|---|---|
-| `Collect only` (default) | Motor forced off | 0.05 A | `SYNC`, `ACQ_START` |
-| `Stable` | 2500 rpm | Fixed 0.10 A | `SYNC`, `PROFILE,STABLE,…` |
-| `Variable load` | 2500 rpm | Pseudorandom 0.05–0.25 A every 2–5 s | `SYNC`, `PROFILE,VARIABLE_LOAD,…` |
-| `Variable speed` | Pseudorandom 2000–4000 rpm every 2–5 s | Fixed 0.10 A | `SYNC`, `PROFILE,VARIABLE_SPEED,…` |
-| `All variable` | Pseudorandom 2000–4000 rpm every 2–5 s | Pseudorandom 0.05–0.25 A every 2–5 s | `SYNC`, `PROFILE,VARIABLE_ALL,…` |
-| `Custom` | Edited by the user | Fixed 0.05–0.25 A or `Variable` | `SYNC`, `CFG`, `LOAD`, `START` |
+| `Collect only` (default) | No motor command | Unchanged by logging | `LOG_START` |
+| `Stable` | 4000 rpm | Fixed 0.20 A | `PROFILE_SET,STABLE` |
+| `Variable load` | 4000 rpm | Pseudorandom 0.10–0.20 A every 2–5 s | `PROFILE_SET,VARIABLE_LOAD` |
+| `Variable speed` | Pseudorandom 3000–4000 rpm every 2–5 s | Fixed 0.20 A | `PROFILE_SET,VARIABLE_SPEED` |
+| `All variable` | Pseudorandom 3000–4000 rpm every 2–5 s | Pseudorandom 0.10–0.20 A every 2–5 s | `PROFILE_SET,VARIABLE_ALL` |
+| `Custom` | Edited by the user | Fixed 0.05–0.25 A or variable 0.10–0.20 A | `MOTOR_CFG`, `LOAD` |
 
-The four presets run inside the acquisition firmware with the B2 ramp and
-current limits (500 electrical Hz/s, `Iq` 25 A, total 28 A); the panel under
-the tiles lists their exact parameters. `Collect only` is useful for recording
-a cooling phase. With `Custom`, the panel becomes an editor: load a saved
-profile from `datalogging/motor_profiles.json`, edit it (it becomes unsaved
-`Custom`), then **Save as…** or **Delete**. Presets require the acquisition
-firmware with `PROFILE` support; an older firmware is reported at startup.
+All four presets use 500 electrical Hz/s, an `Iq` limit of 28 A and a total
+current limit of 30 A. B2 runs the same `All variable` profile in both
+firmwares. The launch brake command remains 0.05 A. `Custom` profiles can
+still be loaded, saved and deleted in `datalogging/motor_profiles.json`.
 
-In every case, `STOP` ends the session cleanly. During a session the settings
-are locked, the active tile shows `LIVE`, and the **Session** card displays
-elapsed time, logged rows, and data rate (it warns when `DATA` stops). The UART
-log hides `DATA` frames unless **Show DATA frames** is ticked. After a session
-written to an auto-named file, a new timestamped name is proposed.
+The dashboard opens serial automatically on the first action and sends
+`HELLO` once on that connection without stopping either subsystem. Both STOP
+buttons keep the port open.
+Motor settings are locked while the motor runs; CSV settings are locked
+while logging runs. After **STOP LOGGING**, a fresh timestamped filename is
+proposed. **Disconnect** and closing the dashboard stop both subsystems.
+Flash the updated acquisition firmware to use these independent commands.
+The **Session** card shows logging time, row count and data rate. UART
+`DATA` frames remain hidden unless **Show DATA frames** is ticked.
 
 The raw CSV uses semicolons and contains nine columns:
 
@@ -302,10 +306,16 @@ The main application modules are:
 The protocol accepts:
 
 ```text
+HELLO
 SYNC
 CFG,<target_rpm>,<iq_limit_a>,<hard_limit_a>,<accel_elec_hz_s>,<datalog_ms>,<ds18b20_ms>
 LOAD,<load_setpoint_a>
 LOAD,VARIABLE
+PROFILE_SET,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>
+MOTOR_START
+MOTOR_STOP
+LOG_START,<datalog_ms>,<ds18b20_ms>
+LOG_STOP
 START
 PROFILE,<STABLE|VARIABLE_LOAD|VARIABLE_SPEED|VARIABLE_ALL>[,<datalog_ms>,<ds18b20_ms>]
 ACQ_START,<datalog_ms>,<ds18b20_ms>
@@ -314,6 +324,12 @@ DIAG
 STATUS
 D6T_FRAME
 ```
+
+`PROFILE_SET` prepares a preset for the next `MOTOR_START`; it does not start
+either subsystem. `MOTOR_START`/`MOTOR_STOP` leave logging untouched, and
+`LOG_START`/`LOG_STOP` leave the motor untouched. `MOTOR_CFG`/`LOAD` prepare Custom
+settings. `MOTOR_CFG,<rpm>,<iq_limit>,<hard_limit>,<accel>` changes only motor settings. Each command returns its matching `ACK`; `LOG_START` carries the
+two acquisition periods. The older combined commands remain available:
 
 `PROFILE` stops the motor and logger, applies the optional periods, restarts
 logging, and arms the same preset as the validation firmware; it answers
@@ -334,13 +350,13 @@ Hz/s in both dashboard and firmware.
 B2 starts a standalone profile in which both speed and TB-200S load vary,
 regardless of any earlier `LOAD` command:
 
-- speed: pseudorandom target drawn from 2000–4000 rpm every 2–5 seconds,
+- speed: pseudorandom target drawn from 3000–4000 rpm every 2–5 seconds,
   never twice the same value in a row;
 - ramp: 500 electrical Hz/s (15,000 rpm/s with two pole pairs) at startup
   and on every change;
-- current: PI `Iq` output capped at 25 A; `Id/Iq` command magnitude and
-  shutdown threshold on measured magnitude capped at 28 A;
-- load: 0.05 A at launch, then pseudorandom 0.05–0.25 A every 2–5 seconds.
+- current: PI `Iq` output capped at 30 A; `Id/Iq` command magnitude and
+  shutdown threshold on measured magnitude capped at 30 A;
+- load: 0.05 A at launch, then pseudorandom 0.10–0.20 A every 2–5 seconds.
 
 A second press stops the motor. A `CFG` received over UART disables the B2
 profile and takes control. `PROFILE` presets retain the B2 ramp and limits.
@@ -397,7 +413,7 @@ fault masks. Application faults such as `OVERSPEED` can have both masks zero.
 The report is retried if the UART queue is full and is not repeated while
 the same fault persists. An unexpected MCSDK stop reports `MCSDK_STOPPED`.
 The dashboard displays the decoded reason in the console and a persistent
-red `Motor error` state; logging continues until the operator presses STOP.
+red `Motor error` state; logging continues until the operator presses **STOP LOGGING**.
 A late header/launch ACK does not hide this state. A new explicit start
 clears the display once accepted by the firmware.
 
@@ -416,11 +432,12 @@ the actual cause before changing a protection threshold.
 
 ## Progressive Id and thermal protection (both firmwares)
 
-`Inc/app_motor_control.h` in each project defines `APP_ID_TARGET_A` (2 A)
-and `APP_ID_RAMP_A_PER_S` (0.25 A/s). Id starts at zero. After `RUN` (and
+`Inc/app_motor_control.h` in each project defines `APP_ID_TARGET_A` (0 A,
+heating injection disabled) and `APP_ID_RAMP_A_PER_S` (0.25 A/s).
+If a positive target is configured, after `RUN` (and
 completion of the speed/brake sequence for Custom starts), the
 speed must remain within 5% of the target (at least 50 rpm tolerance) for
-one second before Id increases. Reaching 2 A then takes about eight seconds
+one second before Id increases. For example, reaching 2 A takes about eight seconds
 at stable speed. A speed transition pauses the increase; a stop, fault, or
 new runtime configuration resets Id to zero. Set the target to zero in both
 headers to disable heating. This is a fixed current setting, not a 60 C
@@ -465,12 +482,12 @@ profiles through `PROFILE,<TOKEN>`:
 
 | Token | Speed | TB-200S command |
 |---|---|---|
-| `STABLE` | 2500 rpm | Fixed 0.10 A |
-| `VARIABLE_LOAD` | 2500 rpm | Pseudorandom 0.05–0.25 A every 2–5 s |
-| `VARIABLE_SPEED` | Pseudorandom 2000–4000 rpm every 2–5 s | Fixed 0.10 A |
-| `VARIABLE_ALL` | Pseudorandom 2000–4000 rpm every 2–5 s | Pseudorandom 0.05–0.25 A every 2–5 s |
+| `STABLE` | 4000 rpm | Fixed 0.20 A |
+| `VARIABLE_LOAD` | 4000 rpm | Pseudorandom 0.10–0.20 A every 2–5 s |
+| `VARIABLE_SPEED` | Pseudorandom 3000–4000 rpm every 2–5 s | Fixed 0.20 A |
+| `VARIABLE_ALL` | Pseudorandom 3000–4000 rpm every 2–5 s | Pseudorandom 0.10–0.20 A every 2–5 s |
 
-Every profile forces 0.05 A before motor launch; fixed 0.10 A is applied only
+Every profile forces 0.05 A before motor launch; fixed 0.20 A is applied only
 after MCSDK reaches `RUN`. The four profiles use the B2 ramp and current
 limits, and the physical B2 button always launches `VARIABLE_ALL`. `STOP`
 stops the motor and returns the load to 0.05 A. Accepted commands answer

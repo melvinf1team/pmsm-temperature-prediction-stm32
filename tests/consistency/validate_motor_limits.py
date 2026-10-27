@@ -19,20 +19,20 @@ EXPECTED_OVERSPEED_LIMIT_RPM = 5000.0
 EXPECTED_MAX_IQ_A = 28.0
 EXPECTED_MAX_CURRENT_A = 30.0
 EXPECTED_POLPULSE_CURRENT_A = 14.0
-EXPECTED_B2_MIN_SPEED_RPM = 2000.0
+EXPECTED_B2_MIN_SPEED_RPM = 3000.0
 EXPECTED_B2_MAX_SPEED_RPM = 4000.0
 EXPECTED_B2_MIN_PERIOD_MS = 2000.0
 EXPECTED_B2_MAX_PERIOD_MS = 5000.0
-EXPECTED_B2_IQ_LIMIT_A = 25.0
-EXPECTED_B2_TOTAL_CURRENT_A = 28.0
+EXPECTED_B2_IQ_LIMIT_A = 28.0
+EXPECTED_B2_TOTAL_CURRENT_A = 30.0
 EXPECTED_B2_ACCEL_ELEC_HZ_S = 500.0
 EXPECTED_CFG_MAX_ACCEL_ELEC_HZ_S = 50.0
 EXPECTED_TB200S_MIN_LOAD_A = 0.05
 EXPECTED_TB200S_MAX_LOAD_A = 0.25
 EXPECTED_TB200S_MIN_PERIOD_MS = 2000.0
 EXPECTED_TB200S_MAX_PERIOD_MS = 5000.0
-EXPECTED_PROFILE_FIXED_SPEED_RPM = 2500.0
-EXPECTED_PROFILE_FIXED_LOAD_A = 0.10
+EXPECTED_PROFILE_FIXED_SPEED_RPM = 4000.0
+EXPECTED_PROFILE_FIXED_LOAD_A = 0.20
 
 
 def numeric_define(path: Path, name: str) -> float:
@@ -102,6 +102,8 @@ def validate_firmware_root(root: Path) -> None:
     assert numeric_define(app_header, "APP_MOTOR_MAX_TOTAL_CURRENT_A") == EXPECTED_MAX_CURRENT_A
     assert numeric_define(app_header, "APP_TB200S_MIN_LOAD_A") == EXPECTED_TB200S_MIN_LOAD_A
     assert numeric_define(app_header, "APP_TB200S_MAX_LOAD_A") == EXPECTED_TB200S_MAX_LOAD_A
+    assert numeric_define(app_header, "APP_TB200S_VARIABLE_MIN_LOAD_A") == 0.10
+    assert numeric_define(app_header, "APP_TB200S_VARIABLE_MAX_LOAD_A") == 0.20
 
     assert numeric_define(drive_header, "MAX_APPLICATION_SPEED_RPM") == EXPECTED_MAX_SPEED_RPM
     assert numeric_define(drive_header, "BOARD_MAX_CURRENT") == EXPECTED_MAX_CURRENT_A
@@ -283,7 +285,7 @@ def validate_firmware_root(root: Path) -> None:
         assert "AppMotorControl_ServiceStartRequest" in source
         assert "AppMotorControl_WaitForMcIdle(APP_START_WAIT_IDLE_MS)" in source
         assert "(void)MC_AcknowledgeFaultsMotor1();" in source
-        assert "iq_limit_a=25,hard_limit_a=28,accel_elec_hz_s=500" in source
+        assert "iq_limit_a=28,hard_limit_a=30,accel_elec_hz_s=500" in source
         assert "AppDatalog_SendText(app_profile_start_text);" in source
         serial_source = (
             root / "STM32CubeIDE" / "Application" / "User" / "app_serial_control.c"
@@ -368,6 +370,8 @@ def main() -> None:
         source = root / app_source
         assert dashboard.PRESET_FIXED_SPEED_RPM == numeric_define(source, "APP_PROFILE_FIXED_SPEED_RPM")
         assert dashboard.PRESET_FIXED_LOAD_A == numeric_define(source, "APP_PROFILE_FIXED_LOAD_A")
+        assert dashboard.PRESET_MIN_LOAD_A == numeric_define(root / "Inc/app_motor_control.h", "APP_TB200S_VARIABLE_MIN_LOAD_A")
+        assert dashboard.PRESET_MAX_LOAD_A == numeric_define(root / "Inc/app_motor_control.h", "APP_TB200S_VARIABLE_MAX_LOAD_A")
         assert dashboard.PRESET_MIN_SPEED_RPM == numeric_define(source, "APP_BUTTON_MIN_TARGET_SPEED_RPM")
         assert dashboard.PRESET_MAX_SPEED_RPM == numeric_define(source, "APP_BUTTON_MAX_TARGET_SPEED_RPM")
         assert dashboard.PRESET_IQ_LIMIT_A == numeric_define(source, "APP_BUTTON_IQ_LIMIT_A")
@@ -392,8 +396,8 @@ def main() -> None:
     print(
         "Motor limits validation passed: target 4500 rpm, Iq 28 A, total 30 A; "
         "overspeed 5000 rpm / 100 ms; "
-        "B2 2000-4000 rpm and TB-200S 0.05-0.25 A every 2-5 s; "
-        "Iq 25 A, total 28 A, 500 Hz_e/s; PROFILE presets shared by both "
+        "B2 3000-4000 rpm and TB-200S 0.10-0.20 A every 2-5 s; "
+        "Iq 28 A, total 30 A, 500 Hz_e/s; PROFILE presets shared by both "
         "firmwares, the dashboard and the validation GUI."
     )
 

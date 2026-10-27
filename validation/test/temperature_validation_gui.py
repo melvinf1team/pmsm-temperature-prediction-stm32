@@ -60,9 +60,9 @@ PROFILE_LABELS_BY_TOKEN = {
 }
 PROFILE_DESCRIPTIONS = {
     PROFILE_COLLECT_ONLY: "Observation only: no motor commands; the physical B2 button remains available.",
-    PROFILE_STABLE: "2500 rpm and 0.10 A, with a protected start at 0.05 A.",
-    PROFILE_VARIABLE_LOAD: "2500 rpm, random load from 0.05 to 0.25 A every 2 to 5 s.",
-    PROFILE_VARIABLE_SPEED: "Random speed every 2 to 5 s, fixed 0.10 A load after startup.",
+    PROFILE_STABLE: "4000 rpm and 0.20 A, with a protected start at 0.05 A.",
+    PROFILE_VARIABLE_LOAD: "4000 rpm, random load from 0.10 to 0.20 A every 2 to 5 s.",
+    PROFILE_VARIABLE_SPEED: "Random speed every 2 to 5 s, fixed 0.20 A load after startup.",
     PROFILE_ALL_VARIABLE: "Speed and load change every 2 to 5 s, as with the B2 button.",
 }
 VALIDATION_DIRECTORY = Path(__file__).resolve().parents[1]
@@ -110,21 +110,21 @@ PROFILE_PRESENTATION = {
     },
     PROFILE_STABLE: {
         "title": "Stable profile",
-        "spec": "2500 rpm  ·  0.10 A",
+        "spec": "4000 rpm  ·  0.20 A",
         "accent": COLORS["green"],
         "speed_variable": False,
         "load_variable": False,
     },
     PROFILE_VARIABLE_LOAD: {
         "title": "Variable load",
-        "spec": "2500 rpm  ·  0.05–0.25 A",
+        "spec": "4000 rpm  ·  0.10–0.20 A",
         "accent": COLORS["load"],
         "speed_variable": False,
         "load_variable": True,
     },
     PROFILE_VARIABLE_SPEED: {
         "title": "Variable speed",
-        "spec": "2000–4000 rpm  ·  0.10 A",
+        "spec": "3000–4000 rpm  ·  0.20 A",
         "accent": COLORS["blue"],
         "speed_variable": True,
         "load_variable": False,
