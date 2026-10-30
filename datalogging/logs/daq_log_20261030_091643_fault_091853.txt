@@ -1,0 +1,16 @@
+Fault report 2026-10-30T09:18:53
+Verdict: Probable glitch (noise on the break inputs)
+- Phase-current peak since START 23.2 A, last 20 ms 16.7 A (OCP threshold 110 A).
+- FOC timing since START: HF task up to 32.8 us, start delayed up to 0.3 us (period 62.5 us).
+- At the break IRQ: PB7 high, comparators above threshold: none, TIM8 flags: BIF.
+- Last FOC sample before the break: U 4.1 A, V 12.0 A, W -16.5 A; max |I| over the last 2.0 ms 16.6 A.
+- Vbus over the trace: 17.9-18.0 V.
+- Both sources had already released and the last sample (16.5 A) could rise by at most ~66 A in one 62 us period: the current never reached 110 A. Suspect EMI on PB7/BKIN or the comparator inputs; raise the break filter or improve wiring/grounding.
+
+Raw firmware lines:
+#FAULT,MCSDK_FAULT,t_ms=141027,speed_mrpm=1861492,speed_limit_rpm=5000,iq_ma=16994,id_ma=-1725,hard_ma=30000,load_ma=197,mc_now=0x0040,mc_occurred=0x0040
+#FAULT_DIAG,break=1,t_break_ms=141027,t_now_ms=141027,irq_count=1,tim_sr=0x00DE,bkin_low=0,comp=0x0,bkin_now_low=0,comp_now=0x0,peak_run_da=232,peak_recent_da=167,ocp_da=1100,vbus_dv=181,trace_n=32,trace_period_us=62,foc_period_ns=62494,foc_max_ns=32776,foc_late_max_ns=300,foc_overruns=0,foc_overrun_ns=0,foc_overrun_late_ns=0,quiet_timeouts=0
+#FAULT_TRACE,-32,115:-15:-102:179,114:-8:-106:179,113:-4:-111:179,112:1:-115:179,112:5:-118:179,110:9:-122:179,108:14:-126:179,107:20:-129:179
+#FAULT_TRACE,-24,106:24:-132:179,102:29:-136:180,100:36:-138:179,97:41:-141:179,94:47:-145:179,92:53:-148:179,90:58:-151:179,87:63:-153:179
+#FAULT_TRACE,-16,84:68:-155:179,81:73:-157:179,77:78:-159:180,74:82:-161:180,71:87:-163:180,69:91:-163:179,66:94:-164:179,63:98:-164:180
+#FAULT_TRACE,-8,60:100:-165:179,57:105:-166:180,55:107:-166:179,52:111:-166:180,49:113:-166:180,47:115:-166:180,44:117:-165:179,41:120:-165:180
